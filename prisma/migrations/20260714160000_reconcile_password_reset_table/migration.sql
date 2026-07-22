@@ -1,0 +1,9 @@
+-- Migration de réconciliation conservée volontairement vide.
+--
+-- La table "PasswordReset", ses index et sa clé étrangère
+-- sont désormais créés dans la migration précédente :
+--
+-- 20260713163511_add_password_reset
+--
+-- Cette migration reste présente afin de préserver
+-- l’ordre et l’historique des migrations Prisma.
