@@ -2,10 +2,12 @@
 
 import Link from "next/link";
 import {
+  Archive,
   BadgeCheck,
   Ban,
   CalendarDays,
   CircleAlert,
+  CircleX,
   Clock3,
   Eye,
   FileClock,
@@ -29,7 +31,20 @@ type EventCardProps = {
   ) => void;
 };
 
-const statusConfig = {
+type EventStatusStyle = {
+  label: string;
+  className: string;
+  icon: typeof BadgeCheck;
+};
+
+const defaultStatusConfig: EventStatusStyle = {
+  label: "Statut inconnu",
+  className:
+    "border-white/[0.08] bg-white/[0.04] text-neutral-400",
+  icon: CircleAlert,
+};
+
+const statusConfig: Record<string, EventStatusStyle> = {
   DRAFT: {
     label: "Brouillon",
     className:
@@ -71,7 +86,21 @@ const statusConfig = {
       "border-blue-500/30 bg-blue-500/10 text-blue-300",
     icon: BadgeCheck,
   },
-} as const;
+
+  REJECTED: {
+    label: "Rejeté",
+    className:
+      "border-red-500/30 bg-red-500/10 text-red-300",
+    icon: CircleX,
+  },
+
+  ARCHIVED: {
+    label: "Archivé",
+    className:
+      "border-violet-500/30 bg-violet-500/10 text-violet-300",
+    icon: Archive,
+  },
+};
 
 function formatDateTime(
   value: string,
@@ -142,7 +171,8 @@ export default function EventCard({
   onDelete,
 }: EventCardProps) {
   const status =
-    statusConfig[event.status];
+    statusConfig[event.status] ??
+    defaultStatusConfig;
 
   const StatusIcon = status.icon;
 

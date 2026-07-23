@@ -17,14 +17,26 @@ import {
 export const metadata: Metadata = {
   title: "Créer un événement | Tikemia",
   description:
-    "Créez, configurez et envoyez votre événement à Tikemia pour validation.",
+    "Créez, configurez et publiez directement votre événement sur Tikemia.",
 };
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
-export default async function CreateOrganizerEventPage() {
+type CreateEventPageData =
+  | {
+      success: true;
+      options: Awaited<
+        ReturnType<typeof getCreateEventOptions>
+      >;
+    }
+  | {
+      success: false;
+      message: string;
+    };
+
+async function loadCreateEventPageData(): Promise<CreateEventPageData> {
   try {
     /*
      * Toutes les options sont chargées côté serveur :
@@ -33,14 +45,18 @@ export default async function CreateOrganizerEventPage() {
      * - fuseaux horaires ;
      * - commission officielle Tikemia ;
      * - limites de création.
+     *
+     * La publication réelle est gérée dans le formulaire
+     * et dans l’API organisateur :
+     * - DRAFT conserve un brouillon ;
+     * - SUBMIT publie immédiatement l’événement.
      */
     const options = await getCreateEventOptions();
 
-    return (
-      <main className="mx-auto w-full max-w-[1600px]">
-        <CreateEventForm options={options} />
-      </main>
-    );
+    return {
+      success: true,
+      options,
+    };
   } catch (error) {
     const message =
       error instanceof GetCreateEventOptionsError
@@ -49,11 +65,44 @@ export default async function CreateOrganizerEventPage() {
 
     console.error(
       "[CREATE_EVENT_PAGE_ERROR]",
-      error instanceof Error ? error.message : error,
+      error instanceof Error
+        ? {
+            name: error.name,
+            message: error.message,
+            stack:
+              process.env.NODE_ENV === "development"
+                ? error.stack
+                : undefined,
+          }
+        : error,
     );
 
-    return <CreateEventLoadError message={message} />;
+    return {
+      success: false,
+      message,
+    };
   }
+}
+
+export default async function CreateOrganizerEventPage() {
+  const pageData =
+    await loadCreateEventPageData();
+
+  if (!pageData.success) {
+    return (
+      <CreateEventLoadError
+        message={pageData.message}
+      />
+    );
+  }
+
+  return (
+    <main className="mx-auto w-full max-w-[1600px]">
+      <CreateEventForm
+        options={pageData.options}
+      />
+    </main>
+  );
 }
 
 type CreateEventLoadErrorProps = {
@@ -129,7 +178,9 @@ function CreateEventLoadError({
 
         <footer className="flex items-center gap-2 border-t border-white/[0.07] px-5 py-3.5 text-[11px] text-neutral-600 sm:px-6">
           <CalendarPlus2 className="h-3.5 w-3.5" />
-          <span>Tikemia — Espace organisateur sécurisé</span>
+          <span>
+            Tikemia — Espace organisateur sécurisé
+          </span>
         </footer>
       </section>
     </main>

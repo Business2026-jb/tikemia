@@ -686,12 +686,15 @@ function getEventStatus(
   publicationMode: "DRAFT" | "SUBMIT",
 ): EventStatus {
   /*
-   * Un organisateur peut sauvegarder un brouillon.
-   * Une soumission passe en attente de validation administrative.
-   * La publication publique sera effectuée après validation.
+   * L’organisateur peut toujours conserver un brouillon.
+   * Lorsqu’il choisit de mettre l’événement en ligne,
+   * celui-ci est publié immédiatement sur Tikemia.
+   *
+   * L’administration conserve ensuite la possibilité
+   * de suspendre, annuler ou archiver l’événement.
    */
   return publicationMode === "SUBMIT"
-    ? "PENDING"
+    ? "PUBLISHED"
     : "DRAFT";
 }
 
@@ -850,6 +853,11 @@ export async function createEvent(
           data.publicationMode,
         );
 
+        const publicationDate =
+          status === "PUBLISHED"
+            ? new Date()
+            : null;
+
         const coverImage =
           data.images.find((image) => image.isCover) ??
           data.images[0];
@@ -883,7 +891,8 @@ export async function createEvent(
               capacity:
                 projection.totalCapacity,
               status,
-              publishedAt: null,
+              submittedAt: publicationDate,
+              publishedAt: publicationDate,
 
               images: {
                 create: data.images.map((image) => ({
@@ -980,12 +989,18 @@ export async function createEvent(
           data: {
             organizerId: organizer.id,
             eventId: createdEvent.id,
-            type: "EVENT_CREATED",
-            title: "Nouvel événement créé",
+            type:
+              status === "DRAFT"
+                ? "EVENT_CREATED"
+                : "EVENT_PUBLISHED",
+            title:
+              status === "DRAFT"
+                ? "Nouvel événement créé"
+                : "Événement publié",
             description:
               status === "DRAFT"
                 ? `L’événement « ${createdEvent.title} » a été enregistré comme brouillon.`
-                : `L’événement « ${createdEvent.title} » a été envoyé pour validation.`,
+                : `L’événement « ${createdEvent.title} » a été publié immédiatement sur Tikemia.`,
             currency: createdEvent.currency,
             metadata: {
               eventStatus: status,

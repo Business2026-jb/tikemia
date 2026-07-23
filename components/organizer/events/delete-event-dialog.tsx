@@ -1,5 +1,6 @@
 "use client";
 
+import type { EventStatus } from "@prisma/client";
 import {
   AlertTriangle,
   LoaderCircle,
@@ -18,13 +19,7 @@ type DeleteEventDialogProps = {
   open: boolean;
   eventId: string;
   eventTitle: string;
-  eventStatus:
-    | "DRAFT"
-    | "PENDING"
-    | "PUBLISHED"
-    | "SUSPENDED"
-    | "CANCELLED"
-    | "COMPLETED";
+  eventStatus: EventStatus;
   onClose: () => void;
   onDeleted: (message?: string) => void;
 };
@@ -41,10 +36,14 @@ type DeleteEventApiResponse = {
   };
 };
 
-const deletableStatuses = new Set([
-  "DRAFT",
-  "PENDING",
-]);
+const deletableStatuses =
+  new Set<EventStatus>([
+    "DRAFT",
+    "PENDING",
+    "PUBLISHED",
+    "REJECTED",
+    "SUSPENDED",
+  ]);
 
 function getStatusLabel(
   status: DeleteEventDialogProps["eventStatus"],
@@ -68,6 +67,12 @@ function getStatusLabel(
     case "COMPLETED":
       return "Terminé";
 
+    case "REJECTED":
+      return "Rejeté";
+
+    case "ARCHIVED":
+      return "Archivé";
+
     default:
       return status;
   }
@@ -76,14 +81,6 @@ function getStatusLabel(
 function getBlockingMessage(
   status: DeleteEventDialogProps["eventStatus"],
 ): string | null {
-  if (status === "PUBLISHED") {
-    return "Un événement publié ne peut pas être supprimé. Il doit être annulé afin de conserver l’historique des commandes, paiements et billets.";
-  }
-
-  if (status === "SUSPENDED") {
-    return "Un événement suspendu ne peut pas être supprimé directement. Contactez l’administration Tikemia ou procédez à son annulation.";
-  }
-
   if (status === "CANCELLED") {
     return "Un événement annulé reste conservé dans l’historique et ne peut pas être supprimé.";
   }
@@ -92,25 +89,44 @@ function getBlockingMessage(
     return "Un événement terminé fait partie de l’historique de votre activité et ne peut pas être supprimé.";
   }
 
+  if (status === "ARCHIVED") {
+    return "Un événement archivé appartient à l’historique de votre activité et ne peut pas être supprimé depuis l’espace organisateur.";
+  }
+
   return null;
 }
 
-export default function DeleteEventDialog({
-  open,
+export default function DeleteEventDialog(
+  props: DeleteEventDialogProps,
+) {
+  if (!props.open) {
+    return null;
+  }
+
+  return (
+    <DeleteEventDialogContent
+      key={`${props.eventId}-${props.eventStatus}`}
+      eventId={props.eventId}
+      eventTitle={props.eventTitle}
+      eventStatus={props.eventStatus}
+      onClose={props.onClose}
+      onDeleted={props.onDeleted}
+    />
+  );
+}
+
+function DeleteEventDialogContent({
   eventId,
   eventTitle,
   eventStatus,
   onClose,
   onDeleted,
-}: DeleteEventDialogProps) {
+}: Omit<DeleteEventDialogProps, "open">) {
   const titleId = useId();
   const descriptionId = useId();
 
   const closeButtonRef =
     useRef<HTMLButtonElement>(null);
-
-  const [mounted, setMounted] =
-    useState(false);
 
   const [isDeleting, setIsDeleting] =
     useState(false);
@@ -125,39 +141,25 @@ export default function DeleteEventDialog({
     getBlockingMessage(eventStatus);
 
   useEffect(() => {
-    setMounted(true);
-
-    return () => {
-      setMounted(false);
-    };
-  }, []);
-
-  useEffect(() => {
-    if (!open) {
-      setError("");
-      setWarning("");
-      setIsDeleting(false);
-      return;
-    }
-
     const previousOverflow =
       document.body.style.overflow;
 
     document.body.style.overflow = "hidden";
 
-    window.setTimeout(() => {
-      closeButtonRef.current?.focus();
-    }, 0);
+    const focusTimeout =
+      window.setTimeout(() => {
+        closeButtonRef.current?.focus();
+      }, 0);
 
     function handleKeyDown(
       event: KeyboardEvent,
     ) {
-      if (event.key === "Escape") {
+      if (
+        event.key === "Escape" &&
+        !isDeleting
+      ) {
         event.preventDefault();
-
-        if (!isDeleting) {
-          onClose();
-        }
+        onClose();
       }
     }
 
@@ -167,6 +169,8 @@ export default function DeleteEventDialog({
     );
 
     return () => {
+      window.clearTimeout(focusTimeout);
+
       document.body.style.overflow =
         previousOverflow;
 
@@ -178,7 +182,6 @@ export default function DeleteEventDialog({
   }, [
     isDeleting,
     onClose,
-    open,
   ]);
 
   async function handleDelete() {
@@ -253,7 +256,7 @@ export default function DeleteEventDialog({
     }
   }
 
-  if (!mounted || !open) {
+  if (typeof document === "undefined") {
     return null;
   }
 
@@ -336,8 +339,8 @@ export default function DeleteEventDialog({
               <p className="mt-2 text-xs leading-5 text-red-300/80">
                 L’événement, ses images, ses types
                 de billets et ses données associées
-                seront supprimés lorsqu’aucune
-                commande ni aucun billet n’existe.
+                seront supprimés définitivement si
+                aucune commande ni aucun billet n’existe.
               </p>
             </div>
           ) : (

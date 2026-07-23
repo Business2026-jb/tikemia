@@ -18,13 +18,18 @@ type RecentEventsProps = {
   events: DashboardRecentEvent[];
 };
 
-const statusLabels: Record<
-  DashboardRecentEvent["status"],
-  {
-    label: string;
-    className: string;
-  }
-> = {
+type StatusStyle = {
+  label: string;
+  className: string;
+};
+
+const defaultStatusStyle: StatusStyle = {
+  label: "Statut inconnu",
+  className:
+    "border-white/[0.08] bg-white/[0.04] text-neutral-400",
+};
+
+const statusLabels: Record<string, StatusStyle> = {
   DRAFT: {
     label: "Brouillon",
     className:
@@ -59,6 +64,18 @@ const statusLabels: Record<
     label: "Terminé",
     className:
       "border-sky-500/25 bg-sky-500/10 text-sky-400",
+  },
+
+  REJECTED: {
+    label: "Rejeté",
+    className:
+      "border-red-500/25 bg-red-500/10 text-red-400",
+  },
+
+  ARCHIVED: {
+    label: "Archivé",
+    className:
+      "border-violet-500/25 bg-violet-500/10 text-violet-400",
   },
 };
 
@@ -161,7 +178,8 @@ export default function RecentEvents({
         <div className="divide-y divide-white/[0.06]">
           {events.map((event) => {
             const status =
-              statusLabels[event.status];
+              statusLabels[event.status] ??
+              defaultStatusStyle;
 
             const progress =
               calculateProgress(

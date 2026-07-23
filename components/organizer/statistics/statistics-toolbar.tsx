@@ -19,7 +19,6 @@ import {
   useSearchParams,
 } from "next/navigation";
 import {
-  useEffect,
   useMemo,
   useState,
 } from "react";
@@ -130,15 +129,14 @@ export default function StatisticsToolbar({
   const searchParams = useSearchParams();
 
   const [filtersOpen, setFiltersOpen] = useState(false);
-  const [customDatesOpen, setCustomDatesOpen] = useState(
-    period.custom,
-  );
-  const [dateFrom, setDateFrom] = useState(
-    normalizeDateInput(period.start),
-  );
-  const [dateTo, setDateTo] = useState(
-    normalizeDateInput(period.end),
-  );
+
+const [dateFrom, setDateFrom] = useState(
+  normalizeDateInput(period.start),
+);
+
+const [dateTo, setDateTo] = useState(
+  normalizeDateInput(period.end),
+);
 
   const selectedEvent = useMemo(
     () =>
@@ -205,7 +203,7 @@ export default function StatisticsToolbar({
   function applyPresetPeriod(
     value: OrganizerStatisticsPeriod,
   ): void {
-    setCustomDatesOpen(false);
+    setFiltersOpen(false);
 
     updateQuery({
       periodDays: value,
@@ -225,11 +223,11 @@ export default function StatisticsToolbar({
       periodDays: null,
     });
 
-    setCustomDatesOpen(true);
+    setFiltersOpen(true);
   }
 
   function resetFilters(): void {
-    setCustomDatesOpen(false);
+    setFiltersOpen(false);
     setDateFrom("");
     setDateTo("");
 
@@ -237,12 +235,6 @@ export default function StatisticsToolbar({
       scroll: false,
     });
   }
-
-  useEffect(() => {
-    setDateFrom(normalizeDateInput(period.start));
-    setDateTo(normalizeDateInput(period.end));
-    setCustomDatesOpen(period.custom);
-  }, [period.end, period.start, period.custom]);
 
   const periodLabel = formatPeriodLabel({
     start: period.start,
@@ -327,7 +319,7 @@ export default function StatisticsToolbar({
                 const value = event.target.value;
 
                 if (value === "CUSTOM") {
-                  setCustomDatesOpen(true);
+                  setFiltersOpen(true);
                   setFiltersOpen(true);
                   return;
                 }

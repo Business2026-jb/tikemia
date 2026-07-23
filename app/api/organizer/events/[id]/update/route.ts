@@ -17,6 +17,9 @@ export const revalidate = 0;
 const SESSION_COOKIE_FALLBACK_NAME =
   "tikemia_session";
 
+const MAX_REQUEST_SIZE_BYTES =
+  1_000_000;
+
 type UpdateOrganizerEventRouteContext = {
   params: Promise<{
     id: string;
@@ -59,7 +62,7 @@ function jsonResponse(
     status,
     headers: {
       "Cache-Control":
-        "no-store, max-age=0, must-revalidate",
+        "no-store, no-cache, must-revalidate, proxy-revalidate",
       Pragma: "no-cache",
       Expires: "0",
       "X-Content-Type-Options": "nosniff",
@@ -92,6 +95,31 @@ function hasJsonContentType(
   return contentType.includes(
     "application/json",
   );
+}
+
+function getRequestContentLength(
+  request: Request,
+): number | null {
+  const contentLength =
+    request.headers.get(
+      "content-length",
+    );
+
+  if (!contentLength) {
+    return null;
+  }
+
+  const parsedContentLength =
+    Number(contentLength);
+
+  if (
+    !Number.isFinite(parsedContentLength) ||
+    parsedContentLength < 0
+  ) {
+    return null;
+  }
+
+  return parsedContentLength;
 }
 
 function isRecord(
@@ -223,6 +251,26 @@ async function handleUpdateRequest(
       );
     }
 
+    const contentLength =
+      getRequestContentLength(request);
+
+    if (
+      contentLength !== null &&
+      contentLength >
+        MAX_REQUEST_SIZE_BYTES
+    ) {
+      return jsonResponse(
+        {
+          success: false,
+          code:
+            "REQUEST_TOO_LARGE",
+          message:
+            "Les informations envoyées sont trop volumineuses.",
+        },
+        413,
+      );
+    }
+
     const organizer =
       await getAuthenticatedOrganizer();
 
@@ -233,6 +281,8 @@ async function handleUpdateRequest(
           code: "UNAUTHORIZED",
           message:
             "Votre session est absente, invalide ou expirée.",
+          redirectTo:
+            "/organizer/login",
         },
         401,
       );
@@ -277,6 +327,14 @@ async function handleUpdateRequest(
      * le navigateur.
      *
      * Ils sont imposés par la route et par la session.
+     *
+     * La conservation du statut actuel de l’événement
+     * est gérée dans updateEvent :
+     * - un brouillon reste un brouillon tant qu’il
+     *   n’est pas publié ;
+     * - un événement déjà publié reste publié après
+     *   modification ;
+     * - aucun retour automatique vers PENDING.
      */
     const result = await updateEvent({
       ...body,

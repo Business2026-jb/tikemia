@@ -587,7 +587,7 @@ export default function CreateEventForm({
       }
 
       const response = await fetch(
-        "/api/organizer/events/create",
+        "/api/organizer/events",
         {
           method: "POST",
           headers: {
@@ -668,7 +668,9 @@ export default function CreateEventForm({
 
       setSuccessMessage(
         result.message ??
-          "L’événement a été créé avec succès.",
+          (publicationMode === "DRAFT"
+            ? "L’événement a été enregistré comme brouillon."
+            : "L’événement a été publié avec succès."),
       );
 
       window.setTimeout(() => {
@@ -725,7 +727,7 @@ export default function CreateEventForm({
 
             <p className="mt-1 text-sm text-neutral-500">
               Complétez les informations avant
-              l’envoi pour validation.
+              la publication de votre événement.
             </p>
           </div>
         </div>
@@ -1352,8 +1354,8 @@ export default function CreateEventForm({
       <section className="sticky bottom-3 z-20 flex flex-col gap-3 rounded-2xl border border-white/[0.09] bg-[#050b0f]/95 p-3 shadow-[0_22px_60px_rgba(0,0,0,0.5)] backdrop-blur-xl sm:flex-row sm:items-center sm:justify-between sm:p-4">
         <p className="hidden max-w-md text-xs leading-5 text-neutral-500 lg:block">
           Enregistrez un brouillon pour continuer
-          plus tard ou envoyez l’événement à
-          Tikemia pour validation.
+          plus tard ou publiez immédiatement
+          votre événement sur Tikemia.
         </p>
 
         <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-end">
@@ -1384,12 +1386,12 @@ export default function CreateEventForm({
             submitMode === "SUBMIT" ? (
               <>
                 <LoaderCircle className="h-4 w-4 animate-spin" />
-                Envoi en cours...
+                Publication en cours...
               </>
             ) : (
               <>
                 <Send className="h-4 w-4" />
-                Envoyer pour validation
+                Publier l’événement
                 <ArrowRight className="h-4 w-4" />
               </>
             )}

@@ -4,6 +4,11 @@ import { EventStatus } from "@prisma/client";
 import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
 
+import {
+  createEvent,
+  CreateEventError,
+  type CreateEventInput,
+} from "@/lib/events/create-event";
 import { prisma } from "@/lib/prisma";
 
 export const runtime = "nodejs";
@@ -13,12 +18,37 @@ export const revalidate = 0;
 const DEFAULT_PAGE = 1;
 const DEFAULT_PAGE_SIZE = 20;
 const MAX_PAGE_SIZE = 100;
+const MAX_REQUEST_SIZE_BYTES = 1_000_000;
 
 type ErrorCode =
   | "UNAUTHORIZED"
   | "FORBIDDEN"
   | "INVALID_QUERY"
-  | "INTERNAL_ERROR";
+  | "UNSUPPORTED_CONTENT_TYPE"
+  | "REQUEST_TOO_LARGE"
+  | "INVALID_JSON"
+  | "INVALID_REQUEST_BODY"
+  | "INTERNAL_ERROR"
+  | "INTERNAL_SERVER_ERROR";
+
+type ErrorResponseBody = {
+  success: false;
+  error: {
+    code: string;
+    message: string;
+    fields?: Record<string, string[]>;
+    redirectTo?: string;
+  };
+};
+
+type CreateEventResponseBody = {
+  success: boolean;
+  message: string;
+  data?: Awaited<ReturnType<typeof createEvent>>;
+  code?: string;
+  fields?: Record<string, string[]>;
+  redirectTo?: string;
+};
 
 function hashSessionToken(token: string): string {
   return createHash("sha256")
@@ -39,17 +69,23 @@ function errorResponse({
   code,
   message,
   status,
+  fields,
+  redirectTo,
 }: {
-  code: ErrorCode;
+  code: ErrorCode | string;
   message: string;
   status: number;
-}) {
+  fields?: Record<string, string[]>;
+  redirectTo?: string;
+}): NextResponse<ErrorResponseBody> {
   return NextResponse.json(
     {
       success: false,
       error: {
         code,
         message,
+        ...(fields ? { fields } : {}),
+        ...(redirectTo ? { redirectTo } : {}),
       },
     },
     {
@@ -57,6 +93,16 @@ function errorResponse({
       headers: noStoreHeaders(),
     },
   );
+}
+
+function createEventJsonResponse(
+  body: CreateEventResponseBody,
+  status: number,
+): NextResponse<CreateEventResponseBody> {
+  return NextResponse.json(body, {
+    status,
+    headers: noStoreHeaders(),
+  });
 }
 
 function parsePositiveInteger(
@@ -101,6 +147,29 @@ function normalizeStatus(
   )
     ? (normalized as EventStatus)
     : null;
+}
+
+function getRequestContentLength(
+  request: Request,
+): number | null {
+  const contentLength =
+    request.headers.get("content-length");
+
+  if (!contentLength) {
+    return null;
+  }
+
+  const parsedContentLength =
+    Number(contentLength);
+
+  if (
+    !Number.isFinite(parsedContentLength) ||
+    parsedContentLength < 0
+  ) {
+    return null;
+  }
+
+  return parsedContentLength;
 }
 
 async function getAuthenticatedOrganizer() {
@@ -153,12 +222,36 @@ async function getAuthenticatedOrganizer() {
           id: session.id,
         },
       })
-      .catch(() => undefined);
+      .catch((error: unknown) => {
+        console.error(
+          "[ORGANIZER_EVENTS_EXPIRED_SESSION_DELETE_ERROR]",
+          error instanceof Error
+            ? error.message
+            : error,
+        );
+      });
 
     return null;
   }
 
   return session.user;
+}
+
+function isOrganizerAllowed(
+  organizer: Awaited<
+    ReturnType<typeof getAuthenticatedOrganizer>
+  >,
+): organizer is NonNullable<
+  Awaited<
+    ReturnType<typeof getAuthenticatedOrganizer>
+  >
+> {
+  return Boolean(
+    organizer &&
+      organizer.role === "ORGANIZER" &&
+      organizer.isActive &&
+      organizer.emailVerified,
+  );
 }
 
 export async function GET(
@@ -174,6 +267,7 @@ export async function GET(
         status: 401,
         message:
           "Votre session a expiré. Connectez-vous de nouveau.",
+        redirectTo: "/organizer/login",
       });
     }
 
@@ -477,5 +571,179 @@ export async function GET(
       message:
         "Impossible de charger les événements pour le moment.",
     });
+  }
+}
+
+export async function POST(
+  request: Request,
+): Promise<
+  NextResponse<CreateEventResponseBody>
+> {
+  try {
+    const contentType =
+      request.headers.get("content-type") ?? "";
+
+    if (
+      !contentType
+        .toLowerCase()
+        .includes("application/json")
+    ) {
+      return createEventJsonResponse(
+        {
+          success: false,
+          code: "UNSUPPORTED_CONTENT_TYPE",
+          message:
+            "Le format de la requête n’est pas pris en charge.",
+        },
+        415,
+      );
+    }
+
+    const contentLength =
+      getRequestContentLength(request);
+
+    if (
+      contentLength !== null &&
+      contentLength > MAX_REQUEST_SIZE_BYTES
+    ) {
+      return createEventJsonResponse(
+        {
+          success: false,
+          code: "REQUEST_TOO_LARGE",
+          message:
+            "Les informations envoyées sont trop volumineuses.",
+        },
+        413,
+      );
+    }
+
+    const organizer =
+      await getAuthenticatedOrganizer();
+
+    if (!organizer) {
+      return createEventJsonResponse(
+        {
+          success: false,
+          code: "UNAUTHORIZED",
+          message:
+            "Votre session est absente, invalide ou expirée.",
+          redirectTo: "/organizer/login",
+        },
+        401,
+      );
+    }
+
+    if (!isOrganizerAllowed(organizer)) {
+      return createEventJsonResponse(
+        {
+          success: false,
+          code: "FORBIDDEN",
+          message:
+            "Votre compte organisateur ne peut pas créer d’événement.",
+        },
+        403,
+      );
+    }
+
+    let requestBody: unknown;
+
+    try {
+      requestBody = await request.json();
+    } catch {
+      return createEventJsonResponse(
+        {
+          success: false,
+          code: "INVALID_JSON",
+          message:
+            "Les informations envoyées ne sont pas valides.",
+        },
+        400,
+      );
+    }
+
+    if (
+      !requestBody ||
+      typeof requestBody !== "object" ||
+      Array.isArray(requestBody)
+    ) {
+      return createEventJsonResponse(
+        {
+          success: false,
+          code: "INVALID_REQUEST_BODY",
+          message:
+            "Les informations de l’événement sont invalides.",
+        },
+        400,
+      );
+    }
+
+    /*
+     * L’identifiant de l’organisateur provient
+     * exclusivement de la session sécurisée.
+     *
+     * Toute valeur organizerId envoyée depuis
+     * le navigateur est volontairement remplacée.
+     */
+    const eventInput = {
+      ...(requestBody as Record<string, unknown>),
+      organizerId: organizer.id,
+    } as CreateEventInput;
+
+    const result =
+      await createEvent(eventInput);
+
+    const isDraft =
+      result.event.status === "DRAFT";
+
+    return createEventJsonResponse(
+      {
+        success: true,
+        message: isDraft
+          ? "L’événement a été enregistré comme brouillon."
+          : "L’événement a été publié avec succès.",
+        data: result,
+        redirectTo: `/organizer/events/${result.event.id}`,
+      },
+      201,
+    );
+  } catch (error) {
+    if (
+      error instanceof CreateEventError
+    ) {
+      return createEventJsonResponse(
+        {
+          success: false,
+          code: error.code,
+          message: error.message,
+          fields: error.fields,
+        },
+        error.status,
+      );
+    }
+
+    console.error(
+      "[ORGANIZER_CREATE_EVENT_ROUTE_ERROR]",
+      error instanceof Error
+        ? {
+            name: error.name,
+            message: error.message,
+            stack:
+              process.env.NODE_ENV ===
+              "development"
+                ? error.stack
+                : undefined,
+          }
+        : error,
+    );
+
+    return createEventJsonResponse(
+      {
+        success: false,
+        code: "INTERNAL_SERVER_ERROR",
+        message:
+          "Impossible de créer l’événement pour le moment. Réessayez.",
+      },
+      500,
+    );
   }
 }

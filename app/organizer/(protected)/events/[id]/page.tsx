@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 
 import type { EventStatus } from "@prisma/client";
 import {
+  Archive,
   ArrowLeft,
   BadgeCheck,
   Ban,
@@ -9,6 +10,7 @@ import {
   CalendarClock,
   CircleAlert,
   CircleDollarSign,
+  CircleX,
   Clock3,
   Eye,
   FileClock,
@@ -74,6 +76,15 @@ const statusConfig: Record<
     icon: BadgeCheck,
   },
 
+  REJECTED: {
+    label: "Rejeté",
+    description:
+      "Cet événement a été rejeté par l’équipe Tikemia. Consultez le motif transmis, apportez les corrections demandées puis soumettez-le de nouveau.",
+    className:
+      "border-rose-500/30 bg-rose-500/10 text-rose-300",
+    icon: CircleX,
+  },
+
   SUSPENDED: {
     label: "Suspendu",
     description:
@@ -99,6 +110,15 @@ const statusConfig: Record<
     className:
       "border-blue-500/30 bg-blue-500/10 text-blue-300",
     icon: BadgeCheck,
+  },
+
+  ARCHIVED: {
+    label: "Archivé",
+    description:
+      "Cet événement a été archivé par Tikemia. Il reste conservé dans votre historique mais n’est plus actif sur la plateforme.",
+    className:
+      "border-violet-500/30 bg-violet-500/10 text-violet-300",
+    icon: Archive,
   },
 };
 
@@ -503,7 +523,15 @@ export default async function OrganizerEventDetailsPage({
                 ? "text-lime-400"
                 : event.status === "PENDING"
                   ? "text-orange-400"
-                  : "text-neutral-500"
+                  : event.status === "REJECTED" ||
+                      event.status === "SUSPENDED" ||
+                      event.status === "CANCELLED"
+                    ? "text-rose-400"
+                    : event.status === "ARCHIVED"
+                      ? "text-violet-400"
+                      : event.status === "COMPLETED"
+                        ? "text-blue-400"
+                        : "text-neutral-500"
             }`}
           />
 

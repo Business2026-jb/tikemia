@@ -35,64 +35,46 @@ type OrganizerEditEventPageProps = {
   }>;
 };
 
-export default async function OrganizerEditEventPage({
-  params,
-}: OrganizerEditEventPageProps) {
-  const { id: rawEventId } = await params;
-  const eventId = rawEventId?.trim();
+type EditEventPageData =
+  | {
+      success: true;
+      data: Awaited<
+        ReturnType<typeof getEventForEdit>
+      >;
+    }
+  | {
+      success: false;
+      eventId: string;
+      message: string;
+      code?: string;
+      status?: number;
+      redirectTo?: string;
+    };
 
-  if (!eventId) {
-    notFound();
-  }
-
+async function loadEditEventPageData(
+  eventId: string,
+): Promise<EditEventPageData> {
   try {
-    const data = await getEventForEdit(
-      eventId,
-    );
+    const data =
+      await getEventForEdit(eventId);
 
-    return (
-      <main className="mx-auto w-full max-w-[1600px]">
-        <EditEventForm
-          event={data.event}
-          options={data.options}
-        />
-      </main>
-    );
+    return {
+      success: true,
+      data,
+    };
   } catch (error) {
     if (
       error instanceof
       GetEventForEditError
     ) {
-      if (
-        error.status === 401 ||
-        error.code === "UNAUTHORIZED" ||
-        error.code === "INVALID_SESSION" ||
-        error.code === "EXPIRED_SESSION"
-      ) {
-        redirect(
-          error.redirectTo ??
-            "/organizer/login",
-        );
-      }
-
-      if (
-        error.status === 404 ||
-        error.code === "EVENT_NOT_FOUND"
-      ) {
-        notFound();
-      }
-
-      if (error.redirectTo) {
-        redirect(error.redirectTo);
-      }
-
-      return (
-        <EditEventLoadError
-          eventId={eventId}
-          message={error.message}
-          code={error.code}
-        />
-      );
+      return {
+        success: false,
+        eventId,
+        message: error.message,
+        code: error.code,
+        status: error.status,
+        redirectTo: error.redirectTo,
+      };
     }
 
     console.error(
@@ -110,14 +92,71 @@ export default async function OrganizerEditEventPage({
         : error,
     );
 
+    return {
+      success: false,
+      eventId,
+      message:
+        "Impossible de charger cet événement pour modification.",
+      code: "GET_EVENT_FOR_EDIT_FAILED",
+      status: 500,
+    };
+  }
+}
+
+export default async function OrganizerEditEventPage({
+  params,
+}: OrganizerEditEventPageProps) {
+  const { id: rawEventId } = await params;
+  const eventId = rawEventId?.trim();
+
+  if (!eventId) {
+    notFound();
+  }
+
+  const pageData =
+    await loadEditEventPageData(eventId);
+
+  if (!pageData.success) {
+    if (
+      pageData.status === 401 ||
+      pageData.code === "UNAUTHORIZED" ||
+      pageData.code === "INVALID_SESSION" ||
+      pageData.code === "EXPIRED_SESSION"
+    ) {
+      redirect(
+        pageData.redirectTo ??
+          "/organizer/login",
+      );
+    }
+
+    if (
+      pageData.status === 404 ||
+      pageData.code === "EVENT_NOT_FOUND"
+    ) {
+      notFound();
+    }
+
+    if (pageData.redirectTo) {
+      redirect(pageData.redirectTo);
+    }
+
     return (
       <EditEventLoadError
-        eventId={eventId}
-        message="Impossible de charger cet événement pour modification."
-        code="GET_EVENT_FOR_EDIT_FAILED"
+        eventId={pageData.eventId}
+        message={pageData.message}
+        code={pageData.code}
       />
     );
   }
+
+  return (
+    <main className="mx-auto w-full max-w-[1600px]">
+      <EditEventForm
+        event={pageData.data.event}
+        options={pageData.data.options}
+      />
+    </main>
+  );
 }
 
 type EditEventLoadErrorProps = {
@@ -136,6 +175,8 @@ function EditEventLoadError({
       "CANCELLED_EVENT_NOT_EDITABLE" ||
     code ===
       "COMPLETED_EVENT_NOT_EDITABLE" ||
+    code ===
+      "ARCHIVED_EVENT_NOT_EDITABLE" ||
     code === "EVENT_NOT_EDITABLE";
 
   return (
@@ -188,7 +229,7 @@ function EditEventLoadError({
 
                 <p className="mt-1 text-[11px] leading-5 text-neutral-500">
                   {isEventLocked
-                    ? "Les événements annulés ou terminés restent conservés afin de protéger les commandes, paiements, billets et rapports associés."
+                    ? "Les événements annulés, terminés ou archivés restent conservés afin de protéger les commandes, paiements, billets et rapports associés."
                     : "Tikemia vérifie la session et l’appartenance de l’événement avant d’autoriser toute modification."}
                 </p>
               </div>

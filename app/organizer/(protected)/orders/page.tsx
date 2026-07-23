@@ -216,15 +216,45 @@ async function getConnectedOrganizer() {
   return organizer;
 }
 
-export default async function OrganizerOrdersPage({
-  searchParams,
-}: OrganizerOrdersPageProps) {
-  const organizer =
-    await getConnectedOrganizer();
+type OrganizerOrdersPageData = Awaited<
+  ReturnType<typeof getOrganizerOrders>
+>;
 
-  const params =
-    await searchParams;
+type OrganizerOrdersLoadResult =
+  | {
+      success: true;
+      data: OrganizerOrdersPageData;
+    }
+  | {
+      success: false;
+      title: string;
+      message: string;
+    };
 
+type OrganizerOrdersQuery = {
+  organizerId: string;
+  page: number;
+  pageSize: number;
+  search: string | null;
+  eventId: string | null;
+  status: string | null;
+  currency: string | null;
+  paymentStatus: string | null;
+  paymentMethod: string | null;
+  dateFrom: string | null;
+  dateTo: string | null;
+  sort: OrganizerOrdersSort;
+};
+
+function createOrganizerOrdersQuery({
+  organizerId,
+  params,
+}: {
+  organizerId: string;
+  params: Awaited<
+    OrganizerOrdersPageProps["searchParams"]
+  >;
+}): OrganizerOrdersQuery {
   const page =
     parsePositiveInteger({
       value:
@@ -249,237 +279,58 @@ export default async function OrganizerOrdersPage({
         100,
     });
 
+  return {
+    organizerId,
+
+    page,
+    pageSize,
+
+    search:
+      params.search ?? null,
+
+    eventId:
+      params.eventId ?? null,
+
+    status:
+      params.status ?? null,
+
+    currency:
+      params.currency ?? null,
+
+    paymentStatus:
+      params.paymentStatus ?? null,
+
+    paymentMethod:
+      params.paymentMethod ?? null,
+
+    dateFrom:
+      params.dateFrom ?? null,
+
+    dateTo:
+      params.dateTo ?? null,
+
+    sort:
+      parseSort(
+        params.sort,
+      ),
+  };
+}
+
+async function loadOrganizerOrdersPageData(
+  query: OrganizerOrdersQuery,
+): Promise<OrganizerOrdersLoadResult> {
   try {
     const data =
-      await getOrganizerOrders({
-        organizerId:
-          organizer.id,
+      await getOrganizerOrders(
+        query,
+      );
 
-        page,
-        pageSize,
+    return {
+      success:
+        true,
 
-        search:
-          params.search ?? null,
-
-        eventId:
-          params.eventId ?? null,
-
-        status:
-          params.status ?? null,
-
-        currency:
-          params.currency ?? null,
-
-        paymentStatus:
-          params.paymentStatus ?? null,
-
-        paymentMethod:
-          params.paymentMethod ?? null,
-
-        dateFrom:
-          params.dateFrom ?? null,
-
-        dateTo:
-          params.dateTo ?? null,
-
-        sort:
-          parseSort(
-            params.sort,
-          ),
-      });
-
-    const organizerName =
-      `${organizer.firstName} ${organizer.lastName}`
-        .replace(/\s+/g, " ")
-        .trim();
-
-    const hasEvents =
-      organizer._count.organizerEvents >
-      0;
-
-    return (
-      <div className="space-y-6">
-        <header className="relative overflow-hidden rounded-3xl border border-white/[0.08] bg-[#081015] px-4 py-5 shadow-[0_20px_60px_rgba(0,0,0,0.22)] sm:px-5 sm:py-6 lg:px-6">
-          <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_top_right,rgba(34,197,94,0.10),transparent_34%),radial-gradient(circle_at_bottom_left,rgba(249,115,22,0.08),transparent_30%)]" />
-
-          <div className="relative flex flex-col gap-5 xl:flex-row xl:items-center xl:justify-between">
-            <div className="min-w-0">
-              <div className="flex flex-wrap items-center gap-2">
-                <span className="inline-flex items-center gap-2 rounded-full border border-emerald-500/20 bg-emerald-500/[0.06] px-3 py-1.5 text-[10px] font-black uppercase tracking-[0.12em] text-lime-400">
-                  <ShoppingBag className="h-3.5 w-3.5" />
-
-                  Commandes organisateur
-                </span>
-
-                <span className="inline-flex items-center gap-2 rounded-full border border-white/[0.08] bg-white/[0.025] px-3 py-1.5 text-[10px] font-black text-neutral-500">
-                  <ShieldCheck className="h-3.5 w-3.5" />
-
-                  Données sécurisées
-                </span>
-              </div>
-
-              <h1 className="mt-4 text-2xl font-black tracking-[-0.04em] text-white sm:text-3xl lg:text-4xl">
-                Commandes et ventes
-              </h1>
-
-              <p className="mt-3 max-w-3xl text-sm leading-6 text-neutral-500">
-                Suivez toutes les commandes, les acheteurs,
-                les événements, les billets, les paiements
-                et les revenus de votre activité Tikemia
-                dans une seule interface claire.
-              </p>
-
-              <div className="mt-4 flex flex-wrap items-center gap-x-4 gap-y-2 text-xs text-neutral-600">
-                <span>
-                  Organisateur :{" "}
-                  <strong className="font-black text-neutral-300">
-                    {organizerName ||
-                      "Organisateur Tikemia"}
-                  </strong>
-                </span>
-
-                <span>
-                  Dernière actualisation :{" "}
-                  <strong className="font-black text-neutral-300">
-                    {new Intl.DateTimeFormat(
-                      "fr-FR",
-                      {
-                        day:
-                          "2-digit",
-                        month:
-                          "short",
-                        year:
-                          "numeric",
-                        hour:
-                          "2-digit",
-                        minute:
-                          "2-digit",
-                      },
-                    ).format(
-                      new Date(
-                        data.generatedAt,
-                      ),
-                    )}
-                  </strong>
-                </span>
-              </div>
-            </div>
-
-            <div className="grid gap-3 sm:grid-cols-2 xl:min-w-[390px]">
-              <QuickAction
-                href="/organizer/events"
-                icon={ArrowLeft}
-                title="Voir les événements"
-                description="Retour à vos événements"
-              />
-
-              <QuickAction
-                href="/api/organizer/orders/export?format=pdf"
-                icon={Download}
-                title="Rapport PDF"
-                description="Exporter toutes les commandes"
-                external
-              />
-            </div>
-          </div>
-        </header>
-
-        <OrdersSummary
-          summary={
-            data.summary
-          }
-        />
-
-        <section className="rounded-2xl border border-orange-500/18 bg-orange-500/[0.04] p-4 sm:p-5">
-          <div className="flex items-start gap-3">
-            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-orange-500/25 bg-orange-500/10">
-              <ReceiptText className="h-[18px] w-[18px] text-orange-400" />
-            </div>
-
-            <div>
-              <h2 className="text-sm font-black text-white">
-                Lecture financière multi-devises
-              </h2>
-
-              <p className="mt-1 text-xs leading-5 text-neutral-500">
-                Chaque commande conserve la devise de son
-                événement. Les montants XOF, XAF, EUR, NGN,
-                GHS et autres monnaies restent séparés et
-                ne sont jamais additionnés entre eux sans
-                conversion explicite.
-              </p>
-            </div>
-          </div>
-        </section>
-
-        <OrdersListClient
-          data={data}
-          hasEvents={hasEvents}
-        />
-
-        <footer className="flex flex-col gap-3 rounded-2xl border border-white/[0.07] bg-[#071014] px-4 py-4 text-[11px] text-neutral-600 sm:flex-row sm:items-center sm:justify-between sm:px-5">
-          <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
-            <span>
-              {data.pagination.totalItems.toLocaleString(
-                "fr-FR",
-              )}{" "}
-              commande
-              {data.pagination.totalItems >
-              1
-                ? "s"
-                : ""}
-            </span>
-
-            <span>
-              {data.summary.totalTickets.toLocaleString(
-                "fr-FR",
-              )}{" "}
-              billet
-              {data.summary.totalTickets >
-              1
-                ? "s"
-                : ""}
-            </span>
-
-            <span>
-              {data.summary.uniqueCustomers.toLocaleString(
-                "fr-FR",
-              )}{" "}
-              client
-              {data.summary.uniqueCustomers >
-              1
-                ? "s"
-                : ""}{" "}
-              unique
-              {data.summary.uniqueCustomers >
-              1
-                ? "s"
-                : ""}
-            </span>
-          </div>
-
-          <div className="flex flex-wrap items-center gap-2">
-            <FooterExportLink
-              href="/api/organizer/orders/export?format=csv"
-              icon={FileText}
-              label="CSV"
-            />
-
-            <FooterExportLink
-              href="/api/organizer/orders/export?format=xlsx"
-              icon={FileSpreadsheet}
-              label="Excel"
-            />
-
-            <FooterExportLink
-              href="/api/organizer/orders/export?format=pdf"
-              icon={FileText}
-              label="PDF"
-            />
-          </div>
-        </footer>
-      </div>
-    );
+      data,
+    };
   } catch (error) {
     if (
       error instanceof
@@ -494,14 +345,16 @@ export default async function OrganizerOrdersPage({
         redirect("/organizer/login");
       }
 
-      return (
-        <OrdersPageError
-          title="Impossible de charger les commandes"
-          message={
-            error.message
-          }
-        />
-      );
+      return {
+        success:
+          false,
+
+        title:
+          "Impossible de charger les commandes",
+
+        message:
+          error.message,
+      };
     }
 
     console.error(
@@ -523,13 +376,249 @@ export default async function OrganizerOrdersPage({
         : error,
     );
 
+    return {
+      success:
+        false,
+
+      title:
+        "Une erreur inattendue est survenue",
+
+      message:
+        "Les commandes ne peuvent pas être affichées pour le moment.",
+    };
+  }
+}
+
+export default async function OrganizerOrdersPage({
+  searchParams,
+}: OrganizerOrdersPageProps) {
+  const organizer =
+    await getConnectedOrganizer();
+
+  const params =
+    await searchParams;
+
+  const query =
+    createOrganizerOrdersQuery({
+      organizerId:
+        organizer.id,
+
+      params,
+    });
+
+  const result =
+    await loadOrganizerOrdersPageData(
+      query,
+    );
+
+  if (!result.success) {
     return (
       <OrdersPageError
-        title="Une erreur inattendue est survenue"
-        message="Les commandes ne peuvent pas être affichées pour le moment."
+        title={
+          result.title
+        }
+        message={
+          result.message
+        }
       />
     );
   }
+
+  const { data } =
+    result;
+
+  const organizerName =
+    `${organizer.firstName} ${organizer.lastName}`
+      .replace(/\s+/g, " ")
+      .trim();
+
+  const hasEvents =
+    organizer._count.organizerEvents >
+    0;
+
+  return (
+    <div className="space-y-6">
+      <header className="relative overflow-hidden rounded-3xl border border-white/[0.08] bg-[#081015] px-4 py-5 shadow-[0_20px_60px_rgba(0,0,0,0.22)] sm:px-5 sm:py-6 lg:px-6">
+        <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_top_right,rgba(34,197,94,0.10),transparent_34%),radial-gradient(circle_at_bottom_left,rgba(249,115,22,0.08),transparent_30%)]" />
+
+        <div className="relative flex flex-col gap-5 xl:flex-row xl:items-center xl:justify-between">
+          <div className="min-w-0">
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="inline-flex items-center gap-2 rounded-full border border-emerald-500/20 bg-emerald-500/[0.06] px-3 py-1.5 text-[10px] font-black uppercase tracking-[0.12em] text-lime-400">
+                <ShoppingBag className="h-3.5 w-3.5" />
+
+                Commandes organisateur
+              </span>
+
+              <span className="inline-flex items-center gap-2 rounded-full border border-white/[0.08] bg-white/[0.025] px-3 py-1.5 text-[10px] font-black text-neutral-500">
+                <ShieldCheck className="h-3.5 w-3.5" />
+
+                Données sécurisées
+              </span>
+            </div>
+
+            <h1 className="mt-4 text-2xl font-black tracking-[-0.04em] text-white sm:text-3xl lg:text-4xl">
+              Commandes et ventes
+            </h1>
+
+            <p className="mt-3 max-w-3xl text-sm leading-6 text-neutral-500">
+              Suivez toutes les commandes, les acheteurs,
+              les événements, les billets, les paiements
+              et les revenus de votre activité Tikemia
+              dans une seule interface claire.
+            </p>
+
+            <div className="mt-4 flex flex-wrap items-center gap-x-4 gap-y-2 text-xs text-neutral-600">
+              <span>
+                Organisateur :{" "}
+                <strong className="font-black text-neutral-300">
+                  {organizerName ||
+                    "Organisateur Tikemia"}
+                </strong>
+              </span>
+
+              <span>
+                Dernière actualisation :{" "}
+                <strong className="font-black text-neutral-300">
+                  {new Intl.DateTimeFormat(
+                    "fr-FR",
+                    {
+                      day:
+                        "2-digit",
+                      month:
+                        "short",
+                      year:
+                        "numeric",
+                      hour:
+                        "2-digit",
+                      minute:
+                        "2-digit",
+                    },
+                  ).format(
+                    new Date(
+                      data.generatedAt,
+                    ),
+                  )}
+                </strong>
+              </span>
+            </div>
+          </div>
+
+          <div className="grid gap-3 sm:grid-cols-2 xl:min-w-[390px]">
+            <QuickAction
+              href="/organizer/events"
+              icon={ArrowLeft}
+              title="Voir les événements"
+              description="Retour à vos événements"
+            />
+
+            <QuickAction
+              href="/api/organizer/orders/export?format=pdf"
+              icon={Download}
+              title="Rapport PDF"
+              description="Exporter toutes les commandes"
+              external
+            />
+          </div>
+        </div>
+      </header>
+
+      <OrdersSummary
+        summary={
+          data.summary
+        }
+      />
+
+      <section className="rounded-2xl border border-orange-500/18 bg-orange-500/[0.04] p-4 sm:p-5">
+        <div className="flex items-start gap-3">
+          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-orange-500/25 bg-orange-500/10">
+            <ReceiptText className="h-[18px] w-[18px] text-orange-400" />
+          </div>
+
+          <div>
+            <h2 className="text-sm font-black text-white">
+              Lecture financière multi-devises
+            </h2>
+
+            <p className="mt-1 text-xs leading-5 text-neutral-500">
+              Chaque commande conserve la devise de son
+              événement. Les montants XOF, XAF, EUR, NGN,
+              GHS et autres monnaies restent séparés et
+              ne sont jamais additionnés entre eux sans
+              conversion explicite.
+            </p>
+          </div>
+        </div>
+      </section>
+
+      <OrdersListClient
+        data={data}
+        hasEvents={hasEvents}
+      />
+
+      <footer className="flex flex-col gap-3 rounded-2xl border border-white/[0.07] bg-[#071014] px-4 py-4 text-[11px] text-neutral-600 sm:flex-row sm:items-center sm:justify-between sm:px-5">
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
+          <span>
+            {data.pagination.totalItems.toLocaleString(
+              "fr-FR",
+            )}{" "}
+            commande
+            {data.pagination.totalItems >
+            1
+              ? "s"
+              : ""}
+          </span>
+
+          <span>
+            {data.summary.totalTickets.toLocaleString(
+              "fr-FR",
+            )}{" "}
+            billet
+            {data.summary.totalTickets >
+            1
+              ? "s"
+              : ""}
+          </span>
+
+          <span>
+            {data.summary.uniqueCustomers.toLocaleString(
+              "fr-FR",
+            )}{" "}
+            client
+            {data.summary.uniqueCustomers >
+            1
+              ? "s"
+              : ""}{" "}
+            unique
+            {data.summary.uniqueCustomers >
+            1
+              ? "s"
+              : ""}
+          </span>
+        </div>
+
+        <div className="flex flex-wrap items-center gap-2">
+          <FooterExportLink
+            href="/api/organizer/orders/export?format=csv"
+            icon={FileText}
+            label="CSV"
+          />
+
+          <FooterExportLink
+            href="/api/organizer/orders/export?format=xlsx"
+            icon={FileSpreadsheet}
+            label="Excel"
+          />
+
+          <FooterExportLink
+            href="/api/organizer/orders/export?format=pdf"
+            icon={FileText}
+            label="PDF"
+          />
+        </div>
+      </footer>
+    </div>
+  );
 }
 
 function QuickAction({

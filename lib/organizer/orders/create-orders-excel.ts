@@ -4,10 +4,6 @@ import ExcelJS from "exceljs";
 
 import type {
   ExportOrdersDataResult,
-  OrganizerOrdersExportCustomerSummary,
-  OrganizerOrdersExportItem,
-  OrganizerOrdersExportOrder,
-  OrganizerOrdersExportTicketRow,
 } from "@/lib/organizer/orders/export-orders-data";
 
 const EXCEL_MIME_TYPE =

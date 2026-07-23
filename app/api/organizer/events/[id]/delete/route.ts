@@ -1,6 +1,9 @@
 import { createHash } from "node:crypto";
 
-import { Prisma } from "@prisma/client";
+import {
+  type EventStatus,
+  Prisma,
+} from "@prisma/client";
 import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
 
@@ -35,6 +38,22 @@ type AuthenticatedOrganizer = {
 
 const SESSION_COOKIE_FALLBACK_NAME =
   "tikemia_session";
+
+/*
+ * Un événement peut être supprimé par son organisateur
+ * tant qu’il ne possède aucune commande et aucun billet.
+ *
+ * Les statuts annulé, terminé et archivé restent protégés
+ * afin de conserver l’historique de la plateforme.
+ */
+const DELETABLE_EVENT_STATUSES =
+  new Set<EventStatus>([
+    "DRAFT",
+    "PENDING",
+    "PUBLISHED",
+    "REJECTED",
+    "SUSPENDED",
+  ]);
 
 function jsonResponse(
   body: DeleteEventResponse,
@@ -204,16 +223,9 @@ export async function DELETE(
       );
     }
 
-    const deletableStatuses = [
-      "DRAFT",
-      "PENDING",
-    ] as const;
-
     if (
-      !deletableStatuses.includes(
-        event.status as
-          | "DRAFT"
-          | "PENDING",
+      !DELETABLE_EVENT_STATUSES.has(
+        event.status,
       )
     ) {
       return jsonResponse(
@@ -221,9 +233,13 @@ export async function DELETE(
           success: false,
           code: "EVENT_STATUS_NOT_DELETABLE",
           message:
-            event.status === "PUBLISHED"
-              ? "Un événement déjà publié ne peut pas être supprimé. Vous devez l’annuler."
-              : "Cet événement ne peut plus être supprimé dans son état actuel.",
+            event.status === "CANCELLED"
+              ? "Un événement annulé reste conservé dans l’historique et ne peut pas être supprimé."
+              : event.status === "COMPLETED"
+                ? "Un événement terminé appartient à l’historique de votre activité et ne peut pas être supprimé."
+                : event.status === "ARCHIVED"
+                  ? "Un événement archivé ne peut pas être supprimé depuis l’espace organisateur."
+                  : "Cet événement ne peut pas être supprimé dans son état actuel.",
         },
         409,
       );
@@ -301,12 +317,13 @@ export async function DELETE(
         }
 
         if (
-          latestEvent.status !== "DRAFT" &&
-          latestEvent.status !== "PENDING"
+          !DELETABLE_EVENT_STATUSES.has(
+            latestEvent.status,
+          )
         ) {
           throw new DeleteEventConflictError(
             "EVENT_STATUS_CHANGED",
-            "Le statut de l’événement a changé. Actualisez la page avant de recommencer.",
+            "Le statut de l’événement a changé et ne permet plus sa suppression. Actualisez la page avant de recommencer.",
           );
         }
 

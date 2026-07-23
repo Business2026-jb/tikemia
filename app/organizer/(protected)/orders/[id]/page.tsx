@@ -230,157 +230,40 @@ async function getConnectedOrganizer() {
   return session.user;
 }
 
-export default async function OrganizerOrderDetailsPage({
-  params,
-}: OrganizerOrderDetailsPageProps) {
-  const organizer =
-    await getConnectedOrganizer();
+type OrganizerOrderDetailsPageData = Awaited<
+  ReturnType<typeof getOrganizerOrderDetails>
+>;
 
-  const resolvedParams =
-    await params;
+type OrganizerOrderDetailsLoadResult =
+  | {
+      success: true;
+      data: OrganizerOrderDetailsPageData;
+    }
+  | {
+      success: false;
+      message: string;
+    };
 
-  const orderId =
-    resolvedParams.id?.trim();
-
-  if (!orderId) {
-    notFound();
-  }
-
+async function loadOrganizerOrderDetailsPageData({
+  organizerId,
+  orderId,
+}: {
+  organizerId: string;
+  orderId: string;
+}): Promise<OrganizerOrderDetailsLoadResult> {
   try {
-    const {
-      order,
-      generatedAt,
-    } =
+    const data =
       await getOrganizerOrderDetails({
-        organizerId:
-          organizer.id,
-
+        organizerId,
         orderId,
       });
 
-    return (
-      <div className="space-y-6">
-        <OrderHeader
-          order={order}
-          generatedAt={
-            generatedAt
-          }
-        />
+    return {
+      success:
+        true,
 
-        {order.integrity
-          .hasFinancialInconsistency && (
-          <IntegrityAlert
-            order={order}
-          />
-        )}
-
-        <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-          <SummaryCard
-            icon={ShoppingBag}
-            label="Statut de la commande"
-            value={getOrderStatusLabel(
-              order.status,
-            )}
-            description={`Référence ${order.reference}`}
-            tone={getOrderStatusTone(
-              order.status,
-            )}
-          />
-
-          <SummaryCard
-            icon={TicketCheck}
-            label="Billets générés"
-            value={order.ticketSummary.total.toLocaleString(
-              "fr-FR",
-            )}
-            description={`${order.ticketSummary.valid} valide(s), ${order.ticketSummary.used} utilisé(s)`}
-            tone="blue"
-          />
-
-          <SummaryCard
-            icon={CircleDollarSign}
-            label="Net organisateur"
-            value={formatMoney({
-              amount:
-                order.organizerNet,
-              currency:
-                order.currency,
-            })}
-            description={`Devise ${order.currency}`}
-            tone="green"
-          />
-
-          <SummaryCard
-            icon={CreditCard}
-            label="Statut du paiement"
-            value={
-              order.payment
-                ? getPaymentStatusLabel(
-                    order.payment.status,
-                  )
-                : "Aucun paiement"
-            }
-            description={
-              order.payment
-                ? normalizeText(
-                    order.payment.method,
-                    "Moyen non renseigné",
-                  )
-                : "Paiement non associé"
-            }
-            tone={
-              order.payment?.status ===
-              "SUCCESS"
-                ? "green"
-                : order.payment?.status ===
-                    "PENDING"
-                  ? "orange"
-                  : order.payment
-                    ? "red"
-                    : "neutral"
-            }
-          />
-        </section>
-
-        <section className="grid items-start gap-5 xl:grid-cols-[minmax(0,1fr)_380px]">
-          <div className="space-y-5">
-            <EventCard
-              order={order}
-            />
-
-            <CustomerCard
-              order={order}
-            />
-
-            <OrderItemsCard
-              order={order}
-            />
-
-            <TicketsCard
-              order={order}
-            />
-          </div>
-
-          <aside className="space-y-5 xl:sticky xl:top-6">
-            <FinancialCard
-              order={order}
-            />
-
-            <PaymentCard
-              order={order}
-            />
-
-            <IntegrityCard
-              order={order}
-            />
-
-            <ActionsCard
-              order={order}
-            />
-          </aside>
-        </section>
-      </div>
-    );
+      data,
+    };
   } catch (error) {
     if (
       error instanceof
@@ -402,13 +285,13 @@ export default async function OrganizerOrderDetailsPage({
         notFound();
       }
 
-      return (
-        <OrderDetailsError
-          message={
-            error.message
-          }
-        />
-      );
+      return {
+        success:
+          false,
+
+        message:
+          error.message,
+      };
     }
 
     console.error(
@@ -417,8 +300,10 @@ export default async function OrganizerOrderDetailsPage({
         ? {
             name:
               error.name,
+
             message:
               error.message,
+
             stack:
               process.env.NODE_ENV ===
               "development"
@@ -428,10 +313,176 @@ export default async function OrganizerOrderDetailsPage({
         : error,
     );
 
+    return {
+      success:
+        false,
+
+      message:
+        "Impossible de charger les détails de cette commande pour le moment.",
+    };
+  }
+}
+
+export default async function OrganizerOrderDetailsPage({
+  params,
+}: OrganizerOrderDetailsPageProps) {
+  const organizer =
+    await getConnectedOrganizer();
+
+  const resolvedParams =
+    await params;
+
+  const orderId =
+    resolvedParams.id?.trim();
+
+  if (!orderId) {
+    notFound();
+  }
+
+  const result =
+    await loadOrganizerOrderDetailsPageData({
+      organizerId:
+        organizer.id,
+
+      orderId,
+    });
+
+  if (!result.success) {
     return (
-      <OrderDetailsError message="Impossible de charger les détails de cette commande pour le moment." />
+      <OrderDetailsError
+        message={
+          result.message
+        }
+      />
     );
   }
+
+  const {
+    order,
+    generatedAt,
+  } = result.data;
+
+  return (
+    <div className="space-y-6">
+      <OrderHeader
+        order={order}
+        generatedAt={
+          generatedAt
+        }
+      />
+
+      {order.integrity
+        .hasFinancialInconsistency && (
+        <IntegrityAlert />
+      )}
+
+      <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+        <SummaryCard
+          icon={ShoppingBag}
+          label="Statut de la commande"
+          value={getOrderStatusLabel(
+            order.status,
+          )}
+          description={`Référence ${order.reference}`}
+          tone={getOrderStatusTone(
+            order.status,
+          )}
+        />
+
+        <SummaryCard
+          icon={TicketCheck}
+          label="Billets générés"
+          value={order.ticketSummary.total.toLocaleString(
+            "fr-FR",
+          )}
+          description={`${order.ticketSummary.valid} valide(s), ${order.ticketSummary.used} utilisé(s)`}
+          tone="blue"
+        />
+
+        <SummaryCard
+          icon={CircleDollarSign}
+          label="Net organisateur"
+          value={formatMoney({
+            amount:
+              order.organizerNet,
+            currency:
+              order.currency,
+          })}
+          description={`Devise ${order.currency}`}
+          tone="green"
+        />
+
+        <SummaryCard
+          icon={CreditCard}
+          label="Statut du paiement"
+          value={
+            order.payment
+              ? getPaymentStatusLabel(
+                  order.payment.status,
+                )
+              : "Aucun paiement"
+          }
+          description={
+            order.payment
+              ? normalizeText(
+                  order.payment.method,
+                  "Moyen non renseigné",
+                )
+              : "Paiement non associé"
+          }
+          tone={
+            order.payment?.status ===
+            "SUCCESS"
+              ? "green"
+              : order.payment?.status ===
+                  "PENDING"
+                ? "orange"
+                : order.payment
+                  ? "red"
+                  : "neutral"
+          }
+        />
+      </section>
+
+      <section className="grid items-start gap-5 xl:grid-cols-[minmax(0,1fr)_380px]">
+        <div className="space-y-5">
+          <EventCard
+            order={order}
+          />
+
+          <CustomerCard
+            order={order}
+          />
+
+          <OrderItemsCard
+            order={order}
+          />
+
+          <TicketsCard
+            order={order}
+          />
+        </div>
+
+        <aside className="space-y-5 xl:sticky xl:top-6">
+          <FinancialCard
+            order={order}
+          />
+
+          <PaymentCard
+            order={order}
+          />
+
+          <IntegrityCard
+            order={order}
+          />
+
+          <ActionsCard
+            order={order}
+          />
+        </aside>
+      </section>
+    </div>
+  );
 }
 
 function OrderHeader({
@@ -550,11 +601,7 @@ function OrderHeader({
   );
 }
 
-function IntegrityAlert({
-  order,
-}: {
-  order: OrganizerOrderDetails;
-}) {
+function IntegrityAlert() {
   return (
     <section className="rounded-2xl border border-red-500/25 bg-red-500/[0.06] p-4 sm:p-5">
       <div className="flex items-start gap-3">

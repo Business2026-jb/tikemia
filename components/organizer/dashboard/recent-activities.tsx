@@ -1,13 +1,17 @@
 import Link from "next/link";
 import {
+  Archive,
   ArrowRight,
   BadgeCheck,
+  Ban,
   Banknote,
   CalendarPlus,
   CheckCircle2,
+  CircleX,
   CircleDollarSign,
   CreditCard,
   Megaphone,
+  PauseCircle,
   ReceiptText,
   RotateCcw,
   TicketCheck,
@@ -38,10 +42,17 @@ type ActivityStyle = {
   badge: string;
 };
 
-const activityStyles: Record<
-  DashboardActivity["type"],
-  ActivityStyle
-> = {
+const defaultActivityStyle: ActivityStyle = {
+  label: "Activité",
+  icon: CheckCircle2,
+  iconWrapper:
+    "border-white/[0.08] bg-white/[0.03]",
+  iconColor: "text-neutral-400",
+  badge:
+    "border-white/[0.08] bg-white/[0.03] text-neutral-400",
+};
+
+const activityStyles: Record<string, ActivityStyle> = {
   EVENT_CREATED: {
     label: "Événement créé",
     icon: CalendarPlus,
@@ -60,6 +71,46 @@ const activityStyles: Record<
     iconColor: "text-lime-400",
     badge:
       "border-emerald-500/20 bg-emerald-500/[0.07] text-lime-400",
+  },
+
+  EVENT_REJECTED: {
+    label: "Événement rejeté",
+    icon: CircleX,
+    iconWrapper:
+      "border-red-500/25 bg-red-500/10",
+    iconColor: "text-red-400",
+    badge:
+      "border-red-500/20 bg-red-500/[0.07] text-red-400",
+  },
+
+  EVENT_SUSPENDED: {
+    label: "Événement suspendu",
+    icon: PauseCircle,
+    iconWrapper:
+      "border-orange-500/25 bg-orange-500/10",
+    iconColor: "text-orange-400",
+    badge:
+      "border-orange-500/20 bg-orange-500/[0.07] text-orange-400",
+  },
+
+  EVENT_CANCELLED: {
+    label: "Événement annulé",
+    icon: Ban,
+    iconWrapper:
+      "border-rose-500/25 bg-rose-500/10",
+    iconColor: "text-rose-400",
+    badge:
+      "border-rose-500/20 bg-rose-500/[0.07] text-rose-400",
+  },
+
+  EVENT_ARCHIVED: {
+    label: "Événement archivé",
+    icon: Archive,
+    iconWrapper:
+      "border-violet-500/25 bg-violet-500/10",
+    iconColor: "text-violet-400",
+    badge:
+      "border-violet-500/20 bg-violet-500/[0.07] text-violet-400",
   },
 
   ORDER_PAID: {
@@ -199,7 +250,10 @@ export default function RecentActivities({
       {activities.length > 0 ? (
         <div className="divide-y divide-white/[0.06]">
           {activities.map((activity) => {
-            const style = activityStyles[activity.type];
+            const style =
+              activityStyles[activity.type] ??
+              defaultActivityStyle;
+
             const Icon = style.icon;
 
             return (

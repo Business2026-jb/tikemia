@@ -81,7 +81,7 @@ const navigation: NavigationItem[] = [
   },
   {
     name: "Retraits",
-    href: "/organizer/payouts",
+    href: "/organizer/payments?payout=request",
     icon: WalletCards,
   },
   {

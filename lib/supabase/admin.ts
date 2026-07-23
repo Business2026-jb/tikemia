@@ -98,7 +98,6 @@ function createSupabaseAdminClient(): SupabaseClient {
 }
 
 declare global {
-  // eslint-disable-next-line no-var
   var tikemiaSupabaseAdmin:
     | SupabaseClient
     | undefined;

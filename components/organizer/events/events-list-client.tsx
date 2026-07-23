@@ -12,6 +12,7 @@ import {
   useRouter,
   useSearchParams,
 } from "next/navigation";
+import type { ComponentProps } from "react";
 import {
   useEffect,
   useMemo,
@@ -41,11 +42,29 @@ type EventsListClientProps = {
   };
 };
 
+type DeleteEventStatus =
+  ComponentProps<
+    typeof DeleteEventDialog
+  >["eventStatus"];
+
 type SelectedEvent = {
   id: string;
   title: string;
-  status: OrganizerEventListItem["status"];
+  status: DeleteEventStatus;
 } | null;
+
+function isDeleteEventStatus(
+  status: OrganizerEventListItem["status"],
+): status is DeleteEventStatus {
+  return [
+    "DRAFT",
+    "PENDING",
+    "PUBLISHED",
+    "SUSPENDED",
+    "CANCELLED",
+    "COMPLETED",
+  ].includes(status);
+}
 
 export default function EventsListClient({
   events,
@@ -100,6 +119,20 @@ export default function EventsListClient({
   ) {
     setSuccessMessage("");
     setErrorMessage("");
+
+    if (
+      !isDeleteEventStatus(
+        event.status,
+      )
+    ) {
+      setSelectedEvent(null);
+      setErrorMessage(
+        event.status === "ARCHIVED"
+          ? "Un événement archivé ne peut pas être supprimé depuis cette liste."
+          : "Le statut actuel de cet événement ne permet pas sa suppression.",
+      );
+      return;
+    }
 
     setSelectedEvent({
       id: event.id,

@@ -3,7 +3,6 @@ import "server-only";
 import type {
   OrderStatus,
   PaymentStatus,
-  TicketStatus,
 } from "@prisma/client";
 
 import {

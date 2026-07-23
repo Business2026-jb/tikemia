@@ -793,12 +793,26 @@ export async function getOrganizerEvents(
         const hasPaidOrders =
           orderMetrics.count > 0;
 
+        /*
+         * La suppression est autorisée tant que
+         * l’événement ne possède aucune commande payée
+         * et aucun billet vendu.
+         *
+         * Un événement publié sans historique commercial
+         * peut donc être supprimé par son organisateur.
+         * Les événements annulés, terminés ou archivés
+         * restent conservés pour protéger l’historique.
+         */
         const canDelete =
           !hasPaidOrders &&
           ticketsSold === 0 &&
-          ["DRAFT", "PENDING"].includes(
-            event.status,
-          );
+          [
+            "DRAFT",
+            "PENDING",
+            "PUBLISHED",
+            "REJECTED",
+            "SUSPENDED",
+          ].includes(event.status);
 
         const canEdit = [
           "DRAFT",
