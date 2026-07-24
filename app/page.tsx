@@ -520,9 +520,9 @@ export default async function HomePage({
     <ClientLayout>
       <div className="min-h-screen bg-[#03070a] text-white">
         <ClientHomeHero
-        backgroundImage="/images/client/home/events-hero.png"
-        backgroundImageAlt="Grande scène de concert avec un public enthousiaste"
-        totalEvents={
+          backgroundImage="/images/client/home/events-hero.png"
+          backgroundImageAlt="Grande scène de concert avec un public enthousiaste"
+          totalEvents={
           homeData.totals
             .publishedEvents
         }
@@ -534,13 +534,13 @@ export default async function HomePage({
           homeData.totals
             .categories
         }
-        primaryActionHref="#client-home-filters"
-        secondaryActionHref="/events"
+          primaryActionHref="#client-home-filters"
+          secondaryActionHref="/events"
         />
 
         <div className="relative z-10 mx-auto w-full max-w-[1600px] px-4 pb-28 sm:px-5 lg:px-8 lg:pb-16">
-        <div
-          id="client-home-filters"
+          <div
+            id="client-home-filters"
           className="-mt-1 scroll-mt-28 sm:-mt-3 lg:-mt-7"
         >
           <ClientHomeFilters
@@ -614,14 +614,14 @@ export default async function HomePage({
             emptyActionLabel="Réinitialiser les filtres"
           />
 
-          <ClientHomePagination
-            pagination={
-              homeData.pagination
-            }
-            currentSearchParams={
-              resolvedSearchParams
-            }
-          />
+            <ClientHomePagination
+              pagination={
+                homeData.pagination
+              }
+              currentSearchParams={
+                resolvedSearchParams
+              }
+            />
           </div>
         </div>
       </div>
