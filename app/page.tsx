@@ -19,9 +19,112 @@ import {
 } from "@/lib/client/get-client-home-events";
 
 export const metadata: Metadata = {
-  title: "Tous les événements | Tikemia",
+  title:
+    "Réservez vos billets pour les meilleurs événements",
+
   description:
-    "Découvrez et réservez les meilleurs concerts, festivals, conférences, spectacles et événements sur Tikemia.",
+    "Découvrez et réservez facilement vos billets pour les meilleurs concerts, festivals, conférences, spectacles, événements sportifs et expériences en Afrique.",
+
+  keywords: [
+    "Tikemia",
+    "billetterie en ligne",
+    "billets événements",
+    "tickets événements",
+    "concerts en Afrique",
+    "festivals en Afrique",
+    "conférences",
+    "spectacles",
+    "événements sportifs",
+    "réservation de billets",
+    "billets électroniques",
+  ],
+
+  alternates: {
+    canonical:
+      "/",
+  },
+
+  openGraph: {
+    type:
+      "website",
+
+    locale:
+      "fr_FR",
+
+    url:
+      "/",
+
+    siteName:
+      "Tikemia",
+
+    title:
+      "Tikemia — Vivez l’expérience des meilleurs événements",
+
+    description:
+      "Réservez facilement vos billets pour les meilleurs concerts, festivals, conférences, spectacles et événements en Afrique.",
+
+    images: [
+      {
+        url:
+          "/imageclient.png",
+
+        width:
+          1536,
+
+        height:
+          1024,
+
+        alt:
+          "Tikemia — Réservez vos billets pour les meilleurs événements",
+      },
+    ],
+  },
+
+  twitter: {
+    card:
+      "summary_large_image",
+
+    title:
+      "Tikemia — Vivez l’expérience des meilleurs événements",
+
+    description:
+      "Découvrez et réservez vos billets pour les meilleurs événements sur Tikemia.",
+
+    images: [
+      {
+        url:
+          "/imageclient.png",
+
+        alt:
+          "Tikemia — Réservez vos billets pour les meilleurs événements",
+      },
+    ],
+  },
+
+  robots: {
+    index:
+      true,
+
+    follow:
+      true,
+
+    googleBot: {
+      index:
+        true,
+
+      follow:
+        true,
+
+      "max-image-preview":
+        "large",
+
+      "max-snippet":
+        -1,
+
+      "max-video-preview":
+        -1,
+    },
+  },
 };
 
 export const dynamic =
@@ -416,7 +519,7 @@ export default async function HomePage({
   return (
     <ClientLayout>
       <div className="min-h-screen bg-[#03070a] text-white">
-      <ClientHomeHero
+        <ClientHomeHero
         backgroundImage="/images/client/home/events-hero.png"
         backgroundImageAlt="Grande scène de concert avec un public enthousiaste"
         totalEvents={
@@ -433,9 +536,9 @@ export default async function HomePage({
         }
         primaryActionHref="#client-home-filters"
         secondaryActionHref="/events"
-      />
+        />
 
-      <div className="relative z-10 mx-auto w-full max-w-[1600px] px-4 pb-28 sm:px-5 lg:px-8 lg:pb-16">
+        <div className="relative z-10 mx-auto w-full max-w-[1600px] px-4 pb-28 sm:px-5 lg:px-8 lg:pb-16">
         <div
           id="client-home-filters"
           className="-mt-1 scroll-mt-28 sm:-mt-3 lg:-mt-7"
@@ -519,9 +622,9 @@ export default async function HomePage({
               resolvedSearchParams
             }
           />
+          </div>
         </div>
       </div>
-    </div>
     </ClientLayout>
   );
 }
