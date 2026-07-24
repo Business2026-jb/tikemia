@@ -54,7 +54,7 @@ export default function ClientHomeHero({
   description =
     "Découvrez les meilleurs concerts, festivals, conférences, spectacles et expériences près de chez vous.",
 
-  backgroundImage = "/images/client/home/events-hero.jpg",
+  backgroundImage = "/images/client/home/events-hero.png",
   backgroundImageAlt =
     "Public assistant à un événement Tikemia",
 

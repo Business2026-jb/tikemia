@@ -1,8 +1,8 @@
-"use client";
-
+import type {
+  Metadata,
+} from "next";
 import Image from "next/image";
 import Link from "next/link";
-import { useState } from "react";
 import {
   ArrowRight,
   BarChart3,
@@ -14,35 +14,162 @@ import {
   X,
 } from "lucide-react";
 
+export const metadata: Metadata = {
+  title:
+    "Organisez, gérez et vendez vos billets",
+
+  description:
+    "Créez vos événements, vendez vos billets, suivez vos ventes et gérez vos participants avec l’espace organisateur Tikemia.",
+
+  keywords: [
+    "Tikemia Organisateur",
+    "créer un événement",
+    "vendre des billets",
+    "billetterie organisateur",
+    "gestion événements",
+    "vente tickets en ligne",
+    "gestion participants",
+    "statistiques événements",
+    "paiements événements",
+    "événements en Afrique",
+  ],
+
+  alternates: {
+    canonical:
+      "/organizer",
+  },
+
+  openGraph: {
+    type:
+      "website",
+
+    locale:
+      "fr_FR",
+
+    url:
+      "/organizer",
+
+    siteName:
+      "Tikemia",
+
+    title:
+      "Tikemia Organisateur — Organisez. Vendez. Réussissez.",
+
+    description:
+      "La plateforme complète pour créer, gérer et vendre les billets de vos événements en toute simplicité.",
+
+    images: [
+      {
+        url:
+          "/imageorganizer.png",
+
+        width:
+          1536,
+
+        height:
+          1024,
+
+        alt:
+          "Tikemia Organisateur — Créez, gérez et vendez vos événements",
+      },
+    ],
+  },
+
+  twitter: {
+    card:
+      "summary_large_image",
+
+    title:
+      "Tikemia Organisateur — Organisez. Vendez. Réussissez.",
+
+    description:
+      "Créez vos événements, suivez vos ventes et gérez vos participants depuis une seule plateforme.",
+
+    images: [
+      {
+        url:
+          "/imageorganizer.png",
+
+        alt:
+          "Tikemia Organisateur — Créez, gérez et vendez vos événements",
+      },
+    ],
+  },
+
+  robots: {
+    index:
+      true,
+
+    follow:
+      true,
+
+    googleBot: {
+      index:
+        true,
+
+      follow:
+        true,
+
+      "max-image-preview":
+        "large",
+
+      "max-snippet":
+        -1,
+
+      "max-video-preview":
+        -1,
+    },
+  },
+};
+
 const organizerFeatures = [
   {
-    title: "Tableau de bord intelligent",
-    description: "Suivez vos ventes et vos performances en temps réel.",
-    icon: BarChart3,
+    title:
+      "Tableau de bord intelligent",
+
+    description:
+      "Suivez vos ventes et vos performances en temps réel.",
+
+    icon:
+      BarChart3,
+
     iconClassName:
       "border-emerald-500/70 bg-emerald-500/10 text-emerald-400",
   },
   {
-    title: "Billetterie et QR codes",
-    description: "Générez des billets fiables, uniques et sécurisés.",
-    icon: QrCode,
+    title:
+      "Billetterie et QR codes",
+
+    description:
+      "Générez des billets fiables, uniques et sécurisés.",
+
+    icon:
+      QrCode,
+
     iconClassName:
       "border-amber-500/70 bg-amber-500/10 text-amber-400",
   },
   {
-    title: "Paiements rapides",
-    description: "Recevez vos revenus avec des moyens de paiement adaptés.",
-    icon: WalletCards,
-    iconClassName: "border-red-500/70 bg-red-500/10 text-red-400",
+    title:
+      "Paiements rapides",
+
+    description:
+      "Recevez vos revenus avec des moyens de paiement adaptés.",
+
+    icon:
+      WalletCards,
+
+    iconClassName:
+      "border-red-500/70 bg-red-500/10 text-red-400",
   },
 ];
 
 export default function OrganizerHomePage() {
-  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const currentYear =
+    new Date().getFullYear();
 
   return (
     <main className="relative min-h-screen overflow-hidden bg-[#020609] text-white">
-      {/* Lumières décoratives */}
       <div
         aria-hidden="true"
         className="pointer-events-none absolute inset-0 overflow-hidden"
@@ -61,13 +188,12 @@ export default function OrganizerHomePage() {
         <div className="absolute -bottom-14 left-0 h-[120px] w-full bg-[#020609]" />
       </div>
 
-      {/* Header */}
       <header className="relative z-50 border-b border-white/5 bg-[#020609]/80 backdrop-blur-xl">
         <div className="mx-auto flex h-[92px] w-full max-w-[1600px] items-center justify-between px-5 sm:px-8 lg:h-[112px] lg:px-12 xl:px-16">
           <Link
             href="/organizer"
-            className="relative flex shrink-0 items-center"
             aria-label="Accueil Tikemia Organisateur"
+            className="relative flex shrink-0 items-center"
           >
             <Image
               src="/logo.png"
@@ -79,7 +205,6 @@ export default function OrganizerHomePage() {
             />
           </Link>
 
-          {/* Navigation PC */}
           <div className="hidden items-center gap-7 lg:flex xl:gap-10">
             <div className="flex items-center gap-2 text-sm text-neutral-200">
               <ShieldCheck className="h-5 w-5 text-lime-400" />
@@ -106,110 +231,94 @@ export default function OrganizerHomePage() {
             </Link>
           </div>
 
-          {/* Bouton mobile */}
-          <button
-            type="button"
-            onClick={() => setMobileMenuOpen(true)}
-            className="flex h-11 w-11 items-center justify-center rounded-xl border border-white/10 bg-white/5 text-white lg:hidden"
-            aria-label="Ouvrir le menu"
-          >
-            <Menu className="h-6 w-6" />
-          </button>
+          <details className="group relative lg:hidden">
+            <summary
+              aria-label="Ouvrir le menu"
+              className="flex h-11 w-11 cursor-pointer list-none items-center justify-center rounded-xl border border-white/10 bg-white/5 text-white [&::-webkit-details-marker]:hidden"
+            >
+              <Menu className="h-6 w-6 group-open:hidden" />
+              <X className="hidden h-6 w-6 group-open:block" />
+            </summary>
+
+            <div className="fixed inset-0 top-[92px] z-[100] bg-black/75 backdrop-blur-sm">
+              <aside className="ml-auto flex h-[calc(100vh-92px)] w-[88%] max-w-[390px] flex-col border-l border-white/10 bg-[#060c10] p-6 shadow-2xl">
+                <div className="flex items-center justify-between border-b border-white/10 pb-5">
+                  <Image
+                    src="/logo.png"
+                    alt="Tikemia"
+                    width={220}
+                    height={70}
+                    className="h-auto w-[190px] object-contain"
+                  />
+
+                  <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-white/5">
+                    <X className="h-5 w-5" />
+                  </span>
+                </div>
+
+                <div className="mt-8 space-y-4">
+                  <div className="flex items-center gap-3 rounded-xl border border-white/10 bg-white/[0.03] p-4">
+                    <ShieldCheck className="h-5 w-5 text-lime-400" />
+
+                    <div>
+                      <p className="text-sm font-semibold">
+                        Plateforme sécurisée
+                      </p>
+
+                      <p className="mt-1 text-xs text-neutral-400">
+                        Vos événements et vos paiements sont protégés.
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-3 rounded-xl border border-white/10 bg-white/[0.03] p-4">
+                    <Headphones className="h-5 w-5 text-lime-400" />
+
+                    <div>
+                      <p className="text-sm font-semibold">
+                        Support organisateur
+                      </p>
+
+                      <p className="mt-1 text-xs text-neutral-400">
+                        Une équipe disponible pour vous accompagner.
+                      </p>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="mt-auto space-y-3">
+                  <Link
+                    href="/organizer/login"
+                    className="flex h-13 items-center justify-center rounded-xl border border-emerald-500/70 px-5 font-semibold"
+                  >
+                    Se connecter
+                  </Link>
+
+                  <Link
+                    href="/organizer/register"
+                    className="flex h-13 items-center justify-center rounded-xl bg-gradient-to-r from-emerald-500 via-lime-500 to-orange-500 px-5 font-bold"
+                  >
+                    Créer un compte organisateur
+                  </Link>
+                </div>
+              </aside>
+            </div>
+          </details>
         </div>
       </header>
 
-      {/* Menu mobile */}
-      <div
-        className={`fixed inset-0 z-[100] transition ${
-          mobileMenuOpen ? "visible" : "invisible"
-        }`}
-      >
-        <button
-          type="button"
-          aria-label="Fermer le menu"
-          onClick={() => setMobileMenuOpen(false)}
-          className={`absolute inset-0 bg-black/75 backdrop-blur-sm transition-opacity ${
-            mobileMenuOpen ? "opacity-100" : "opacity-0"
-          }`}
-        />
-
-        <aside
-          className={`absolute right-0 top-0 flex h-full w-[88%] max-w-[390px] flex-col border-l border-white/10 bg-[#060c10] p-6 shadow-2xl transition-transform duration-300 ${
-            mobileMenuOpen ? "translate-x-0" : "translate-x-full"
-          }`}
-        >
-          <div className="flex items-center justify-between border-b border-white/10 pb-5">
-            <Image
-              src="/logo.png"
-              alt="Tikemia"
-              width={220}
-              height={70}
-              className="h-auto w-[190px] object-contain"
-            />
-
-            <button
-              type="button"
-              onClick={() => setMobileMenuOpen(false)}
-              className="flex h-10 w-10 items-center justify-center rounded-xl bg-white/5"
-              aria-label="Fermer"
-            >
-              <X className="h-5 w-5" />
-            </button>
-          </div>
-
-          <div className="mt-8 space-y-4">
-            <div className="flex items-center gap-3 rounded-xl border border-white/10 bg-white/[0.03] p-4">
-              <ShieldCheck className="h-5 w-5 text-lime-400" />
-              <div>
-                <p className="text-sm font-semibold">Plateforme sécurisée</p>
-                <p className="mt-1 text-xs text-neutral-400">
-                  Vos événements et vos paiements sont protégés.
-                </p>
-              </div>
-            </div>
-
-            <div className="flex items-center gap-3 rounded-xl border border-white/10 bg-white/[0.03] p-4">
-              <Headphones className="h-5 w-5 text-lime-400" />
-              <div>
-                <p className="text-sm font-semibold">Support organisateur</p>
-                <p className="mt-1 text-xs text-neutral-400">
-                  Une équipe disponible pour vous accompagner.
-                </p>
-              </div>
-            </div>
-          </div>
-
-          <div className="mt-auto space-y-3">
-            <Link
-              href="/organizer/login"
-              onClick={() => setMobileMenuOpen(false)}
-              className="flex h-13 items-center justify-center rounded-xl border border-emerald-500/70 px-5 font-semibold"
-            >
-              Se connecter
-            </Link>
-
-            <Link
-              href="/organizer/register"
-              onClick={() => setMobileMenuOpen(false)}
-              className="flex h-13 items-center justify-center rounded-xl bg-gradient-to-r from-emerald-500 via-lime-500 to-orange-500 px-5 font-bold"
-            >
-              Créer un compte organisateur
-            </Link>
-          </div>
-        </aside>
-      </div>
-
-      {/* Hero principal */}
       <section className="relative z-10">
         <div className="mx-auto grid min-h-[calc(100vh-112px)] w-full max-w-[1600px] items-center gap-10 px-5 pb-32 pt-12 sm:px-8 lg:grid-cols-[0.82fr_1.18fr] lg:px-12 lg:pb-40 lg:pt-12 xl:px-16">
-          {/* Partie texte */}
           <div className="relative z-20 max-w-[680px]">
             <p className="mb-5 text-sm font-bold uppercase tracking-[0.16em] text-lime-400 sm:text-base">
               Espace vendeur et organisateur
             </p>
 
             <h1 className="text-[52px] font-black leading-[0.98] tracking-[-0.05em] sm:text-[68px] lg:text-[76px] xl:text-[86px]">
-              <span className="block text-white">Gérez. Vendez.</span>
+              <span className="block text-white">
+                Gérez. Vendez.
+              </span>
+
               <span className="mt-3 block bg-gradient-to-r from-emerald-500 via-lime-400 via-amber-400 to-orange-500 bg-clip-text text-transparent">
                 Développez.
               </span>
@@ -221,13 +330,16 @@ export default function OrganizerHomePage() {
               professionnels de l’événementiel en Afrique.
             </p>
 
-            {/* Fonctionnalités */}
             <div className="mt-9 grid gap-5 sm:grid-cols-3">
               {organizerFeatures.map((feature) => {
-                const Icon = feature.icon;
+                const Icon =
+                  feature.icon;
 
                 return (
-                  <div key={feature.title} className="flex items-start gap-3">
+                  <div
+                    key={feature.title}
+                    className="flex items-start gap-3"
+                  >
                     <div
                       className={`flex h-12 w-12 shrink-0 items-center justify-center rounded-full border ${feature.iconClassName}`}
                     >
@@ -238,6 +350,7 @@ export default function OrganizerHomePage() {
                       <p className="text-sm font-semibold text-white">
                         {feature.title}
                       </p>
+
                       <p className="mt-1 text-xs leading-5 text-neutral-400">
                         {feature.description}
                       </p>
@@ -247,7 +360,6 @@ export default function OrganizerHomePage() {
               })}
             </div>
 
-            {/* Boutons */}
             <div className="mt-10 flex flex-col gap-4 sm:flex-row">
               <Link
                 href="/organizer/login"
@@ -266,7 +378,6 @@ export default function OrganizerHomePage() {
               </Link>
             </div>
 
-            {/* Confiance */}
             <div className="mt-11 flex items-center gap-4">
               <div className="flex -space-x-3">
                 {["A", "M", "K", "D"].map((letter, index) => (
@@ -274,7 +385,8 @@ export default function OrganizerHomePage() {
                     key={letter}
                     className="flex h-12 w-12 items-center justify-center rounded-full border-2 border-[#020609] bg-gradient-to-br from-neutral-600 to-neutral-900 text-sm font-bold"
                     style={{
-                      transform: `translateX(-${index * 2}px)`,
+                      transform:
+                        `translateX(-${index * 2}px)`,
                     }}
                   >
                     {letter}
@@ -286,6 +398,7 @@ export default function OrganizerHomePage() {
                 <p className="text-sm font-semibold text-lime-400 sm:text-base">
                   Des milliers d’organisateurs
                 </p>
+
                 <p className="mt-1 text-xs text-neutral-400 sm:text-sm">
                   utilisent Tikemia pour développer leurs événements.
                 </p>
@@ -293,7 +406,6 @@ export default function OrganizerHomePage() {
             </div>
           </div>
 
-          {/* Image principale */}
           <div className="relative flex min-h-[430px] items-center justify-center lg:min-h-[680px]">
             <div className="absolute inset-x-[8%] bottom-[12%] h-[45%] rounded-full bg-emerald-500/20 blur-[100px]" />
 
@@ -311,7 +423,6 @@ export default function OrganizerHomePage() {
         </div>
       </section>
 
-      {/* Footer */}
       <footer className="relative z-20 border-t border-white/10 bg-[#020609]/95">
         <div className="mx-auto flex w-full max-w-[1600px] flex-col gap-7 px-5 py-8 sm:px-8 md:flex-row md:items-center md:justify-between lg:px-12 xl:px-16">
           <div className="flex items-center gap-4">
@@ -326,28 +437,40 @@ export default function OrganizerHomePage() {
             <div className="hidden h-8 w-px bg-white/10 sm:block" />
 
             <p className="text-xs leading-5 text-neutral-500">
-              © {new Date().getFullYear()} Tikemia. La billetterie conçue pour
-              les professionnels de l’événementiel.
+              © {currentYear} Tikemia. La billetterie conçue pour les
+              professionnels de l’événementiel.
             </p>
           </div>
 
-          <nav className="flex flex-wrap gap-x-6 gap-y-3 text-xs text-neutral-400">
-            <Link href="/support" className="transition hover:text-white">
+          <nav
+            aria-label="Liens du pied de page organisateur"
+            className="flex flex-wrap gap-x-6 gap-y-3 text-xs text-neutral-400"
+          >
+            <Link
+              href="/support"
+              className="transition hover:text-white"
+            >
               Assistance
             </Link>
+
             <Link
               href="/terms"
               className="transition hover:text-white"
             >
               Conditions organisateurs
             </Link>
+
             <Link
               href="/privacy-policy"
               className="transition hover:text-white"
             >
               Confidentialité
             </Link>
-            <Link href="/" className="transition hover:text-white">
+
+            <Link
+              href="/"
+              className="transition hover:text-white"
+            >
               Retour au site
             </Link>
           </nav>

@@ -6,6 +6,7 @@ import type {
 import "./globals.css";
 
 const APP_NAME = "Tikemia";
+
 const APP_URL =
   process.env.NEXT_PUBLIC_APP_URL?.trim() ||
   process.env.APP_URL?.trim() ||
