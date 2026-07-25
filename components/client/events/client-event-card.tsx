@@ -11,6 +11,9 @@ import {
   Ticket,
   UserRound,
 } from "lucide-react";
+import type {
+  ReactNode,
+} from "react";
 import {
   useMemo,
   useState,
@@ -51,6 +54,80 @@ type EventBadge = {
   label: string;
   className: string;
 };
+
+type AvailabilityDisplay = {
+  label: string;
+  value: string;
+  valueClassName: string;
+  urgency: boolean;
+};
+
+function getAvailabilityDisplay(
+  event: ClientHomeEvent,
+): AvailabilityDisplay {
+  if (
+    event.availability.soldOut
+  ) {
+    return {
+      label:
+        "Disponibilité",
+
+      value:
+        "Épuisé",
+
+      valueClassName:
+        "text-red-400",
+
+      urgency:
+        false,
+    };
+  }
+
+  const availableTickets =
+    Math.max(
+      event.availability.availableTickets,
+      0,
+    );
+
+  if (
+    availableTickets > 0 &&
+    availableTickets <= 10
+  ) {
+    return {
+      label:
+        "Dernières places",
+
+      value:
+        `${availableTickets} restante${
+          availableTickets > 1
+            ? "s"
+            : ""
+        }`,
+
+      valueClassName:
+        "text-orange-400",
+
+      urgency:
+        true,
+    };
+  }
+
+  return {
+    label:
+      "Disponible",
+
+    value:
+      availableTickets.toLocaleString(
+        "fr-FR",
+      ),
+
+    valueClassName:
+      "text-lime-400",
+
+    urgency:
+      false,
+  };
+}
 
 function cn(
   ...classes: Array<
@@ -304,7 +381,10 @@ function EventImage({
         aria-hidden="true"
         className="absolute inset-0 bg-[radial-gradient(circle_at_20%_10%,rgba(132,204,22,0.22),transparent_34%),radial-gradient(circle_at_85%_20%,rgba(249,115,22,0.2),transparent_34%),linear-gradient(145deg,#101c20,#05090c_65%)]"
       >
-        <Ticket className="absolute left-1/2 top-1/2 h-12 w-12 -translate-x-1/2 -translate-y-1/2 text-white/10" />
+        <Ticket
+          aria-hidden="true"
+          className="absolute left-1/2 top-1/2 h-12 w-12 -translate-x-1/2 -translate-y-1/2 text-white/10"
+        />
       </div>
     );
   }
@@ -470,7 +550,10 @@ function OrganizerLine({
             className="object-cover"
           />
         ) : (
-          <UserRound className="h-3.5 w-3.5 text-neutral-500" />
+          <UserRound
+            aria-hidden="true"
+            className="h-3.5 w-3.5 text-neutral-500"
+          />
         )}
       </span>
 
@@ -504,7 +587,7 @@ function EventMeta({
     | typeof CalendarDays
     | typeof MapPin
     | typeof Clock3;
-  children: React.ReactNode;
+  children: ReactNode;
   className?: string;
 }) {
   return (
@@ -514,7 +597,10 @@ function EventMeta({
         className,
       )}
     >
-      <Icon className="mt-0.5 h-3.5 w-3.5 shrink-0 text-neutral-600" />
+      <Icon
+        aria-hidden="true"
+        className="mt-0.5 h-3.5 w-3.5 shrink-0 text-neutral-600"
+      />
 
       <span className="min-w-0 truncate">
         {children}
@@ -594,6 +680,17 @@ export default function ClientEventCard({
       ],
     );
 
+  const availability =
+    useMemo(
+      () =>
+        getAvailabilityDisplay(
+          event,
+        ),
+      [
+        event,
+      ],
+    );
+
   if (
     variant === "list"
   ) {
@@ -609,7 +706,7 @@ export default function ClientEventCard({
             eventHref
           }
           aria-label={`Voir l’événement ${event.title}`}
-          className="grid min-w-0 grid-cols-[112px_minmax(0,1fr)] sm:grid-cols-[190px_minmax(0,1fr)] lg:grid-cols-[240px_minmax(0,1fr)]"
+          className="grid min-w-0 grid-cols-[112px_minmax(0,1fr)] outline-none focus-visible:ring-2 focus-visible:ring-lime-400/70 focus-visible:ring-inset sm:grid-cols-[190px_minmax(0,1fr)] lg:grid-cols-[240px_minmax(0,1fr)]"
         >
           <div className="relative min-h-[158px] overflow-hidden sm:min-h-[190px]">
             <EventImage
@@ -736,24 +833,20 @@ export default function ClientEventCard({
               {showAvailability && (
                 <div className="shrink-0 text-right">
                   <p className="text-[10px] text-neutral-600">
-                    Disponible
+                    {
+                      availability.label
+                    }
                   </p>
 
                   <p
                     className={cn(
-                      "text-base font-black",
-                      event.availability
-                        .soldOut
-                        ? "text-red-400"
-                        : "text-lime-400",
+                      "text-sm font-black sm:text-base",
+                      availability.valueClassName,
                     )}
                   >
-                    {event.availability
-                      .soldOut
-                      ? "Épuisé"
-                      : event
-                          .availability
-                          .availableTickets}
+                    {
+                      availability.value
+                    }
                   </p>
                 </div>
               )}
@@ -772,7 +865,7 @@ export default function ClientEventCard({
       className={cn(
         "group relative min-w-0 overflow-hidden rounded-2xl border border-white/[0.08] bg-[#071014] transition hover:-translate-y-1 hover:border-white/[0.15] hover:shadow-[0_22px_60px_rgba(0,0,0,0.34)]",
         featured
-          ? "w-[250px] shrink-0 snap-start sm:w-[280px] lg:w-auto"
+          ? "w-[84vw] max-w-[300px] shrink-0 snap-start min-[390px]:w-[78vw] sm:w-[280px] lg:w-auto"
           : "w-full",
         className,
       )}
@@ -782,7 +875,7 @@ export default function ClientEventCard({
           eventHref
         }
         aria-label={`Voir l’événement ${event.title}`}
-        className="flex h-full min-w-0 flex-col"
+        className="flex h-full min-w-0 flex-col outline-none focus-visible:ring-2 focus-visible:ring-lime-400/70 focus-visible:ring-inset"
       >
         <div
           className={cn(
@@ -837,6 +930,12 @@ export default function ClientEventCard({
               }
             />
           </div>
+
+          {availability.urgency && (
+            <div className="absolute inset-x-3 bottom-3 rounded-xl border border-orange-500/30 bg-orange-500/18 px-3 py-2 text-center text-[10px] font-black uppercase tracking-[0.08em] text-orange-300 backdrop-blur-md">
+              Dernières places
+            </div>
+          )}
 
           {event.availability
             .soldOut && (
@@ -920,24 +1019,20 @@ export default function ClientEventCard({
             {showAvailability && (
               <div className="shrink-0 text-right">
                 <p className="text-[9px] text-neutral-600">
-                  Disponible
+                  {
+                    availability.label
+                  }
                 </p>
 
                 <p
                   className={cn(
                     "text-sm font-black",
-                    event.availability
-                      .soldOut
-                      ? "text-red-400"
-                      : "text-lime-400",
+                    availability.valueClassName,
                   )}
                 >
-                  {event.availability
-                    .soldOut
-                    ? "Épuisé"
-                    : event
-                        .availability
-                        .availableTickets}
+                  {
+                    availability.value
+                  }
                 </p>
               </div>
             )}
