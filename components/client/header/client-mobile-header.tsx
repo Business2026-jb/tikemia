@@ -3,7 +3,12 @@
 import Image from "next/image";
 import Link from "next/link";
 import { Menu, Search, User, X } from "lucide-react";
-import { useMemo, useState } from "react";
+import {
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { usePathname, useRouter } from "next/navigation";
 
 import ClientMobileDrawer from "@/components/client/header/client-mobile-drawer";
@@ -95,6 +100,9 @@ export default function ClientMobileHeader({
   const [isLoggingOut, setIsLoggingOut] =
     useState(false);
 
+  const searchInputRef =
+    useRef<HTMLInputElement | null>(null);
+
   const initials = useMemo(
     () => getUserInitials(user),
     [user],
@@ -104,6 +112,67 @@ export default function ClientMobileHeader({
     user?.unreadNotificationsCount ?? 0,
     0,
   );
+
+  useEffect(() => {
+    if (!drawerOpen && !searchOpen) {
+      return;
+    }
+
+    const previousOverflow =
+      document.body.style.overflow;
+
+    document.body.style.overflow =
+      "hidden";
+
+    return () => {
+      document.body.style.overflow =
+        previousOverflow;
+    };
+  }, [drawerOpen, searchOpen]);
+
+  useEffect(() => {
+    if (!searchOpen) {
+      return;
+    }
+
+    const timeout =
+      window.setTimeout(() => {
+        searchInputRef.current?.focus();
+      }, 80);
+
+    return () => {
+      window.clearTimeout(timeout);
+    };
+  }, [searchOpen]);
+
+  useEffect(() => {
+    if (!drawerOpen && !searchOpen) {
+      return;
+    }
+
+    function handleKeyDown(
+      event: KeyboardEvent,
+    ): void {
+      if (event.key !== "Escape") {
+        return;
+      }
+
+      setDrawerOpen(false);
+      setSearchOpen(false);
+    }
+
+    window.addEventListener(
+      "keydown",
+      handleKeyDown,
+    );
+
+    return () => {
+      window.removeEventListener(
+        "keydown",
+        handleKeyDown,
+      );
+    };
+  }, [drawerOpen, searchOpen]);
 
   function closeDrawer(): void {
     setDrawerOpen(false);
@@ -266,6 +335,7 @@ export default function ClientMobileHeader({
       <MobileSearchDialog
         open={searchOpen}
         value={searchValue}
+        inputRef={searchInputRef}
         onChange={setSearchValue}
         onClose={closeSearch}
         onSubmit={submitSearch}
@@ -305,12 +375,16 @@ function ClientMobileAvatar({
 function MobileSearchDialog({
   open,
   value,
+  inputRef,
   onChange,
   onClose,
   onSubmit,
 }: {
   open: boolean;
   value: string;
+  inputRef: React.RefObject<
+    HTMLInputElement | null
+  >;
   onChange: (value: string) => void;
   onClose: () => void;
   onSubmit: () => void;
@@ -363,6 +437,7 @@ function MobileSearchDialog({
             <Search className="pointer-events-none absolute left-4 top-1/2 h-5 w-5 -translate-y-1/2 text-neutral-500" />
 
             <input
+              ref={inputRef}
               value={value}
               onChange={(event) =>
                 onChange(event.target.value)
