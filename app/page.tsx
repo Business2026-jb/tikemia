@@ -7,23 +7,55 @@ import {
   ChevronRight,
 } from "lucide-react";
 
+import ClientLayout from "@/app/(client)/layout";
 import ClientAllEvents from "@/components/client/home/client-all-events";
 import ClientFeaturedEvents from "@/components/client/home/client-featured-events";
 import ClientHomeFilters from "@/components/client/home/client-home-filters";
 import ClientHomeHero from "@/components/client/home/client-home-hero";
-import ClientLayout from "@/app/(client)/layout";
 import {
   getClientHomeEvents,
   type ClientHomeEventSort,
   type ClientHomePagination,
 } from "@/lib/client/get-client-home-events";
 
+const APP_URL =
+  process.env.NEXT_PUBLIC_APP_URL?.trim() ||
+  process.env.APP_URL?.trim() ||
+  "https://tikemia.com";
+
+const HOME_PAGE_SIZE = 12;
+const FEATURED_EVENTS_LIMIT = 5;
+
+const ALLOWED_SORT_VALUES =
+  new Set<ClientHomeEventSort>([
+    "soonest",
+    "latest",
+    "popular",
+    "price-low",
+    "price-high",
+  ]);
+
 export const metadata: Metadata = {
+  metadataBase:
+    new URL(APP_URL),
+
   title:
     "Réservez vos billets pour les meilleurs événements",
 
   description:
     "Découvrez et réservez facilement vos billets pour les meilleurs concerts, festivals, conférences, spectacles, événements sportifs et expériences en Afrique.",
+
+  applicationName:
+    "Tikemia",
+
+  creator:
+    "Tikemia",
+
+  publisher:
+    "Tikemia",
+
+  category:
+    "Billetterie et événements",
 
   keywords: [
     "Tikemia",
@@ -145,39 +177,45 @@ type ClientHomePageProps = {
   searchParams?: Promise<ClientHomePageSearchParams>;
 };
 
-const HOME_PAGE_SIZE = 12;
-const FEATURED_EVENTS_LIMIT = 5;
-
-const ALLOWED_SORT_VALUES =
-  new Set<ClientHomeEventSort>([
-    "soonest",
-    "latest",
-    "popular",
-    "price-low",
-    "price-high",
-  ]);
-
 function getSingleSearchParam(
-  value: string | string[] | undefined,
+  value:
+    | string
+    | string[]
+    | undefined,
 ): string {
-  if (Array.isArray(value)) {
-    return value[0]?.trim() ?? "";
+  if (
+    Array.isArray(value)
+  ) {
+    return (
+      value[0]?.trim() ??
+      ""
+    );
   }
 
-  return value?.trim() ?? "";
+  return (
+    value?.trim() ??
+    ""
+  );
 }
 
 function getPageNumber(
-  value: string | string[] | undefined,
+  value:
+    | string
+    | string[]
+    | undefined,
 ): number {
   const parsedValue =
     Number.parseInt(
-      getSingleSearchParam(value),
+      getSingleSearchParam(
+        value,
+      ),
       10,
     );
 
   if (
-    !Number.isInteger(parsedValue) ||
+    !Number.isInteger(
+      parsedValue,
+    ) ||
     parsedValue < 1
   ) {
     return 1;
@@ -187,7 +225,10 @@ function getPageNumber(
 }
 
 function getSortValue(
-  value: string | string[] | undefined,
+  value:
+    | string
+    | string[]
+    | undefined,
 ): ClientHomeEventSort {
   const normalizedValue =
     getSingleSearchParam(
@@ -205,7 +246,8 @@ function createPageHref({
   currentSearchParams,
   page,
 }: {
-  currentSearchParams: ClientHomePageSearchParams;
+  currentSearchParams:
+    ClientHomePageSearchParams;
   page: number;
 }): string {
   const params =
@@ -255,12 +297,18 @@ function createPageHref({
 }
 
 function getVisiblePages(
-  pagination: ClientHomePagination,
+  pagination:
+    ClientHomePagination,
 ): number[] {
   const totalPages =
-    pagination.totalPages;
+    Math.max(
+      pagination.totalPages,
+      0,
+    );
 
-  if (totalPages <= 1) {
+  if (
+    totalPages <= 1
+  ) {
     return [];
   }
 
@@ -273,7 +321,7 @@ function getVisiblePages(
       totalPages,
     );
 
-  const candidates =
+  return Array.from(
     new Set<number>([
       1,
       totalPages,
@@ -282,19 +330,22 @@ function getVisiblePages(
       currentPage,
       currentPage + 1,
       currentPage + 2,
-    ]);
-
-  return Array.from(
-    candidates,
+    ]),
   )
     .filter(
-      (page) =>
+      (
+        page,
+      ) =>
         page >= 1 &&
         page <= totalPages,
     )
     .sort(
-      (first, second) =>
-        first - second,
+      (
+        first,
+        second,
+      ) =>
+        first -
+        second,
     );
 }
 
@@ -302,11 +353,14 @@ function ClientHomePagination({
   pagination,
   currentSearchParams,
 }: {
-  pagination: ClientHomePagination;
-  currentSearchParams: ClientHomePageSearchParams;
+  pagination:
+    ClientHomePagination;
+  currentSearchParams:
+    ClientHomePageSearchParams;
 }) {
   if (
-    pagination.totalPages <= 1
+    pagination.totalPages <=
+    1
   ) {
     return null;
   }
@@ -325,13 +379,19 @@ function ClientHomePagination({
         <Link
           href={createPageHref({
             currentSearchParams,
+
             page:
-              pagination.page - 1,
+              pagination.page -
+              1,
           })}
           aria-label="Page précédente"
-          className="inline-flex h-11 items-center justify-center gap-2 rounded-xl border border-white/[0.09] bg-white/[0.025] px-4 text-xs font-black text-neutral-300 transition hover:border-lime-500/20 hover:bg-lime-500/[0.07] hover:text-lime-300"
+          className="inline-flex h-11 items-center justify-center gap-2 rounded-xl border border-white/[0.09] bg-white/[0.025] px-4 text-xs font-black text-neutral-300 outline-none transition hover:border-lime-500/20 hover:bg-lime-500/[0.07] hover:text-lime-300 focus-visible:ring-2 focus-visible:ring-lime-400/70"
         >
-          <ChevronLeft className="h-4 w-4" />
+          <ChevronLeft
+            aria-hidden="true"
+            className="h-4 w-4"
+          />
+
           <span className="hidden sm:inline">
             Précédent
           </span>
@@ -342,6 +402,7 @@ function ClientHomePagination({
           className="inline-flex h-11 cursor-not-allowed items-center justify-center gap-2 rounded-xl border border-white/[0.05] bg-white/[0.01] px-4 text-xs font-black text-neutral-800"
         >
           <ChevronLeft className="h-4 w-4" />
+
           <span className="hidden sm:inline">
             Précédent
           </span>
@@ -371,7 +432,9 @@ function ClientHomePagination({
 
           return (
             <span
-              key={page}
+              key={
+                page
+              }
               className="contents"
             >
               {shouldShowEllipsis && (
@@ -393,10 +456,12 @@ function ClientHomePagination({
                 className={
                   active
                     ? "inline-flex h-11 min-w-11 items-center justify-center rounded-xl border border-lime-400/30 bg-lime-500 text-sm font-black text-[#071000] shadow-[0_12px_30px_rgba(132,204,22,0.16)]"
-                    : "inline-flex h-11 min-w-11 items-center justify-center rounded-xl border border-white/[0.09] bg-white/[0.025] text-sm font-black text-neutral-400 transition hover:border-lime-500/20 hover:bg-lime-500/[0.07] hover:text-lime-300"
+                    : "inline-flex h-11 min-w-11 items-center justify-center rounded-xl border border-white/[0.09] bg-white/[0.025] text-sm font-black text-neutral-400 outline-none transition hover:border-lime-500/20 hover:bg-lime-500/[0.07] hover:text-lime-300 focus-visible:ring-2 focus-visible:ring-lime-400/70"
                 }
               >
-                {page}
+                {
+                  page
+                }
               </Link>
             </span>
           );
@@ -407,16 +472,22 @@ function ClientHomePagination({
         <Link
           href={createPageHref({
             currentSearchParams,
+
             page:
-              pagination.page + 1,
+              pagination.page +
+              1,
           })}
           aria-label="Page suivante"
-          className="inline-flex h-11 items-center justify-center gap-2 rounded-xl border border-white/[0.09] bg-white/[0.025] px-4 text-xs font-black text-neutral-300 transition hover:border-lime-500/20 hover:bg-lime-500/[0.07] hover:text-lime-300"
+          className="inline-flex h-11 items-center justify-center gap-2 rounded-xl border border-white/[0.09] bg-white/[0.025] px-4 text-xs font-black text-neutral-300 outline-none transition hover:border-lime-500/20 hover:bg-lime-500/[0.07] hover:text-lime-300 focus-visible:ring-2 focus-visible:ring-lime-400/70"
         >
           <span className="hidden sm:inline">
             Suivant
           </span>
-          <ChevronRight className="h-4 w-4" />
+
+          <ChevronRight
+            aria-hidden="true"
+            className="h-4 w-4"
+          />
         </Link>
       ) : (
         <span
@@ -426,6 +497,7 @@ function ClientHomePagination({
           <span className="hidden sm:inline">
             Suivant
           </span>
+
           <ChevronRight className="h-4 w-4" />
         </span>
       )}
@@ -483,23 +555,36 @@ export default async function HomePage({
   const homeData =
     await getClientHomeEvents({
       page,
+
       pageSize:
         HOME_PAGE_SIZE,
+
       featuredLimit:
         FEATURED_EVENTS_LIMIT,
 
       search:
-        search || null,
+        search ||
+        null,
+
       category:
-        category || null,
+        category ||
+        null,
+
       city:
-        city || null,
+        city ||
+        null,
+
       countryCode:
-        countryCode || null,
+        countryCode ||
+        null,
+
       dateFrom:
-        dateFrom || null,
+        dateFrom ||
+        null,
+
       dateTo:
-        dateTo || null,
+        dateTo ||
+        null,
 
       sort,
     });
@@ -516,6 +601,17 @@ export default async function HomePage({
           "soonest",
     );
 
+  const resultsCount =
+    Math.max(
+      homeData.pagination.totalItems,
+      0,
+    );
+
+  const plural =
+    resultsCount > 1
+      ? "s"
+      : "";
+
   return (
     <ClientLayout>
       <div className="min-h-screen bg-[#03070a] text-white">
@@ -523,17 +619,17 @@ export default async function HomePage({
           backgroundImage="/images/client/home/events-hero.png"
           backgroundImageAlt="Grande scène de concert avec un public enthousiaste"
           totalEvents={
-          homeData.totals
-            .publishedEvents
-        }
-        totalCities={
-          homeData.totals
-            .cities
-        }
-        totalCategories={
-          homeData.totals
-            .categories
-        }
+            homeData.totals
+              .publishedEvents
+          }
+          totalCities={
+            homeData.totals
+              .cities
+          }
+          totalCategories={
+            homeData.totals
+              .categories
+          }
           primaryActionHref="#client-home-filters"
           secondaryActionHref="/events"
         />
@@ -541,78 +637,62 @@ export default async function HomePage({
         <div className="relative z-10 mx-auto w-full max-w-[1600px] px-4 pb-28 sm:px-5 lg:px-8 lg:pb-16">
           <div
             id="client-home-filters"
-          className="-mt-1 scroll-mt-28 sm:-mt-3 lg:-mt-7"
-        >
-          <ClientHomeFilters
-            filters={
-              homeData.filters
-            }
-            categories={
-              homeData.categories
-            }
-            cities={
-              homeData.cities
-            }
-            basePath="/"
-            className="shadow-[0_24px_80px_rgba(0,0,0,0.4)]"
-          />
-        </div>
+            className="-mt-1 scroll-mt-28 sm:-mt-3 lg:-mt-7"
+          >
+            <ClientHomeFilters
+              filters={
+                homeData.filters
+              }
+              categories={
+                homeData.categories
+              }
+              cities={
+                homeData.cities
+              }
+              basePath="/"
+              className="shadow-[0_24px_80px_rgba(0,0,0,0.4)]"
+            />
+          </div>
 
-        <div className="mt-9 sm:mt-11 lg:mt-14">
-          <ClientFeaturedEvents
-            events={
-              homeData.featuredEvents
-            }
-            viewAllHref="/events?featured=true"
-            description="Les événements sélectionnés et mis en avant sur Tikemia."
-            priorityCount={2}
-          />
-        </div>
+          <div className="mt-9 sm:mt-11 lg:mt-14">
+            <ClientFeaturedEvents
+              events={
+                homeData.featuredEvents
+              }
+              viewAllHref="/events?featured=true"
+              description="Les événements sélectionnés et mis en avant sur Tikemia."
+              priorityCount={
+                2
+              }
+            />
+          </div>
 
-        <div className="mt-10 sm:mt-12 lg:mt-16">
-          <ClientAllEvents
-            events={
-              homeData.events
-            }
-            pagination={
-              homeData.pagination
-            }
-            title={
-              hasActiveFilters
-                ? "Résultats de votre recherche"
-                : "Tous les événements"
-            }
-            description={
-              hasActiveFilters
-                ? `${homeData.pagination.totalItems.toLocaleString(
-                    "fr-FR",
-                  )} événement${
-                    homeData.pagination
-                      .totalItems >
-                    1
-                      ? "s"
-                      : ""
-                  } correspondant à vos critères.`
-                : `${homeData.pagination.totalItems.toLocaleString(
-                    "fr-FR",
-                  )} événement${
-                    homeData.pagination
-                      .totalItems >
-                    1
-                      ? "s"
-                      : ""
-                  } disponible${
-                    homeData.pagination
-                      .totalItems >
-                    1
-                      ? "s"
-                      : ""
-                  } sur Tikemia.`
-            }
-            initialView="grid"
-            emptyActionHref="/"
-            emptyActionLabel="Réinitialiser les filtres"
-          />
+          <div className="mt-10 sm:mt-12 lg:mt-16">
+            <ClientAllEvents
+              events={
+                homeData.events
+              }
+              pagination={
+                homeData.pagination
+              }
+              title={
+                hasActiveFilters
+                  ? "Résultats de votre recherche"
+                  : "Tous les événements"
+              }
+              description={
+                hasActiveFilters
+                  ? `${resultsCount.toLocaleString(
+                      "fr-FR",
+                    )} événement${plural} correspondant à vos critères.`
+                  : `${resultsCount.toLocaleString(
+                      "fr-FR",
+                    )} événement${plural} disponible${plural} sur Tikemia.`
+              }
+              initialView="grid"
+              emptyActionHref="/"
+              emptyActionLabel="Réinitialiser les filtres"
+            />
 
             <ClientHomePagination
               pagination={
