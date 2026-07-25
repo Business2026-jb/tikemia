@@ -44,6 +44,10 @@ export type ClientHeaderUser = {
 
 export type ClientHeaderProps = {
   user?: ClientHeaderUser | null;
+
+  loginHref?: string;
+  registerHref?: string;
+
   logoSrc?: string;
   supportEmail?: string;
   supportPhone?: string;
@@ -196,6 +200,10 @@ function isPathActive(
 
 export default function ClientHeader({
   user = null,
+
+  loginHref = "/login",
+  registerHref = "/register",
+
   logoSrc = "/logo.png",
   supportEmail = "contact@tikemia.com",
   supportPhone = "+229 01 69 56 77 44",
@@ -640,16 +648,12 @@ export default function ClientHeader({
               {accountOpen && (
                 <AccountDropdown
                   user={user}
-                  displayName={
-                    displayName
-                  }
+                  displayName={displayName}
                   initials={initials}
-                  isLoggingOut={
-                    isLoggingOut
-                  }
-                  onLogout={
-                    handleLogout
-                  }
+                  isLoggingOut={isLoggingOut}
+                  loginHref={loginHref}
+                  registerHref={registerHref}
+                  onLogout={handleLogout}
                 />
               )}
             </div>
@@ -699,7 +703,7 @@ export default function ClientHeader({
               href={
                 user
                   ? "/account/profile"
-                  : "/login"
+                  : loginHref
               }
               aria-label={
                 user
@@ -740,6 +744,8 @@ export default function ClientHeader({
         initials={initials}
         displayName={displayName}
         isLoggingOut={isLoggingOut}
+        loginHref={loginHref}
+        registerHref={registerHref}
         onClose={() =>
           setDrawerOpen(false)
         }
@@ -811,12 +817,16 @@ function AccountDropdown({
   displayName,
   initials,
   isLoggingOut,
+  loginHref,
+  registerHref,
   onLogout,
 }: {
   user?: ClientHeaderUser | null;
   displayName: string;
   initials: string;
   isLoggingOut: boolean;
+  loginHref: string;
+  registerHref: string;
   onLogout: () => void | Promise<void>;
 }) {
   return (
@@ -905,7 +915,7 @@ function AccountDropdown({
           </div>
 
           <Link
-            href="/login"
+            href={loginHref}
             className="mt-3 flex h-11 items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-emerald-500 via-lime-500 to-orange-500 text-sm font-black text-white"
           >
             <LogIn className="h-4 w-4" />
@@ -913,7 +923,7 @@ function AccountDropdown({
           </Link>
 
           <Link
-            href="/register"
+            href={registerHref}
             className="mt-2 flex h-11 items-center justify-center rounded-xl border border-white/[0.09] bg-white/[0.025] text-sm font-bold text-neutral-300 transition hover:bg-white/[0.05] hover:text-white"
           >
             Créer un compte
@@ -952,6 +962,8 @@ function MobileDrawer({
   initials,
   displayName,
   isLoggingOut,
+  loginHref,
+  registerHref,
   onClose,
   onLogout,
 }: {
@@ -962,6 +974,8 @@ function MobileDrawer({
   initials: string;
   displayName: string;
   isLoggingOut: boolean;
+  loginHref: string;
+  registerHref: string;
   onClose: () => void;
   onLogout: () => void | Promise<void>;
 }) {
@@ -1048,7 +1062,7 @@ function MobileDrawer({
           ) : (
             <div className="grid grid-cols-2 gap-2">
               <Link
-                href="/login"
+                href={loginHref}
                 onClick={onClose}
                 className="flex h-11 items-center justify-center rounded-xl bg-gradient-to-r from-emerald-500 via-lime-500 to-orange-500 text-sm font-black text-white"
               >
@@ -1056,7 +1070,7 @@ function MobileDrawer({
               </Link>
 
               <Link
-                href="/register"
+                href={registerHref}
                 onClick={onClose}
                 className="flex h-11 items-center justify-center rounded-xl border border-white/[0.09] bg-white/[0.025] text-sm font-bold text-neutral-300"
               >
