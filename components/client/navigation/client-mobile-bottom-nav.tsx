@@ -63,6 +63,19 @@ function cn(
     .join(" ");
 }
 
+function normalizePath(
+  value: string,
+): string {
+  const pathname =
+    value.split("?")[0]?.trim() || "/";
+
+  if (pathname === "/") {
+    return "/";
+  }
+
+  return pathname.replace(/\/+$/, "");
+}
+
 function isPathActive({
   pathname,
   href,
@@ -70,17 +83,20 @@ function isPathActive({
   pathname: string;
   href: string;
 }): boolean {
-  const cleanHref =
-    href.split("?")[0];
+  const currentPath =
+    normalizePath(pathname);
 
-  if (cleanHref === "/") {
-    return pathname === "/";
+  const targetPath =
+    normalizePath(href);
+
+  if (targetPath === "/") {
+    return currentPath === "/";
   }
 
   return (
-    pathname === cleanHref ||
-    pathname.startsWith(
-      `${cleanHref}/`,
+    currentPath === targetPath ||
+    currentPath.startsWith(
+      `${targetPath}/`,
     )
   );
 }
@@ -100,7 +116,12 @@ function createProtectedHref({
     requiresAuthentication &&
     !user
   ) {
-    return `${loginHref}?redirect=${encodeURIComponent(
+    const separator =
+      loginHref.includes("?")
+        ? "&"
+        : "?";
+
+    return `${loginHref}${separator}redirect=${encodeURIComponent(
       href,
     )}`;
   }
@@ -108,59 +129,62 @@ function createProtectedHref({
   return href;
 }
 
-function renderNavigationIcon(
-  icon: NavigationIconName,
-  active: boolean,
-) {
-  const className = cn(
-    "h-[19px] w-[19px] transition",
-    active
-      ? "text-lime-400"
-      : "text-neutral-500",
-  );
-
-  if (icon === "home") {
-    return (
-      <Home
-        aria-hidden="true"
-        className={className}
-      />
+function renderNavigationIcon({
+  icon,
+  active,
+}: {
+  icon: NavigationIconName;
+  active: boolean;
+}) {
+  const className =
+    cn(
+      "h-[19px] w-[19px] transition duration-200",
+      active
+        ? "text-lime-400"
+        : "text-neutral-500 group-hover:text-neutral-300",
     );
-  }
 
-  if (icon === "search") {
-    return (
-      <Search
-        aria-hidden="true"
-        className={className}
-      />
-    );
-  }
+  switch (icon) {
+    case "home":
+      return (
+        <Home
+          aria-hidden="true"
+          className={className}
+        />
+      );
 
-  if (icon === "heart") {
-    return (
-      <Heart
-        aria-hidden="true"
-        className={className}
-      />
-    );
-  }
+    case "search":
+      return (
+        <Search
+          aria-hidden="true"
+          className={className}
+        />
+      );
 
-  if (icon === "ticket") {
-    return (
-      <Ticket
-        aria-hidden="true"
-        className={className}
-      />
-    );
-  }
+    case "heart":
+      return (
+        <Heart
+          aria-hidden="true"
+          className={className}
+        />
+      );
 
-  return (
-    <User
-      aria-hidden="true"
-      className={className}
-    />
-  );
+    case "ticket":
+      return (
+        <Ticket
+          aria-hidden="true"
+          className={className}
+        />
+      );
+
+    default:
+      return (
+        <User
+          aria-hidden="true"
+          className={className}
+        />
+      );
+  }
 }
 
 export default function ClientMobileBottomNav({
@@ -179,15 +203,26 @@ export default function ClientMobileBottomNav({
 
   className,
 }: ClientMobileBottomNavProps) {
-  const pathname = usePathname();
+  const pathname =
+    usePathname();
 
   const shouldHide =
     hiddenPathPrefixes.some(
-      (prefix) =>
-        pathname === prefix ||
-        pathname.startsWith(
-          `${prefix}/`,
-        ),
+      (prefix) => {
+        const normalizedPrefix =
+          normalizePath(prefix);
+
+        const normalizedPath =
+          normalizePath(pathname);
+
+        return (
+          normalizedPath ===
+            normalizedPrefix ||
+          normalizedPath.startsWith(
+            `${normalizedPrefix}/`,
+          )
+        );
+      },
     );
 
   if (shouldHide) {
@@ -196,39 +231,76 @@ export default function ClientMobileBottomNav({
 
   const navigationItems: NavigationItem[] = [
     {
-      id: "home",
-      label: "Accueil",
-      href: homeHref,
-      icon: "home",
+      id:
+        "home",
+
+      label:
+        "Accueil",
+
+      href:
+        homeHref,
+
+      icon:
+        "home",
     },
     {
-      id: "explore",
-      label: "Explorer",
-      href: exploreHref,
-      icon: "search",
+      id:
+        "explore",
+
+      label:
+        "Explorer",
+
+      href:
+        exploreHref,
+
+      icon:
+        "search",
     },
     {
-      id: "favorites",
-      label: "Favoris",
-      href: favoritesHref,
-      icon: "heart",
+      id:
+        "favorites",
+
+      label:
+        "Favoris",
+
+      href:
+        favoritesHref,
+
+      icon:
+        "heart",
     },
     {
-      id: "tickets",
-      label: "Billets",
-      href: ticketsHref,
-      icon: "ticket",
-      requiresAuthentication: true,
+      id:
+        "tickets",
+
+      label:
+        "Billets",
+
+      href:
+        ticketsHref,
+
+      icon:
+        "ticket",
+
+      requiresAuthentication:
+        true,
     },
     {
-      id: "account",
-      label: user
-        ? "Compte"
-        : "Connexion",
-      href: user
-        ? accountHref
-        : loginHref,
-      icon: "user",
+      id:
+        "account",
+
+      label:
+        user
+          ? "Compte"
+          : "Connexion",
+
+      href:
+        user
+          ? accountHref
+          : loginHref,
+
+      icon:
+        "user",
     },
   ];
 
@@ -236,7 +308,8 @@ export default function ClientMobileBottomNav({
     <nav
       aria-label="Navigation mobile principale"
       className={cn(
-        "fixed inset-x-0 bottom-0 z-50 border-t border-white/[0.09] bg-[#03070a]/95 px-2 pb-[max(8px,env(safe-area-inset-bottom))] pt-2 shadow-[0_-14px_45px_rgba(0,0,0,0.38)] backdrop-blur-2xl supports-[backdrop-filter]:bg-[#03070a]/82 lg:hidden",
+        "fixed inset-x-0 bottom-0 z-[70] border-t border-white/[0.09] bg-[#03070a]/95 px-2 pt-2 shadow-[0_-14px_45px_rgba(0,0,0,0.38)] backdrop-blur-2xl supports-[backdrop-filter]:bg-[#03070a]/84 lg:hidden",
+        "pb-[max(8px,env(safe-area-inset-bottom))]",
         className,
       )}
     >
@@ -246,31 +319,44 @@ export default function ClientMobileBottomNav({
             const active =
               isPathActive({
                 pathname,
+
                 href:
                   item.href,
               });
 
-            const href =
+            const resolvedHref =
               createProtectedHref({
                 href:
                   item.href,
+
                 requiresAuthentication:
                   item.requiresAuthentication,
+
                 user,
+
                 loginHref,
               });
 
             return (
               <Link
-                key={item.id}
-                href={href}
+                key={
+                  item.id
+                }
+                href={
+                  resolvedHref
+                }
                 aria-current={
                   active
                     ? "page"
                     : undefined
                 }
+                aria-label={
+                  item.label
+                }
                 className={cn(
-                  "group relative flex min-w-0 flex-col items-center justify-center gap-1 rounded-xl px-1 py-2 text-center transition active:scale-95",
+                  "group relative flex min-w-0 flex-col items-center justify-center gap-1 rounded-xl px-1 py-2 text-center outline-none transition duration-200",
+                  "focus-visible:ring-2 focus-visible:ring-lime-400/70 focus-visible:ring-offset-2 focus-visible:ring-offset-[#03070a]",
+                  "active:scale-95",
                   active
                     ? "bg-emerald-500/[0.08]"
                     : "hover:bg-white/[0.035]",
@@ -285,27 +371,31 @@ export default function ClientMobileBottomNav({
 
                 <span
                   className={cn(
-                    "flex h-8 w-8 items-center justify-center rounded-xl border transition",
+                    "flex h-8 w-8 items-center justify-center rounded-xl border transition duration-200",
                     active
                       ? "border-emerald-500/20 bg-emerald-500/[0.09]"
                       : "border-transparent bg-transparent group-hover:border-white/[0.06] group-hover:bg-white/[0.025]",
                   )}
                 >
-                  {renderNavigationIcon(
-                    item.icon,
+                  {renderNavigationIcon({
+                    icon:
+                      item.icon,
+
                     active,
-                  )}
+                  })}
                 </span>
 
                 <span
                   className={cn(
-                    "max-w-full truncate text-[10px] font-bold transition",
+                    "max-w-full truncate text-[10px] font-bold transition duration-200",
                     active
                       ? "text-emerald-300"
                       : "text-neutral-600 group-hover:text-neutral-300",
                   )}
                 >
-                  {item.label}
+                  {
+                    item.label
+                  }
                 </span>
               </Link>
             );
