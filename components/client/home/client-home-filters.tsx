@@ -32,10 +32,8 @@ export type ClientHomeFiltersProps = {
   cities: ClientHomeCityOption[];
 
   className?: string;
-
   searchPlaceholder?: string;
   basePath?: string;
-
   showAdvancedFilters?: boolean;
 };
 
@@ -129,14 +127,11 @@ function createFilterStateKey(
 export default function ClientHomeFilters(
   props: ClientHomeFiltersProps,
 ) {
-  const stateKey =
-    createFilterStateKey(
-      props.filters,
-    );
-
   return (
     <ClientHomeFiltersContent
-      key={stateKey}
+      key={createFilterStateKey(
+        props.filters,
+      )}
       {...props}
     />
   );
@@ -382,26 +377,29 @@ function ClientHomeFiltersContent({
     <section
       aria-labelledby="client-home-filters-title"
       className={cn(
-        "w-full min-w-0 rounded-3xl border border-white/[0.08] bg-[#071014]/95 shadow-[0_18px_60px_rgba(0,0,0,0.24)] backdrop-blur-xl",
+        "w-full min-w-0 overflow-hidden rounded-3xl border border-white/[0.08] bg-[#071014]/96 shadow-[0_18px_60px_rgba(0,0,0,0.24)] backdrop-blur-xl",
         className,
       )}
     >
       <div className="flex flex-col gap-3 border-b border-white/[0.07] px-4 py-4 sm:px-5 lg:flex-row lg:items-center lg:justify-between xl:px-6">
         <div className="min-w-0">
-          <div className="flex flex-wrap items-center gap-2">
-            <span className="flex h-9 w-9 items-center justify-center rounded-xl border border-lime-500/20 bg-lime-500/[0.07] text-lime-300">
-              <SlidersHorizontal className="h-4 w-4" />
+          <div className="flex min-w-0 items-center gap-3">
+            <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-lime-500/20 bg-lime-500/[0.07] text-lime-300">
+              <SlidersHorizontal
+                aria-hidden="true"
+                className="h-4 w-4"
+              />
             </span>
 
-            <div>
+            <div className="min-w-0">
               <h2
                 id="client-home-filters-title"
-                className="text-base font-black text-white sm:text-lg"
+                className="truncate text-base font-black text-white sm:text-lg"
               >
                 Rechercher et filtrer
               </h2>
 
-              <p className="mt-1 text-xs leading-5 text-neutral-600">
+              <p className="mt-1 line-clamp-2 text-xs leading-5 text-neutral-600">
                 Trouvez rapidement l’événement qui vous correspond.
               </p>
             </div>
@@ -429,10 +427,15 @@ function ClientHomeFiltersContent({
             0 && (
             <button
               type="button"
-              onClick={resetFilters}
-              className="inline-flex h-9 items-center justify-center gap-2 rounded-xl border border-red-500/20 bg-red-500/[0.06] px-3 text-xs font-bold text-red-400 transition hover:bg-red-500/[0.1]"
+              onClick={
+                resetFilters
+              }
+              className="inline-flex h-9 items-center justify-center gap-2 rounded-xl border border-red-500/20 bg-red-500/[0.06] px-3 text-xs font-bold text-red-400 transition hover:bg-red-500/[0.1] active:scale-95"
             >
-              <X className="h-4 w-4" />
+              <X
+                aria-hidden="true"
+                className="h-4 w-4"
+              />
               Réinitialiser
             </button>
           )}
@@ -450,7 +453,10 @@ function ClientHomeFiltersContent({
           }}
           className="relative min-w-0 md:col-span-2 xl:col-span-1"
         >
-          <Search className="pointer-events-none absolute left-4 top-1/2 h-5 w-5 -translate-y-1/2 text-neutral-500" />
+          <Search
+            aria-hidden="true"
+            className="pointer-events-none absolute left-4 top-1/2 h-5 w-5 -translate-y-1/2 text-neutral-500"
+          />
 
           <input
             value={
@@ -479,9 +485,12 @@ function ClientHomeFiltersContent({
           <button
             type="submit"
             aria-label="Lancer la recherche"
-            className="absolute right-1.5 top-1/2 flex h-9 w-9 -translate-y-1/2 items-center justify-center rounded-lg bg-lime-500/10 text-lime-300 transition hover:bg-lime-500/20"
+            className="absolute right-1.5 top-1/2 flex h-9 w-9 -translate-y-1/2 items-center justify-center rounded-lg bg-lime-500/10 text-lime-300 transition hover:bg-lime-500/20 active:scale-95"
           >
-            <Search className="h-4 w-4" />
+            <Search
+              aria-hidden="true"
+              className="h-4 w-4"
+            />
           </button>
         </form>
 
@@ -491,7 +500,10 @@ function ClientHomeFiltersContent({
           </span>
 
           <div className="relative">
-            <Filter className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-neutral-600" />
+            <Filter
+              aria-hidden="true"
+              className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-neutral-600"
+            />
 
             <select
               value={
@@ -539,7 +551,10 @@ function ClientHomeFiltersContent({
               )}
             </select>
 
-            <ChevronDown className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-neutral-600" />
+            <ChevronDown
+              aria-hidden="true"
+              className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-neutral-600"
+            />
           </div>
         </label>
 
@@ -549,7 +564,10 @@ function ClientHomeFiltersContent({
           </span>
 
           <div className="relative">
-            <MapPin className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-neutral-600" />
+            <MapPin
+              aria-hidden="true"
+              className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-neutral-600"
+            />
 
             <select
               value={
@@ -609,7 +627,10 @@ function ClientHomeFiltersContent({
               )}
             </select>
 
-            <ChevronDown className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-neutral-600" />
+            <ChevronDown
+              aria-hidden="true"
+              className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-neutral-600"
+            />
           </div>
         </label>
 
@@ -619,7 +640,10 @@ function ClientHomeFiltersContent({
           </span>
 
           <div className="relative">
-            <CalendarDays className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-neutral-600" />
+            <CalendarDays
+              aria-hidden="true"
+              className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-neutral-600"
+            />
 
             <select
               value={
@@ -656,7 +680,10 @@ function ClientHomeFiltersContent({
               )}
             </select>
 
-            <ChevronDown className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-neutral-600" />
+            <ChevronDown
+              aria-hidden="true"
+              className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-neutral-600"
+            />
           </div>
         </label>
 
@@ -675,13 +702,16 @@ function ClientHomeFiltersContent({
               advancedOpen
             }
             className={cn(
-              "inline-flex h-12 items-center justify-center gap-2 rounded-xl border px-4 text-sm font-black transition",
+              "inline-flex h-12 items-center justify-center gap-2 rounded-xl border px-4 text-sm font-black transition active:scale-[0.99]",
               advancedOpen
                 ? "border-orange-500/30 bg-orange-500/[0.09] text-orange-300"
                 : "border-white/[0.1] bg-white/[0.025] text-neutral-300 hover:border-white/[0.15] hover:bg-white/[0.05] hover:text-white",
             )}
           >
-            <SlidersHorizontal className="h-4 w-4" />
+            <SlidersHorizontal
+              aria-hidden="true"
+              className="h-4 w-4"
+            />
             Filtres
           </button>
         )}
@@ -753,7 +783,7 @@ function ClientHomeFiltersContent({
                         dateTo,
                   )
                 }
-                className="inline-flex h-11 w-full items-center justify-center rounded-xl border border-lime-500/25 bg-lime-500/[0.08] px-4 text-sm font-black text-lime-300 transition hover:bg-lime-500/[0.13] disabled:cursor-not-allowed disabled:opacity-40 md:w-auto"
+                className="inline-flex h-11 w-full items-center justify-center rounded-xl border border-lime-500/25 bg-lime-500/[0.08] px-4 text-sm font-black text-lime-300 transition hover:bg-lime-500/[0.13] active:scale-[0.99] disabled:cursor-not-allowed disabled:opacity-40 md:w-auto"
               >
                 Appliquer
               </button>
@@ -792,7 +822,7 @@ function ClientHomeFiltersContent({
             })
           }
           className={cn(
-            "shrink-0 rounded-full border px-3 py-2 text-xs font-bold transition",
+            "shrink-0 rounded-full border px-3 py-2 text-xs font-bold transition active:scale-95",
             !filters.category
               ? "border-lime-500/25 bg-lime-500/[0.09] text-lime-300"
               : "border-white/[0.08] bg-white/[0.025] text-neutral-500 hover:text-white",
@@ -829,7 +859,7 @@ function ClientHomeFiltersContent({
                     })
                   }
                   className={cn(
-                    "shrink-0 rounded-full border px-3 py-2 text-xs font-bold transition",
+                    "shrink-0 rounded-full border px-3 py-2 text-xs font-bold transition active:scale-95",
                     active
                       ? "border-lime-500/25 bg-lime-500/[0.09] text-lime-300"
                       : "border-white/[0.08] bg-white/[0.025] text-neutral-500 hover:border-white/[0.14] hover:text-white",
