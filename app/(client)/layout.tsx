@@ -1,7 +1,19 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import type { ReactNode } from "react";
 
+import ClientFooter from "@/components/client/footer/client-footer";
+import ClientHeader from "@/components/client/header/client-header";
+import ClientMobileBottomNav from "@/components/client/navigation/client-mobile-bottom-nav";
+import { getClientHeaderData } from "@/lib/client/get-client-header-data";
+
+const APP_URL =
+  process.env.NEXT_PUBLIC_APP_URL?.trim() ||
+  process.env.APP_URL?.trim() ||
+  "https://tikemia.com";
+
 export const metadata: Metadata = {
+  metadataBase: new URL(APP_URL),
+
   title: {
     default: "Tikemia — Billetterie en ligne",
     template: "%s | Tikemia",
@@ -25,20 +37,10 @@ export const metadata: Metadata = {
     "Afrique",
   ],
 
-  authors: [
-    {
-      name: "Tikemia",
-    },
-  ],
-
+  authors: [{ name: "Tikemia" }],
   creator: "Tikemia",
   publisher: "Tikemia",
-
-  metadataBase: new URL(
-    process.env.NEXT_PUBLIC_APP_URL?.trim() ||
-      process.env.APP_URL?.trim() ||
-      "https://tikemia.com",
-  ),
+  category: "Billetterie et événements",
 
   alternates: {
     canonical: "/",
@@ -52,6 +54,14 @@ export const metadata: Metadata = {
     title: "Tikemia — Billetterie en ligne",
     description:
       "Découvrez et achetez vos billets pour les meilleurs événements sur Tikemia.",
+    images: [
+      {
+        url: "/imageclient.png",
+        width: 1536,
+        height: 1024,
+        alt: "Tikemia — Réservez vos billets pour les meilleurs événements",
+      },
+    ],
   },
 
   twitter: {
@@ -59,6 +69,12 @@ export const metadata: Metadata = {
     title: "Tikemia — Billetterie en ligne",
     description:
       "Découvrez et achetez vos billets pour les meilleurs événements sur Tikemia.",
+    images: [
+      {
+        url: "/imageclient.png",
+        alt: "Tikemia — Réservez vos billets pour les meilleurs événements",
+      },
+    ],
   },
 
   robots: {
@@ -73,93 +89,75 @@ export const metadata: Metadata = {
       "max-video-preview": -1,
     },
   },
-
-  category: "Billetterie et événements",
 };
 
-export const viewport = {
+export const viewport: Viewport = {
   width: "device-width",
   initialScale: 1,
   maximumScale: 5,
   viewportFit: "cover",
   themeColor: "#03070a",
+  colorScheme: "dark",
 };
 
 type ClientLayoutProps = Readonly<{
   children: ReactNode;
 }>;
 
-export default function ClientLayout({
+export default async function ClientLayout({
   children,
 }: ClientLayoutProps) {
+  const headerData = await getClientHeaderData();
+
   return (
     <div className="relative min-h-dvh overflow-x-clip bg-[#03070a] text-white">
-      {/*
-        Le lien d’évitement améliore l’accessibilité au clavier.
-        Il permet d’aller directement au contenu principal.
-      */}
       <a
         href="#client-main-content"
-        className="sr-only fixed left-4 top-4 z-[100] rounded-lg bg-lime-400 px-4 py-2 text-sm font-black text-black focus:not-sr-only"
+        className="sr-only fixed left-4 top-4 z-[200] rounded-xl bg-lime-400 px-4 py-2.5 text-sm font-black text-black shadow-xl focus:not-sr-only focus:outline-none focus:ring-2 focus:ring-white"
       >
         Aller au contenu principal
       </a>
 
-      {/*
-        Décoration globale légère.
-        Elle respecte l’identité sombre et premium de Tikemia
-        sans bloquer les interactions.
-      */}
       <div
         aria-hidden="true"
         className="pointer-events-none fixed inset-0 z-0 overflow-hidden"
       >
         <div className="absolute -left-40 -top-40 h-[420px] w-[420px] rounded-full bg-emerald-500/[0.045] blur-[120px]" />
-
         <div className="absolute -right-48 top-[18%] h-[430px] w-[430px] rounded-full bg-orange-500/[0.035] blur-[130px]" />
-
         <div className="absolute bottom-[-220px] left-1/2 h-[460px] w-[720px] -translate-x-1/2 rounded-full bg-red-500/[0.025] blur-[150px]" />
       </div>
 
-      {/*
-        Le header client global sera ajouté ici à l’étape suivante :
-
-        <ClientHeader />
-
-        Il restera identique pour :
-        - les visiteurs invités ;
-        - les clients connectés ;
-        - les pages d’achat ;
-        - les pages du compte client.
-
-        Seules les actions du compte changeront selon la session.
-      */}
-
       <div className="relative z-10 flex min-h-dvh w-full flex-col">
-        <div
+        <ClientHeader user={headerData.user} />
+
+        <main
           id="client-main-content"
-          className="min-w-0 flex-1"
+          tabIndex={-1}
+          className="min-w-0 flex-1 outline-none"
         >
           {children}
-        </div>
+        </main>
 
-        {/*
-          Le footer client global sera ajouté ici :
-
+        <div className="pb-[calc(88px+env(safe-area-inset-bottom))] lg:pb-0">
           <ClientFooter />
-
-          Il sera unique sur toute l’expérience client.
-          Aucun lien organisateur ne sera ajouté.
-        */}
+        </div>
       </div>
 
-      {/*
-        La navigation inférieure mobile sera ajoutée ici :
-
-        <ClientMobileBottomNavigation />
-
-        Elle sera principalement visible en mode mobile/PWA.
-      */}
+      <ClientMobileBottomNav
+        user={
+          headerData.user
+            ? {
+                id: headerData.user.id,
+              }
+            : null
+        }
+        homeHref="/"
+        exploreHref="/events"
+        favoritesHref={headerData.favoritesHref}
+        ticketsHref={headerData.ticketsHref}
+        accountHref={headerData.profileHref}
+        loginHref={headerData.loginHref}
+      />
     </div>
   );
 }
