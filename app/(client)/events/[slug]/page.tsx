@@ -7,7 +7,9 @@ import { getClientEventDetail } from "@/lib/client/get-client-event-detail";
 export const dynamic = "force-dynamic";
 
 type ClientEventDetailPageProps = {
-  params: Promise<{ slug: string }>;
+  params: Promise<{
+    slug: string;
+  }>;
 };
 
 export async function generateMetadata({
@@ -15,12 +17,15 @@ export async function generateMetadata({
 }: ClientEventDetailPageProps): Promise<Metadata> {
   const { slug } = await params;
 
-  const result = await getClientEventDetail({ slug }).catch(() => null);
+  const result = await getClientEventDetail({
+    slug,
+  }).catch(() => null);
 
   if (!result) {
     return {
       title: "Événement introuvable",
-      description: "Cet événement n’est pas disponible sur Tikemia.",
+      description:
+        "Cet événement n’est pas disponible sur Tikemia.",
       robots: {
         index: false,
         follow: false,
@@ -29,17 +34,27 @@ export async function generateMetadata({
   }
 
   const { event } = result;
+
   const description =
     event.shortDescription ||
-    event.description.replace(/\s+/g, " ").trim().slice(0, 180);
-  const socialImage = event.coverImage || "/imageclient.png";
+    event.description
+      .replace(/\s+/g, " ")
+      .trim()
+      .slice(0, 180);
+
+  const socialImage =
+    event.coverImage ||
+    "/imageclient.png";
 
   return {
     title: event.title,
+
     description,
+
     alternates: {
       canonical: `/events/${event.slug}`,
     },
+
     openGraph: {
       type: "website",
       locale: "fr_FR",
@@ -54,6 +69,7 @@ export async function generateMetadata({
         },
       ],
     },
+
     twitter: {
       card: "summary_large_image",
       title: event.title,
@@ -73,11 +89,18 @@ export default async function ClientEventDetailPage({
 }: ClientEventDetailPageProps) {
   const { slug } = await params;
 
-  const result = await getClientEventDetail({ slug }).catch(() => null);
+  const result =
+    await getClientEventDetail({
+      slug,
+    }).catch(() => null);
 
   if (!result) {
     notFound();
   }
 
-  return <ClientEventDetailCheckout event={result.event} />;
+  return (
+    <ClientEventDetailCheckout
+      event={result.event}
+    />
+  );
 }
