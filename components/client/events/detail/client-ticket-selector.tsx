@@ -102,7 +102,7 @@ function formatMoney({
 
 function getSaleStatusLabel(
   ticketType: ClientEventDetailTicketType,
-): string {
+): string | null {
   switch (
     ticketType.saleStatus
   ) {
@@ -119,23 +119,11 @@ function getSaleStatusLabel(
       return "Indisponible";
 
     default:
-      return ticketType.availableTickets <= 10
-        ? `${ticketType.availableTickets} place${
-            ticketType.availableTickets > 1
-              ? "s"
-              : ""
-          } restante${
-            ticketType.availableTickets > 1
-              ? "s"
-              : ""
-          }`
-        : `${ticketType.availableTickets.toLocaleString(
-            "fr-FR",
-          )} disponible${
-            ticketType.availableTickets > 1
-              ? "s"
-              : ""
-          }`;
+      /*
+       * Le stock réel reste utilisé pour limiter les quantités,
+       * mais aucun nombre de billets disponible n’est affiché.
+       */
+      return null;
   }
 }
 
@@ -156,9 +144,7 @@ function getSaleStatusClassName(
       return "border-red-500/20 bg-red-500/[0.07] text-red-400";
 
     default:
-      return ticketType.availableTickets <= 10
-        ? "border-orange-500/20 bg-orange-500/[0.07] text-orange-300"
-        : "border-lime-500/20 bg-lime-500/[0.07] text-lime-300";
+      return "";
   }
 }
 
@@ -318,6 +304,11 @@ export default function ClientTicketSelector({
                 quantity <
                   maximumAllowed;
 
+              const saleStatusLabel =
+                getSaleStatusLabel(
+                  ticketType,
+                );
+
               return (
                 <article
                   key={
@@ -340,20 +331,20 @@ export default function ClientTicketSelector({
                           }
                         </h3>
 
-                        <span
-                          className={cn(
-                            "inline-flex rounded-full border px-2.5 py-1 text-[10px] font-black",
-                            getSaleStatusClassName(
-                              ticketType,
-                            ),
-                          )}
-                        >
-                          {
-                            getSaleStatusLabel(
-                              ticketType,
-                            )
-                          }
-                        </span>
+                        {saleStatusLabel && (
+                          <span
+                            className={cn(
+                              "inline-flex rounded-full border px-2.5 py-1 text-[10px] font-black",
+                              getSaleStatusClassName(
+                                ticketType,
+                              ),
+                            )}
+                          >
+                            {
+                              saleStatusLabel
+                            }
+                          </span>
+                        )}
                       </div>
 
                       {ticketType.description && (

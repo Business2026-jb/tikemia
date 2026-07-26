@@ -185,7 +185,7 @@ function getAvailabilityLabel(
 ): {
   label: string;
   className: string;
-} {
+} | null {
   if (
     event.availability.soldOut
   ) {
@@ -213,36 +213,11 @@ function getAvailabilityLabel(
     };
   }
 
-  if (
-    event.availability.availableTickets <=
-    10
-  ) {
-    return {
-      label:
-        `${event.availability.availableTickets} place${
-          event.availability.availableTickets > 1
-            ? "s"
-            : ""
-        } restante${
-          event.availability.availableTickets > 1
-            ? "s"
-            : ""
-        }`,
-
-      className:
-        "border-orange-500/20 bg-orange-500/[0.08] text-orange-300",
-    };
-  }
-
-  return {
-    label:
-      `${event.availability.availableTickets.toLocaleString(
-        "fr-FR",
-      )} places disponibles`,
-
-    className:
-      "border-lime-500/20 bg-lime-500/[0.08] text-lime-300",
-  };
+  /*
+   * Le stock reste utilisé par la logique d’achat, mais le nombre de
+   * places disponibles n’est plus affiché publiquement dans le résumé.
+   */
+  return null;
 }
 
 export default function ClientEventSummary({
@@ -307,7 +282,8 @@ export default function ClientEventSummary({
           </span>
         )}
 
-        {showAvailability && (
+        {showAvailability &&
+          availability && (
           <span
             className={cn(
               "inline-flex rounded-full border px-3 py-1.5 text-[10px] font-black",
