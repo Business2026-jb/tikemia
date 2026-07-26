@@ -1,7 +1,7 @@
 import type { Metadata, Viewport } from "next";
 import type { ReactNode } from "react";
 
-import ClientFooter from "@/components/client/footer/client-footer";
+import ClientConditionalFooter from "@/components/client/footer/client-conditional-footer";
 import ClientHeader from "@/components/client/header/client-header";
 import ClientMobileBottomNav from "@/components/client/navigation/client-mobile-bottom-nav";
 import { getClientHeaderData } from "@/lib/client/get-client-header-data";
@@ -138,9 +138,7 @@ export default async function ClientLayout({
           {children}
         </main>
 
-        <div className="pb-[calc(88px+env(safe-area-inset-bottom))] lg:pb-0">
-          <ClientFooter />
-        </div>
+        <ClientConditionalFooter />
       </div>
 
       <ClientMobileBottomNav
