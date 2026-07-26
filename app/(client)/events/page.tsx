@@ -568,13 +568,32 @@ export default async function ClientEventsPage({
       sort,
     });
 
+  const hasFeaturedEvents =
+    eventsData.featuredEvents.length >
+    0;
+
+  const highlightedEvents =
+    hasFeaturedEvents
+      ? eventsData.featuredEvents
+      : eventsData.events.slice(
+          0,
+          FEATURED_EVENTS_LIMIT,
+        );
+
   const displayedEvents =
     featuredOnly
-      ? eventsData.events.filter(
-          (
-            event,
-          ) =>
-            event.isFeatured,
+      ? (
+          hasFeaturedEvents
+            ? eventsData.events.filter(
+                (
+                  event,
+                ) =>
+                  event.isFeatured,
+              )
+            : eventsData.events.slice(
+                0,
+                FEATURED_EVENTS_LIMIT,
+              )
         )
       : eventsData.events;
 
@@ -649,20 +668,30 @@ export default async function ClientEventsPage({
           />
         </div>
 
-        {!featuredOnly && (
-          <div className="mt-9 sm:mt-11 lg:mt-14">
-            <ClientFeaturedEvents
-              events={
-                eventsData.featuredEvents
-              }
-              viewAllHref="/events?featured=true"
-              description="Les événements sélectionnés et mis en avant sur Tikemia."
-              priorityCount={
-                2
-              }
-            />
-          </div>
-        )}
+        {!featuredOnly &&
+          highlightedEvents.length >
+            0 && (
+            <div className="mt-9 sm:mt-11 lg:mt-14">
+              <ClientFeaturedEvents
+                events={
+                  highlightedEvents
+                }
+                viewAllHref={
+                  hasFeaturedEvents
+                    ? "/events?featured=true"
+                    : "/events"
+                }
+                description={
+                  hasFeaturedEvents
+                    ? "Découvrez les événements sélectionnés et mis en avant sur Tikemia."
+                    : "Découvrez les événements disponibles prochainement sur Tikemia."
+                }
+                priorityCount={
+                  2
+                }
+              />
+            </div>
+          )}
 
         <div className="mt-10 sm:mt-12 lg:mt-16">
           <ClientAllEvents
@@ -674,16 +703,26 @@ export default async function ClientEventsPage({
             }
             title={
               featuredOnly
-                ? "Événements à la une"
+                ? (
+                    hasFeaturedEvents
+                      ? "Événements à la une"
+                      : "Événements disponibles"
+                  )
                 : hasActiveFilters
                   ? "Résultats de votre recherche"
                   : "Tous les événements"
             }
             description={
               featuredOnly
-                ? `${resultsCount.toLocaleString(
-                    "fr-FR",
-                  )} événement${plural} mis en avant sur Tikemia.`
+                ? (
+                    hasFeaturedEvents
+                      ? `${resultsCount.toLocaleString(
+                          "fr-FR",
+                        )} événement${plural} mis en avant sur Tikemia.`
+                      : `${resultsCount.toLocaleString(
+                          "fr-FR",
+                        )} événement${plural} disponible${plural} sur Tikemia.`
+                  )
                 : hasActiveFilters
                   ? `${resultsCount.toLocaleString(
                       "fr-FR",
