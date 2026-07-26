@@ -589,6 +589,18 @@ export default async function HomePage({
       sort,
     });
 
+  const hasFeaturedEvents =
+    homeData.featuredEvents.length >
+    0;
+
+  const highlightedEvents =
+    hasFeaturedEvents
+      ? homeData.featuredEvents
+      : homeData.events.slice(
+          0,
+          FEATURED_EVENTS_LIMIT,
+        );
+
   const hasActiveFilters =
     Boolean(
       search ||
@@ -654,18 +666,28 @@ export default async function HomePage({
             />
           </div>
 
-          <div className="mt-9 sm:mt-11 lg:mt-14">
-            <ClientFeaturedEvents
-              events={
-                homeData.featuredEvents
-              }
-              viewAllHref="/events?featured=true"
-              description="Les événements sélectionnés et mis en avant sur Tikemia."
-              priorityCount={
-                2
-              }
-            />
-          </div>
+          {highlightedEvents.length > 0 && (
+            <div className="mt-9 sm:mt-11 lg:mt-14">
+              <ClientFeaturedEvents
+                events={
+                  highlightedEvents
+                }
+                viewAllHref={
+                  hasFeaturedEvents
+                    ? "/events?featured=true"
+                    : "/events"
+                }
+                description={
+                  hasFeaturedEvents
+                    ? "Découvrez les événements sélectionnés et mis en avant sur Tikemia."
+                    : "Découvrez les événements disponibles prochainement sur Tikemia."
+                }
+                priorityCount={
+                  2
+                }
+              />
+            </div>
+          )}
 
           <div className="mt-10 sm:mt-12 lg:mt-16">
             <ClientAllEvents
