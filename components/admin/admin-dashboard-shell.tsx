@@ -17,7 +17,7 @@ export default function AdminDashboardShell({
     useState(false);
 
   return (
-    <div className="min-h-screen bg-slate-100">
+    <div className="min-h-screen bg-[#02070b] text-white">
       <AdminSidebar />
 
       <AdminMobileMenu
@@ -25,13 +25,14 @@ export default function AdminDashboardShell({
         onClose={() => setMobileMenuOpen(false)}
       />
 
-      <div className="min-h-screen lg:pl-72">
-        <header className="fixed inset-x-0 top-0 z-30 flex h-16 items-center border-b border-slate-200 bg-white px-4 lg:hidden">
+      <div className="min-h-screen min-w-0 bg-[#02070b] lg:pl-72">
+        <header className="fixed inset-x-0 top-0 z-30 flex h-16 items-center border-b border-white/[0.07] bg-[#03090e]/95 px-4 shadow-[0_10px_35px_rgba(0,0,0,0.25)] backdrop-blur-xl lg:hidden">
           <button
             type="button"
             onClick={() => setMobileMenuOpen(true)}
-            className="flex h-11 w-11 items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-700 transition hover:bg-slate-50"
+            className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-white/[0.08] bg-white/[0.04] text-white transition hover:border-white/[0.14] hover:bg-white/[0.08]"
             aria-label="Ouvrir le menu administrateur"
+            aria-expanded={mobileMenuOpen}
           >
             <Menu
               className="h-6 w-6"
@@ -39,18 +40,18 @@ export default function AdminDashboardShell({
             />
           </button>
 
-          <div className="ml-3">
-            <p className="text-sm font-bold text-slate-950">
+          <div className="ml-3 min-w-0">
+            <p className="truncate text-sm font-black tracking-[-0.01em] text-white">
               Administration Tikemia
             </p>
 
-            <p className="text-xs text-slate-500">
-              Tableau de bord
+            <p className="truncate text-xs font-medium text-neutral-500">
+              Centre de contrôle
             </p>
           </div>
         </header>
 
-        <main className="w-full px-4 pb-8 pt-20 sm:px-6 lg:px-8 lg:pt-8">
+        <main className="min-h-screen w-full min-w-0 bg-[#02070b] pt-16 lg:pt-0">
           {children}
         </main>
       </div>

@@ -957,7 +957,7 @@ function DashboardSectionHeader({
         </h2>
 
         {description && (
-          <p className="mt-1 text-xs leading-5 text-neutral-600">
+          <p className="mt-1 text-xs leading-5 text-neutral-500">
             {
               description
             }
@@ -1031,7 +1031,7 @@ function KpiCard({
       href={
         href
       }
-      className="group min-w-0 rounded-2xl border border-white/[0.075] bg-[#071014] p-4 shadow-[0_14px_40px_rgba(0,0,0,0.16)] transition hover:-translate-y-0.5 hover:border-white/[0.13] hover:shadow-[0_20px_55px_rgba(0,0,0,0.25)] sm:p-5"
+      className="group min-w-0 rounded-2xl border border-white/[0.075] bg-[#071116] p-4 shadow-[0_14px_40px_rgba(0,0,0,0.16)] transition hover:-translate-y-0.5 hover:border-white/[0.13] hover:shadow-[0_20px_55px_rgba(0,0,0,0.25)] sm:p-5"
     >
       <div className="flex items-start justify-between gap-3">
         <span
@@ -1043,7 +1043,7 @@ function KpiCard({
         <ArrowRight className="h-4 w-4 text-neutral-700 transition group-hover:translate-x-0.5 group-hover:text-neutral-400" />
       </div>
 
-      <p className="mt-5 text-[11px] font-black uppercase tracking-[0.1em] text-neutral-600">
+      <p className="mt-5 text-[11px] font-black uppercase tracking-[0.1em] text-neutral-500">
         {
           label
         }
@@ -1103,7 +1103,7 @@ function RevenueChart({
     );
 
   return (
-    <section className="min-w-0 rounded-3xl border border-white/[0.075] bg-[#071014] p-4 shadow-[0_18px_55px_rgba(0,0,0,0.2)] sm:p-5 lg:p-6">
+    <section className="min-w-0 rounded-3xl border border-white/[0.075] bg-[#071116] p-4 shadow-[0_18px_55px_rgba(0,0,0,0.2)] sm:p-5 lg:p-6">
       <DashboardSectionHeader
         title="Revenus des 7 derniers jours"
         description="Commandes payées uniquement."
@@ -1112,8 +1112,8 @@ function RevenueChart({
       />
 
       <div className="mt-5 grid gap-3 sm:grid-cols-2">
-        <div className="rounded-2xl border border-white/[0.065] bg-white/[0.018] p-4">
-          <p className="text-[10px] font-black uppercase tracking-[0.1em] text-neutral-600">
+        <div className="rounded-2xl border border-white/[0.065] bg-white/[0.025] p-4">
+          <p className="text-[10px] font-black uppercase tracking-[0.1em] text-neutral-500">
             Revenus
           </p>
 
@@ -1126,8 +1126,8 @@ function RevenueChart({
           </p>
         </div>
 
-        <div className="rounded-2xl border border-white/[0.065] bg-white/[0.018] p-4">
-          <p className="text-[10px] font-black uppercase tracking-[0.1em] text-neutral-600">
+        <div className="rounded-2xl border border-white/[0.065] bg-white/[0.025] p-4">
+          <p className="text-[10px] font-black uppercase tracking-[0.1em] text-neutral-500">
             Commandes payées
           </p>
 
@@ -1186,7 +1186,7 @@ function RevenueChart({
                   />
                 </div>
 
-                <span className="truncate text-[9px] font-bold capitalize text-neutral-600 sm:text-[10px]">
+                <span className="truncate text-[9px] font-bold capitalize text-neutral-500 sm:text-[10px]">
                   {
                     value.label
                   }
@@ -1329,7 +1329,7 @@ function OperationalAlerts({
   ];
 
   return (
-    <section className="rounded-3xl border border-white/[0.075] bg-[#071014] p-4 shadow-[0_18px_55px_rgba(0,0,0,0.2)] sm:p-5 lg:p-6">
+    <section className="rounded-3xl border border-white/[0.075] bg-[#071116] p-4 shadow-[0_18px_55px_rgba(0,0,0,0.2)] sm:p-5 lg:p-6">
       <DashboardSectionHeader
         title="Contrôle opérationnel"
         description="Éléments qui nécessitent une vérification."
@@ -1351,7 +1351,7 @@ function OperationalAlerts({
                 href={
                   alert.href
                 }
-                className="group flex items-center gap-3 rounded-2xl border border-white/[0.065] bg-white/[0.018] p-3 transition hover:border-white/[0.11] hover:bg-white/[0.035]"
+                className="group flex items-center gap-3 rounded-2xl border border-white/[0.065] bg-white/[0.025] p-3 transition hover:border-white/[0.11] hover:bg-white/[0.035]"
               >
                 <span
                   className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border ${alert.className}`}
@@ -1391,7 +1391,7 @@ function RecentEvents({
   events: DashboardData["recentEvents"];
 }) {
   return (
-    <section className="min-w-0 rounded-3xl border border-white/[0.075] bg-[#071014] p-4 shadow-[0_18px_55px_rgba(0,0,0,0.2)] sm:p-5 lg:p-6">
+    <section className="min-w-0 rounded-3xl border border-white/[0.075] bg-[#071116] p-4 shadow-[0_18px_55px_rgba(0,0,0,0.2)] sm:p-5 lg:p-6">
       <DashboardSectionHeader
         title="Derniers événements"
         description="Créations les plus récentes."
@@ -1420,7 +1420,7 @@ function RecentEvents({
                       event.id
                     }
                     href={`/admin/events/${event.id}`}
-                    className="group flex min-w-0 items-center gap-3 bg-white/[0.012] p-3.5 transition hover:bg-white/[0.03] sm:p-4"
+                    className="group flex min-w-0 items-center gap-3 bg-white/[0.02] p-3.5 transition hover:bg-white/[0.03] sm:p-4"
                   >
                     <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-blue-400/15 bg-blue-400/[0.055] text-xs font-black text-blue-300">
                       {
@@ -1437,7 +1437,7 @@ function RecentEvents({
                         }
                       </span>
 
-                      <span className="mt-1 block truncate text-[11px] text-neutral-600">
+                      <span className="mt-1 block truncate text-[11px] text-neutral-500">
                         {
                           organizerName
                         }{" "}
@@ -1457,7 +1457,7 @@ function RecentEvents({
                         }
                       </span>
 
-                      <span className="mt-1 block text-[10px] text-neutral-600">
+                      <span className="mt-1 block text-[10px] text-neutral-500">
                         {
                           formatNumber(
                             event._count
@@ -1511,7 +1511,7 @@ function RecentPayments({
   payments: DashboardData["recentPayments"];
 }) {
   return (
-    <section className="min-w-0 rounded-3xl border border-white/[0.075] bg-[#071014] p-4 shadow-[0_18px_55px_rgba(0,0,0,0.2)] sm:p-5 lg:p-6">
+    <section className="min-w-0 rounded-3xl border border-white/[0.075] bg-[#071116] p-4 shadow-[0_18px_55px_rgba(0,0,0,0.2)] sm:p-5 lg:p-6">
       <DashboardSectionHeader
         title="Derniers paiements"
         description="Transactions enregistrées récemment."
@@ -1532,7 +1532,7 @@ function RecentPayments({
                     payment.id
                   }
                   href={`/admin/payments/${payment.id}`}
-                  className="group flex min-w-0 items-center gap-3 bg-white/[0.012] p-3.5 transition hover:bg-white/[0.03] sm:p-4"
+                  className="group flex min-w-0 items-center gap-3 bg-white/[0.02] p-3.5 transition hover:bg-white/[0.03] sm:p-4"
                 >
                   <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-emerald-400/15 bg-emerald-400/[0.055] text-emerald-300">
                     <CreditCard className="h-5 w-5" />
@@ -1546,7 +1546,7 @@ function RecentPayments({
                       }
                     </span>
 
-                    <span className="mt-1 block truncate text-[11px] text-neutral-600">
+                    <span className="mt-1 block truncate text-[11px] text-neutral-500">
                       {
                         payment.order
                           .reference
@@ -1566,7 +1566,7 @@ function RecentPayments({
                       }
                     </span>
 
-                    <span className="mt-1 block text-[10px] text-neutral-600">
+                    <span className="mt-1 block text-[10px] text-neutral-500">
                       {
                         formatDateTime(
                           payment.paidAt ??
@@ -1624,7 +1624,7 @@ function RecentOrders({
   orders: DashboardData["recentOrders"];
 }) {
   return (
-    <section className="min-w-0 rounded-3xl border border-white/[0.075] bg-[#071014] p-4 shadow-[0_18px_55px_rgba(0,0,0,0.2)] sm:p-5 lg:p-6">
+    <section className="min-w-0 rounded-3xl border border-white/[0.075] bg-[#071116] p-4 shadow-[0_18px_55px_rgba(0,0,0,0.2)] sm:p-5 lg:p-6">
       <DashboardSectionHeader
         title="Commandes récentes"
         description="Dernières commandes de la plateforme."
@@ -1644,7 +1644,7 @@ function RecentOrders({
                   order.id
                 }
                 href={`/admin/orders/${order.id}`}
-                className="group rounded-2xl border border-white/[0.065] bg-white/[0.018] p-4 transition hover:border-blue-400/15 hover:bg-blue-400/[0.035]"
+                className="group rounded-2xl border border-white/[0.065] bg-white/[0.025] p-4 transition hover:border-blue-400/15 hover:bg-blue-400/[0.035]"
               >
                 <div className="flex items-start justify-between gap-3">
                   <span className="flex h-10 w-10 items-center justify-center rounded-xl border border-blue-400/15 bg-blue-400/[0.055] text-blue-300">
@@ -1664,7 +1664,7 @@ function RecentOrders({
                   }
                 </p>
 
-                <p className="mt-1 truncate text-[11px] text-neutral-600">
+                <p className="mt-1 truncate text-[11px] text-neutral-500">
                   {
                     order.reference
                   }{" "}
@@ -1789,7 +1789,7 @@ function QuickActions() {
   ];
 
   return (
-    <section className="rounded-3xl border border-white/[0.075] bg-[#071014] p-4 shadow-[0_18px_55px_rgba(0,0,0,0.2)] sm:p-5 lg:p-6">
+    <section className="rounded-3xl border border-white/[0.075] bg-[#071116] p-4 shadow-[0_18px_55px_rgba(0,0,0,0.2)] sm:p-5 lg:p-6">
       <DashboardSectionHeader
         title="Actions rapides"
         description="Accès direct aux opérations principales."
@@ -1811,7 +1811,7 @@ function QuickActions() {
                 href={
                   action.href
                 }
-                className="group flex items-center gap-3 rounded-2xl border border-white/[0.065] bg-white/[0.018] p-3.5 transition hover:border-blue-400/18 hover:bg-blue-400/[0.045]"
+                className="group flex items-center gap-3 rounded-2xl border border-white/[0.065] bg-white/[0.025] p-3.5 transition hover:border-blue-400/18 hover:bg-blue-400/[0.045]"
               >
                 <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-blue-400/15 bg-blue-400/[0.055] text-blue-300">
                   <Icon className="h-[18px] w-[18px]" />
@@ -1873,8 +1873,8 @@ export default async function AdminDashboardPage() {
   } = state;
 
   return (
-    <div className="w-full min-w-0">
-      <section className="relative overflow-hidden rounded-3xl border border-white/[0.075] bg-[#071014] p-5 shadow-[0_20px_70px_rgba(0,0,0,0.22)] sm:p-6 lg:p-7">
+    <div className="min-h-screen w-full min-w-0 bg-[#02070b] px-4 pb-10 pt-4 sm:px-6 sm:pt-6 lg:px-8 lg:pt-8">
+      <section className="relative overflow-hidden rounded-3xl border border-white/[0.075] bg-[#071116] p-5 shadow-[0_20px_70px_rgba(0,0,0,0.22)] sm:p-6 lg:p-7">
         <div
           aria-hidden="true"
           className="absolute -right-16 -top-20 h-64 w-64 rounded-full bg-blue-500/[0.1] blur-[100px]"
@@ -2075,7 +2075,7 @@ export default async function AdminDashboardPage() {
       <section className="mt-5 grid gap-5 xl:grid-cols-[minmax(0,1.3fr)_minmax(320px,0.7fr)]">
         <QuickActions />
 
-        <section className="rounded-3xl border border-white/[0.075] bg-[#071014] p-4 shadow-[0_18px_55px_rgba(0,0,0,0.2)] sm:p-5 lg:p-6">
+        <section className="rounded-3xl border border-white/[0.075] bg-[#071116] p-4 shadow-[0_18px_55px_rgba(0,0,0,0.2)] sm:p-5 lg:p-6">
           <DashboardSectionHeader
             title="Situation financière"
             description="Vue globale de la plateforme."
@@ -2091,7 +2091,7 @@ export default async function AdminDashboardPage() {
                 </span>
 
                 <div>
-                  <p className="text-[10px] font-black uppercase tracking-[0.1em] text-neutral-600">
+                  <p className="text-[10px] font-black uppercase tracking-[0.1em] text-neutral-500">
                     Chiffre d’affaires total
                   </p>
 
@@ -2114,7 +2114,7 @@ export default async function AdminDashboardPage() {
                 </span>
 
                 <div>
-                  <p className="text-[10px] font-black uppercase tracking-[0.1em] text-neutral-600">
+                  <p className="text-[10px] font-black uppercase tracking-[0.1em] text-neutral-500">
                     Retraits à traiter
                   </p>
 
@@ -2137,7 +2137,7 @@ export default async function AdminDashboardPage() {
                 </span>
 
                 <div>
-                  <p className="text-[10px] font-black uppercase tracking-[0.1em] text-neutral-600">
+                  <p className="text-[10px] font-black uppercase tracking-[0.1em] text-neutral-500">
                     Abonnements actifs
                   </p>
 
