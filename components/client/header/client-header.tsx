@@ -490,7 +490,7 @@ export default function ClientHeader({
           </div>
         </div>
 
-        <div className="mx-auto hidden h-[78px] w-full max-w-[1600px] items-center gap-5 px-5 lg:flex xl:px-8">
+        <div className="mx-auto hidden h-[76px] w-full max-w-[1600px] items-center gap-4 px-5 lg:flex xl:gap-6 xl:px-8">
           <Link
             href="/"
             aria-label="Accueil Tikemia"
@@ -502,13 +502,13 @@ export default function ClientHeader({
               width={190}
               height={62}
               priority
-              className="h-auto w-[150px] object-contain xl:w-[170px]"
+              className="h-auto w-[145px] object-contain xl:w-[160px]"
             />
           </Link>
 
           <nav
             aria-label="Navigation principale"
-            className="flex min-w-0 flex-1 items-center justify-center gap-1"
+            className="flex min-w-0 flex-1 items-center justify-center gap-0.5 xl:gap-1"
           >
             {DESKTOP_NAVIGATION.map(
               (item) => {
@@ -523,7 +523,7 @@ export default function ClientHeader({
                     key={item.href}
                     href={item.href}
                     className={cn(
-                      "relative rounded-lg px-3 py-2 text-[13px] font-semibold transition",
+                      "relative whitespace-nowrap rounded-lg px-2.5 py-2 text-[13px] font-semibold transition xl:px-3 xl:text-sm",
                       active
                         ? "bg-white/[0.055] text-white"
                         : "text-neutral-400 hover:bg-white/[0.035] hover:text-white",
@@ -540,37 +540,14 @@ export default function ClientHeader({
             )}
           </nav>
 
-          <form
-            onSubmit={(event) => {
-              event.preventDefault();
-              submitSearch();
-            }}
-            className="relative hidden w-full max-w-[360px] xl:block"
-          >
-            <Search className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-neutral-500" />
-
-            <input
-              value={searchValue}
-              onChange={(event) =>
-                setSearchValue(
-                  event.target.value,
-                )
-              }
-              type="search"
-              placeholder="Événement, artiste, ville..."
-              aria-label="Rechercher un événement"
-              className="h-11 w-full rounded-xl border border-white/[0.09] bg-white/[0.04] pl-10 pr-4 text-sm text-white outline-none transition placeholder:text-neutral-600 focus:border-emerald-500/35 focus:bg-white/[0.055] focus:ring-2 focus:ring-emerald-500/10"
-            />
-          </form>
-
-          <div className="flex shrink-0 items-center gap-1.5">
+          <div className="flex shrink-0 items-center gap-1">
             <button
               type="button"
               onClick={() =>
                 setSearchOpen(true)
               }
               aria-label="Ouvrir la recherche"
-              className="flex h-10 w-10 items-center justify-center rounded-xl border border-white/[0.08] bg-white/[0.025] text-neutral-300 transition hover:border-white/[0.14] hover:bg-white/[0.055] hover:text-white xl:hidden"
+              className="flex h-10 w-10 items-center justify-center rounded-xl border border-white/[0.08] bg-white/[0.025] text-neutral-300 transition hover:border-emerald-500/25 hover:bg-emerald-500/[0.07] hover:text-emerald-300"
             >
               <Search className="h-4 w-4" />
             </button>
@@ -581,7 +558,7 @@ export default function ClientHeader({
             >
               <Heart className="h-4 w-4" />
 
-              <span className="hidden 2xl:inline">
+              <span className="hidden xl:inline">
                 Favoris
               </span>
             </Link>
@@ -592,7 +569,7 @@ export default function ClientHeader({
             >
               <Ticket className="h-4 w-4" />
 
-              <span className="hidden 2xl:inline">
+              <span className="hidden xl:inline">
                 Mes billets
               </span>
             </Link>
