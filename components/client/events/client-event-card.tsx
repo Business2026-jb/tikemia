@@ -5,7 +5,6 @@ import Link from "next/link";
 import {
   BadgeCheck,
   CalendarDays,
-  Clock3,
   Heart,
   MapPin,
   Ticket,
@@ -39,6 +38,12 @@ export type ClientEventCardProps = {
   favoriteDisabled?: boolean;
 
   showOrganizer?: boolean;
+
+  /**
+   * Conservé pour assurer la compatibilité avec les composants existants.
+   * La disponibilité numérique n’est volontairement plus affichée
+   * sur les cartes publiques.
+   */
   showAvailability?: boolean;
 
   priority?: boolean;
@@ -54,80 +59,6 @@ type EventBadge = {
   label: string;
   className: string;
 };
-
-type AvailabilityDisplay = {
-  label: string;
-  value: string;
-  valueClassName: string;
-  urgency: boolean;
-};
-
-function getAvailabilityDisplay(
-  event: ClientHomeEvent,
-): AvailabilityDisplay {
-  if (
-    event.availability.soldOut
-  ) {
-    return {
-      label:
-        "Disponibilité",
-
-      value:
-        "Épuisé",
-
-      valueClassName:
-        "text-red-400",
-
-      urgency:
-        false,
-    };
-  }
-
-  const availableTickets =
-    Math.max(
-      event.availability.availableTickets,
-      0,
-    );
-
-  if (
-    availableTickets > 0 &&
-    availableTickets <= 10
-  ) {
-    return {
-      label:
-        "Dernières places",
-
-      value:
-        `${availableTickets} restante${
-          availableTickets > 1
-            ? "s"
-            : ""
-        }`,
-
-      valueClassName:
-        "text-orange-400",
-
-      urgency:
-        true,
-    };
-  }
-
-  return {
-    label:
-      "Disponible",
-
-    value:
-      availableTickets.toLocaleString(
-        "fr-FR",
-      ),
-
-    valueClassName:
-      "text-lime-400",
-
-    urgency:
-      false,
-  };
-}
 
 function cn(
   ...classes: Array<
@@ -147,7 +78,9 @@ function normalizeEventHref({
   slug: string;
 }): string {
   const normalizedBasePath =
-    basePath.trim().replace(/\/+$/, "") ||
+    basePath
+      .trim()
+      .replace(/\/+$/, "") ||
     "/events";
 
   return `${normalizedBasePath}/${encodeURIComponent(
@@ -218,23 +151,22 @@ function formatEventPrice(
       ? event.price.amount
       : 0;
 
+  const currency =
+    event.price.currency ||
+    event.currency ||
+    "XOF";
+
   try {
     return new Intl.NumberFormat(
       "fr-FR",
       {
         style: "currency",
-        currency:
-          event.price.currency ||
-          event.currency ||
-          "XOF",
+        currency,
         maximumFractionDigits:
           [
             "XOF",
             "XAF",
-          ].includes(
-            event.price.currency ||
-              event.currency,
-          )
+          ].includes(currency)
             ? 0
             : 2,
       },
@@ -242,10 +174,7 @@ function formatEventPrice(
   } catch {
     return `${amount.toLocaleString(
       "fr-FR",
-    )} ${
-      event.price.currency ||
-      event.currency
-    }`;
+    )} ${currency}`;
   }
 }
 
@@ -414,10 +343,12 @@ function FavoriteButton({
   initiallyFavorite,
   disabled,
   onFavoriteChange,
+  compact = false,
 }: {
   event: ClientHomeEvent;
   initiallyFavorite: boolean;
   disabled: boolean;
+  compact?: boolean;
   onFavoriteChange?: (
     eventId: string,
     isFavorite: boolean,
@@ -507,7 +438,10 @@ function FavoriteButton({
         void handleFavoriteClick();
       }}
       className={cn(
-        "flex h-10 w-10 shrink-0 items-center justify-center rounded-full border backdrop-blur-md transition active:scale-95 disabled:cursor-not-allowed disabled:opacity-50",
+        "flex shrink-0 items-center justify-center rounded-full border backdrop-blur-md transition active:scale-95 disabled:cursor-not-allowed disabled:opacity-50",
+        compact
+          ? "h-9 w-9"
+          : "h-10 w-10",
         isFavorite
           ? "border-red-400/35 bg-red-500/20 text-red-400"
           : "border-white/20 bg-black/35 text-white hover:border-white/35 hover:bg-black/55",
@@ -515,7 +449,9 @@ function FavoriteButton({
     >
       <Heart
         className={cn(
-          "h-[19px] w-[19px]",
+          compact
+            ? "h-[18px] w-[18px]"
+            : "h-[19px] w-[19px]",
           isFavorite &&
             "fill-current",
         )}
@@ -585,8 +521,7 @@ function EventMeta({
 }: {
   icon:
     | typeof CalendarDays
-    | typeof MapPin
-    | typeof Clock3;
+    | typeof MapPin;
   children: ReactNode;
   className?: string;
 }) {
@@ -620,7 +555,6 @@ export default function ClientEventCard({
   favoriteDisabled = false,
 
   showOrganizer = true,
-  showAvailability = true,
 
   priority = false,
   className,
@@ -680,24 +614,13 @@ export default function ClientEventCard({
       ],
     );
 
-  const availability =
-    useMemo(
-      () =>
-        getAvailabilityDisplay(
-          event,
-        ),
-      [
-        event,
-      ],
-    );
-
   if (
     variant === "list"
   ) {
     return (
       <article
         className={cn(
-          "group relative min-w-0 overflow-hidden rounded-2xl border border-white/[0.08] bg-[#071014] transition hover:-translate-y-0.5 hover:border-white/[0.14] hover:shadow-[0_18px_50px_rgba(0,0,0,0.28)]",
+          "group relative min-w-0 overflow-hidden rounded-2xl border border-white/[0.09] bg-[#071014] shadow-[0_14px_38px_rgba(0,0,0,0.2)] transition hover:-translate-y-0.5 hover:border-white/[0.15] hover:shadow-[0_18px_50px_rgba(0,0,0,0.3)]",
           className,
         )}
       >
@@ -706,9 +629,9 @@ export default function ClientEventCard({
             eventHref
           }
           aria-label={`Voir l’événement ${event.title}`}
-          className="grid min-w-0 grid-cols-[112px_minmax(0,1fr)] outline-none focus-visible:ring-2 focus-visible:ring-lime-400/70 focus-visible:ring-inset sm:grid-cols-[190px_minmax(0,1fr)] lg:grid-cols-[240px_minmax(0,1fr)]"
+          className="grid min-h-[154px] min-w-0 grid-cols-[36%_minmax(0,1fr)] outline-none focus-visible:ring-2 focus-visible:ring-lime-400/70 focus-visible:ring-inset sm:min-h-[190px] sm:grid-cols-[190px_minmax(0,1fr)] lg:grid-cols-[240px_minmax(0,1fr)]"
         >
-          <div className="relative min-h-[158px] overflow-hidden sm:min-h-[190px]">
+          <div className="relative min-h-full overflow-hidden">
             <EventImage
               event={
                 event
@@ -716,15 +639,15 @@ export default function ClientEventCard({
               priority={
                 priority
               }
-              sizes="(max-width: 640px) 112px, (max-width: 1024px) 190px, 240px"
+              sizes="(max-width: 640px) 36vw, (max-width: 1024px) 190px, 240px"
             />
 
-            <div className="absolute inset-0 bg-gradient-to-t from-black/55 via-transparent to-black/10" />
+            <div className="absolute inset-0 bg-gradient-to-t from-black/45 via-transparent to-black/10" />
 
             {badge && (
               <span
                 className={cn(
-                  "absolute left-2 top-2 inline-flex h-6 items-center rounded-lg border px-2 text-[9px] font-black uppercase tracking-[0.05em]",
+                  "absolute left-2 top-2 inline-flex h-6 max-w-[calc(100%-1rem)] items-center truncate rounded-lg border px-2 text-[8px] font-black uppercase tracking-[0.04em] sm:text-[9px]",
                   badge.className,
                 )}
               >
@@ -733,123 +656,114 @@ export default function ClientEventCard({
                 }
               </span>
             )}
+
+            {event.category && (
+              <span
+                className={cn(
+                  "absolute bottom-2 left-2 inline-flex max-w-[calc(100%-1rem)] truncate rounded-md border px-2 py-1 text-[8px] font-black uppercase tracking-[0.05em] sm:hidden",
+                  getCategoryClassName(
+                    event.category.slug,
+                  ),
+                )}
+              >
+                {
+                  event.category.name
+                }
+              </span>
+            )}
           </div>
 
-          <div className="flex min-w-0 flex-col justify-between p-3 sm:p-4">
-            <div className="min-w-0">
-              <div className="flex items-start justify-between gap-3">
-                <div className="min-w-0">
-                  {event.category && (
-                    <span
-                      className={cn(
-                        "inline-flex rounded-md border px-2 py-1 text-[9px] font-black uppercase tracking-[0.06em]",
-                        getCategoryClassName(
-                          event.category
-                            .slug,
-                        ),
-                      )}
-                    >
-                      {
-                        event.category
-                          .name
-                      }
-                    </span>
-                  )}
-
-                  <h2 className="mt-2 line-clamp-2 text-base font-black leading-tight text-white sm:text-lg">
-                    {
-                      event.title
-                    }
-                  </h2>
-                </div>
-
-                <FavoriteButton
-                  event={
-                    event
-                  }
-                  initiallyFavorite={
-                    initiallyFavorite
-                  }
-                  disabled={
-                    favoriteDisabled
-                  }
-                  onFavoriteChange={
-                    onFavoriteChange
-                  }
-                />
-              </div>
-
-              {showOrganizer && (
-                <div className="mt-2">
-                  <OrganizerLine
-                    event={
-                      event
-                    }
-                  />
-                </div>
-              )}
-
-              <div className="mt-3 grid gap-2">
-                <EventMeta
-                  icon={
-                    CalendarDays
-                  }
-                >
-                  {eventDate}
-                  {eventTime
-                    ? ` · ${eventTime}`
-                    : ""}
-                </EventMeta>
-
-                <EventMeta
-                  icon={
-                    MapPin
-                  }
-                >
-                  {event.venueName}
-                  {event.city
-                    ? `, ${event.city}`
-                    : ""}
-                </EventMeta>
-              </div>
-            </div>
-
-            <div className="mt-4 flex items-end justify-between gap-3">
+          <div className="flex min-w-0 flex-col p-3 sm:p-4">
+            <div className="flex min-w-0 items-start justify-between gap-2">
               <div className="min-w-0">
-                <p className="text-[10px] text-neutral-600">
-                  {event.price
-                    .isFree
-                    ? "Entrée"
-                    : "À partir de"}
-                </p>
-
-                <p className="truncate text-sm font-black text-lime-400 sm:text-base">
-                  {
-                    eventPrice
-                  }
-                </p>
-              </div>
-
-              {showAvailability && (
-                <div className="shrink-0 text-right">
-                  <p className="text-[10px] text-neutral-600">
-                    {
-                      availability.label
-                    }
-                  </p>
-
-                  <p
+                {event.category && (
+                  <span
                     className={cn(
-                      "text-sm font-black sm:text-base",
-                      availability.valueClassName,
+                      "hidden w-fit rounded-md border px-2 py-1 text-[9px] font-black uppercase tracking-[0.06em] sm:inline-flex",
+                      getCategoryClassName(
+                        event.category.slug,
+                      ),
                     )}
                   >
                     {
-                      availability.value
+                      event.category.name
                     }
-                  </p>
-                </div>
-              )}
+                  </span>
+                )}
+
+                <h2 className="line-clamp-2 text-[15px] font-black leading-[1.2] tracking-[-0.01em] text-white sm:mt-2 sm:text-lg">
+                  {
+                    event.title
+                  }
+                </h2>
+              </div>
+
+              <FavoriteButton
+                event={
+                  event
+                }
+                initiallyFavorite={
+                  initiallyFavorite
+                }
+                disabled={
+                  favoriteDisabled
+                }
+                compact
+                onFavoriteChange={
+                  onFavoriteChange
+                }
+              />
+            </div>
+
+            {showOrganizer && (
+              <div className="mt-2 hidden sm:block">
+                <OrganizerLine
+                  event={
+                    event
+                  }
+                />
+              </div>
+            )}
+
+            <div className="mt-2.5 grid gap-2 sm:mt-3">
+              <EventMeta
+                icon={
+                  CalendarDays
+                }
+                className="text-[11px] sm:text-xs"
+              >
+                {eventDate}
+                {eventTime
+                  ? ` · ${eventTime}`
+                  : ""}
+              </EventMeta>
+
+              <EventMeta
+                icon={
+                  MapPin
+                }
+                className="text-[11px] sm:text-xs"
+              >
+                {event.venueName}
+                {event.city
+                  ? `, ${event.city}`
+                  : ""}
+              </EventMeta>
+            </div>
+
+            <div className="mt-auto pt-3">
+              <p className="text-[10px] text-neutral-600">
+                {event.price
+                  .isFree
+                  ? "Entrée"
+                  : "À partir de"}
+              </p>
+
+              <p className="truncate text-sm font-black text-lime-400 sm:text-base">
+                {
+                  eventPrice
+                }
+              </p>
             </div>
           </div>
         </Link>
@@ -931,12 +845,6 @@ export default function ClientEventCard({
             />
           </div>
 
-          {availability.urgency && (
-            <div className="absolute inset-x-3 bottom-3 rounded-xl border border-orange-500/30 bg-orange-500/18 px-3 py-2 text-center text-[10px] font-black uppercase tracking-[0.08em] text-orange-300 backdrop-blur-md">
-              Dernières places
-            </div>
-          )}
-
           {event.availability
             .soldOut && (
             <div className="absolute inset-x-3 bottom-3 rounded-xl border border-red-500/25 bg-red-500/15 px-3 py-2 text-center text-[10px] font-black uppercase tracking-[0.08em] text-red-300 backdrop-blur-md">
@@ -1001,41 +909,18 @@ export default function ClientEventCard({
             </EventMeta>
           </div>
 
-          <div className="mt-auto flex items-end justify-between gap-3 pt-4">
-            <div className="min-w-0">
-              <p className="text-[10px] text-neutral-600">
-                {event.price.isFree
-                  ? "Entrée"
-                  : "À partir de"}
-              </p>
+          <div className="mt-auto pt-4">
+            <p className="text-[10px] text-neutral-600">
+              {event.price.isFree
+                ? "Entrée"
+                : "À partir de"}
+            </p>
 
-              <p className="truncate text-sm font-black text-lime-400 sm:text-base">
-                {
-                  eventPrice
-                }
-              </p>
-            </div>
-
-            {showAvailability && (
-              <div className="shrink-0 text-right">
-                <p className="text-[9px] text-neutral-600">
-                  {
-                    availability.label
-                  }
-                </p>
-
-                <p
-                  className={cn(
-                    "text-sm font-black",
-                    availability.valueClassName,
-                  )}
-                >
-                  {
-                    availability.value
-                  }
-                </p>
-              </div>
-            )}
+            <p className="truncate text-sm font-black text-lime-400 sm:text-base">
+              {
+                eventPrice
+              }
+            </p>
           </div>
         </div>
       </Link>

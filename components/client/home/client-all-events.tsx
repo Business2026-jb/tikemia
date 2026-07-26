@@ -3,11 +3,9 @@
 import Link from "next/link";
 import {
   ArrowRight,
-  CalendarDays,
   Grid2X2,
   List,
   SearchX,
-  Sparkles,
 } from "lucide-react";
 import {
   useMemo,
@@ -75,11 +73,8 @@ function normalizeFavoriteIds(
 ): Set<string> {
   return new Set(
     values
-      .map(
-        (
-          value,
-        ) =>
-          value.trim(),
+      .map((value) =>
+        value.trim(),
       )
       .filter(Boolean),
   );
@@ -88,31 +83,26 @@ function normalizeFavoriteIds(
 function formatEventCount(
   value: number,
 ): string {
-  const count =
-    Math.max(
-      Math.trunc(value),
-      0,
-    );
+  const count = Math.max(
+    Math.trunc(value),
+    0,
+  );
 
   return new Intl.NumberFormat(
     "fr-FR",
-  ).format(
-    count,
-  );
+  ).format(count);
 }
 
 export default function ClientAllEvents({
   events,
   pagination,
 
-  title =
-    "Tous les événements",
+  title = "Tous les événements",
 
   description =
-    "Découvrez les événements disponibles et trouvez l’expérience qui vous correspond.",
+    "Découvrez les meilleurs événements près de chez vous.",
 
-  initialView =
-    "grid",
+  initialView = "grid",
 
   favoriteEventIds = [],
   favoriteDisabled = false,
@@ -123,14 +113,12 @@ export default function ClientAllEvents({
   emptyDescription =
     "Aucun événement ne correspond actuellement à votre recherche ou à vos filtres.",
 
-  emptyActionHref =
-    "/events",
+  emptyActionHref = "/events",
 
   emptyActionLabel =
     "Voir tous les événements",
 
-  eventBasePath =
-    "/events",
+  eventBasePath = "/events",
 
   className,
 
@@ -152,28 +140,23 @@ export default function ClientAllEvents({
         normalizeFavoriteIds(
           favoriteEventIds,
         ),
-      [
-        favoriteEventIds,
-      ],
+      [favoriteEventIds],
     );
 
-  const totalItems =
-    Math.max(
-      pagination.totalItems,
-      0,
-    );
+  const totalItems = Math.max(
+    pagination.totalItems,
+    0,
+  );
 
-  const currentPage =
-    Math.max(
-      pagination.page,
-      1,
-    );
+  const currentPage = Math.max(
+    pagination.page,
+    1,
+  );
 
-  const totalPages =
-    Math.max(
-      pagination.totalPages,
-      0,
-    );
+  const totalPages = Math.max(
+    pagination.totalPages,
+    0,
+  );
 
   const displayedCount =
     events.length;
@@ -186,123 +169,90 @@ export default function ClientAllEvents({
         className,
       )}
     >
-      <div className="flex min-w-0 flex-col gap-4 border-b border-white/[0.07] pb-4 sm:flex-row sm:items-end sm:justify-between">
+      <div className="flex min-w-0 items-end justify-between gap-4">
         <div className="min-w-0">
-          <div className="flex min-w-0 items-center gap-3">
-            <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-lime-500/20 bg-lime-500/[0.07] text-lime-300">
-              <CalendarDays
-                aria-hidden="true"
-                className="h-[18px] w-[18px]"
-              />
-            </span>
+          <h2
+            id="client-all-events-title"
+            className="text-[22px] font-black leading-tight tracking-[-0.025em] text-white sm:text-2xl lg:text-3xl"
+          >
+            {title}
+          </h2>
 
-            <div className="min-w-0">
-              <div className="flex flex-wrap items-center gap-2">
-                <h2
-                  id="client-all-events-title"
-                  className="text-xl font-black tracking-tight text-white sm:text-2xl"
-                >
-                  {
-                    title
-                  }
-                </h2>
-
-                <span className="inline-flex h-7 items-center rounded-full border border-white/[0.08] bg-white/[0.025] px-2.5 text-[10px] font-black text-neutral-400">
-                  {
-                    formatEventCount(
-                      totalItems,
-                    )
-                  }
-                </span>
-              </div>
-
-              <p className="mt-1 max-w-2xl text-xs leading-5 text-neutral-600 sm:text-sm">
-                {
-                  description
-                }
-              </p>
-            </div>
-          </div>
+          <p className="mt-1 text-xs leading-5 text-neutral-500 sm:text-sm">
+            {description}
+          </p>
         </div>
 
-        <div className="flex shrink-0 items-center gap-2">
-          <span className="hidden text-[11px] font-semibold text-neutral-600 sm:inline">
+        <div className="hidden shrink-0 items-center gap-2 sm:flex">
+          <span className="hidden text-[11px] font-semibold text-neutral-500 lg:inline">
             Affichage
           </span>
 
           <div
             role="group"
             aria-label="Choisir le mode d’affichage"
-            className="inline-flex rounded-xl border border-white/[0.08] bg-white/[0.02] p-1"
+            className="inline-flex rounded-xl border border-white/[0.09] bg-[#071014] p-1 shadow-[0_12px_35px_rgba(0,0,0,0.25)]"
           >
             <button
               type="button"
               onClick={() =>
-                setViewMode(
-                  "grid",
-                )
+                setViewMode("grid")
               }
               aria-label="Afficher en grille"
               aria-pressed={
-                viewMode ===
-                "grid"
+                viewMode === "grid"
               }
               className={cn(
-                "flex h-9 w-9 items-center justify-center rounded-lg outline-none transition active:scale-95 focus-visible:ring-2 focus-visible:ring-lime-400/70",
-                viewMode ===
-                  "grid"
-                  ? "bg-lime-500/[0.1] text-lime-300"
-                  : "text-neutral-600 hover:bg-white/[0.04] hover:text-white",
+                "flex h-10 w-10 items-center justify-center rounded-lg outline-none transition active:scale-95 focus-visible:ring-2 focus-visible:ring-lime-400/70",
+                viewMode === "grid"
+                  ? "border border-lime-500/20 bg-lime-500/[0.14] text-lime-400"
+                  : "text-neutral-500 hover:bg-white/[0.04] hover:text-white",
               )}
             >
               <Grid2X2
                 aria-hidden="true"
-                className="h-4 w-4"
+                className="h-[18px] w-[18px]"
               />
             </button>
 
             <button
               type="button"
               onClick={() =>
-                setViewMode(
-                  "list",
-                )
+                setViewMode("list")
               }
               aria-label="Afficher en liste"
               aria-pressed={
-                viewMode ===
-                "list"
+                viewMode === "list"
               }
               className={cn(
-                "flex h-9 w-9 items-center justify-center rounded-lg outline-none transition active:scale-95 focus-visible:ring-2 focus-visible:ring-lime-400/70",
-                viewMode ===
-                  "list"
-                  ? "bg-lime-500/[0.1] text-lime-300"
-                  : "text-neutral-600 hover:bg-white/[0.04] hover:text-white",
+                "flex h-10 w-10 items-center justify-center rounded-lg outline-none transition active:scale-95 focus-visible:ring-2 focus-visible:ring-lime-400/70",
+                viewMode === "list"
+                  ? "border border-lime-500/20 bg-lime-500/[0.14] text-lime-400"
+                  : "text-neutral-500 hover:bg-white/[0.04] hover:text-white",
               )}
             >
               <List
                 aria-hidden="true"
-                className="h-4 w-4"
+                className="h-[19px] w-[19px]"
               />
             </button>
           </div>
         </div>
       </div>
 
-      {displayedCount >
-      0 ? (
+      {displayedCount > 0 ? (
         <>
+          {/*
+            VERSION MOBILE
+
+            Sur téléphone, les événements sont toujours
+            affichés en liste horizontale comme sur
+            l’image de référence.
+          */}
           <div
             role="list"
             aria-label="Liste des événements"
-            className={cn(
-              "mt-5 w-full min-w-0",
-              viewMode ===
-                "grid"
-                ? "grid gap-4 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4"
-                : "space-y-3",
-            )}
+            className="mt-5 space-y-3 sm:hidden"
           >
             {events.map(
               (
@@ -310,28 +260,18 @@ export default function ClientAllEvents({
                 index,
               ) => (
                 <div
-                  key={
-                    event.id
-                  }
+                  key={event.id}
                   role="listitem"
-                  className="min-w-0"
+                  className="min-w-0 overflow-hidden"
                 >
                   <ClientEventCard
-                    event={
-                      event
-                    }
-                    variant={
-                      viewMode ===
-                      "grid"
-                        ? "grid"
-                        : "list"
-                    }
+                    event={event}
+                    variant="list"
                     eventBasePath={
                       eventBasePath
                     }
                     priority={
-                      index <
-                      2
+                      index < 2
                     }
                     initiallyFavorite={
                       favoriteIds.has(
@@ -350,53 +290,90 @@ export default function ClientAllEvents({
             )}
           </div>
 
-          <div className="mt-5 flex flex-col gap-3 rounded-2xl border border-white/[0.07] bg-white/[0.018] px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
-            <div className="flex items-center gap-2 text-[11px] text-neutral-600">
-              <Sparkles
-                aria-hidden="true"
-                className="h-3.5 w-3.5 text-orange-400"
-              />
+          {/*
+            VERSION TABLETTE ET PC
 
-              <span>
-                Page{" "}
-                <strong className="font-black text-neutral-300">
-                  {
-                    currentPage
-                  }
-                </strong>
+            Le visiteur peut choisir entre la grille
+            et la liste sans modifier la présentation
+            mobile.
+          */}
+          <div
+            role="list"
+            aria-label="Liste des événements"
+            className={cn(
+              "mt-6 hidden w-full min-w-0 sm:block",
+              viewMode === "grid"
+                ? "sm:grid sm:grid-cols-2 sm:gap-4 xl:grid-cols-3 2xl:grid-cols-4"
+                : "sm:space-y-3",
+            )}
+          >
+            {events.map(
+              (
+                event,
+                index,
+              ) => (
+                <div
+                  key={event.id}
+                  role="listitem"
+                  className="min-w-0"
+                >
+                  <ClientEventCard
+                    event={event}
+                    variant={
+                      viewMode === "grid"
+                        ? "grid"
+                        : "list"
+                    }
+                    eventBasePath={
+                      eventBasePath
+                    }
+                    priority={
+                      index < 2
+                    }
+                    initiallyFavorite={
+                      favoriteIds.has(
+                        event.id,
+                      )
+                    }
+                    favoriteDisabled={
+                      favoriteDisabled
+                    }
+                    onFavoriteChange={
+                      onFavoriteChange
+                    }
+                  />
+                </div>
+              ),
+            )}
+          </div>
 
-                {totalPages >
-                  0 && (
-                  <>
-                    {" "}
-                    sur{" "}
-                    <strong className="font-black text-neutral-300">
-                      {
-                        totalPages
-                      }
-                    </strong>
-                  </>
-                )}
-              </span>
-            </div>
-
-            <p className="text-[11px] text-neutral-600">
-              {
-                formatEventCount(
-                  displayedCount,
-                )
-              }{" "}
+          <div className="mt-5 flex flex-col gap-2 border-t border-white/[0.06] pt-4 sm:flex-row sm:items-center sm:justify-between">
+            <p className="text-[11px] font-medium text-neutral-600">
+              {formatEventCount(
+                totalItems,
+              )}{" "}
               événement
-              {displayedCount >
-              1
+              {totalItems > 1
                 ? "s"
                 : ""}{" "}
-              affiché
-              {displayedCount >
-              1
+              disponible
+              {totalItems > 1
                 ? "s"
                 : ""}
             </p>
+
+            {totalPages > 0 && (
+              <p className="text-[11px] font-medium text-neutral-600">
+                Page{" "}
+                <strong className="font-black text-neutral-300">
+                  {currentPage}
+                </strong>{" "}
+                sur{" "}
+                <strong className="font-black text-neutral-300">
+                  {totalPages}
+                </strong>
+              </p>
+            )}
           </div>
         </>
       ) : (
@@ -409,26 +386,18 @@ export default function ClientAllEvents({
           </span>
 
           <h3 className="mt-4 text-lg font-black text-white">
-            {
-              emptyTitle
-            }
+            {emptyTitle}
           </h3>
 
           <p className="mx-auto mt-2 max-w-lg text-sm leading-6 text-neutral-600">
-            {
-              emptyDescription
-            }
+            {emptyDescription}
           </p>
 
           <Link
-            href={
-              emptyActionHref
-            }
+            href={emptyActionHref}
             className="group mt-5 inline-flex h-11 items-center justify-center gap-2 rounded-xl border border-lime-500/20 bg-lime-500/[0.07] px-4 text-xs font-black text-lime-300 outline-none transition hover:border-lime-500/30 hover:bg-lime-500/[0.12] focus-visible:ring-2 focus-visible:ring-lime-400/70 focus-visible:ring-offset-2 focus-visible:ring-offset-[#03070a]"
           >
-            {
-              emptyActionLabel
-            }
+            {emptyActionLabel}
 
             <ArrowRight
               aria-hidden="true"
