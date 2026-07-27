@@ -45,6 +45,7 @@ function hashSessionToken(token: string): string {
 
 async function getAuthenticatedCustomer() {
   const cookieStore = await cookies();
+
   const sessionToken = cookieStore
     .get(CLIENT_SESSION_COOKIE_NAME)
     ?.value?.trim();
@@ -163,7 +164,11 @@ export async function GET() {
                 name: true,
                 price: true,
                 quantity: true,
-                sold: true,
+                _count: {
+                  select: {
+                    tickets: true,
+                  },
+                },
               },
             },
           },
@@ -175,13 +180,27 @@ export async function GET() {
       const availableTicketTypes =
         favorite.event.ticketTypes.filter(
           (ticketType) =>
-            ticketType.quantity - ticketType.sold > 0,
+            ticketType.quantity -
+              ticketType._count.tickets >
+            0,
         );
 
       const lowestPrice =
         availableTicketTypes[0]?.price ??
         favorite.event.ticketTypes[0]?.price ??
         null;
+
+      const availableTicketsCount =
+        availableTicketTypes.reduce(
+          (total, ticketType) =>
+            total +
+            Math.max(
+              0,
+              ticketType.quantity -
+                ticketType._count.tickets,
+            ),
+          0,
+        );
 
       return {
         id: favorite.id,
@@ -204,18 +223,14 @@ export async function GET() {
           currency: favorite.event.currency,
           category: favorite.event.category,
           lowestPrice: lowestPrice?.toFixed(2) ?? null,
-          isFree: lowestPrice ? lowestPrice.equals(0) : false,
-          isUpcoming: favorite.event.startsAt > now,
-          availableTicketsCount:
-            availableTicketTypes.reduce(
-              (total, ticketType) =>
-                total +
-                Math.max(
-                  0,
-                  ticketType.quantity - ticketType.sold,
-                ),
-              0,
-            ),
+          isFree:
+            lowestPrice !== null
+              ? lowestPrice.equals(0)
+              : false,
+          isUpcoming:
+            favorite.event.startsAt.getTime() >
+            now.getTime(),
+          availableTicketsCount,
         },
       };
     });
@@ -232,7 +247,10 @@ export async function GET() {
       favorites: items,
     });
   } catch (error) {
-    console.error("[CLIENT_FAVORITES_GET_ERROR]", error);
+    console.error(
+      "[CLIENT_FAVORITES_GET_ERROR]",
+      error,
+    );
 
     return jsonResponse(
       {
@@ -271,13 +289,15 @@ export async function POST(request: Request) {
         {
           success: false,
           code: "INVALID_JSON",
-          message: "La requête envoyée est invalide.",
+          message:
+            "La requête envoyée est invalide.",
         },
         400,
       );
     }
 
-    const parsedBody = addFavoriteSchema.safeParse(rawBody);
+    const parsedBody =
+      addFavoriteSchema.safeParse(rawBody);
 
     if (!parsedBody.success) {
       return jsonResponse(
@@ -398,10 +418,14 @@ export async function POST(request: Request) {
       201,
     );
   } catch (error) {
-    console.error("[CLIENT_FAVORITES_POST_ERROR]", error);
+    console.error(
+      "[CLIENT_FAVORITES_POST_ERROR]",
+      error,
+    );
 
     if (
-      error instanceof Prisma.PrismaClientKnownRequestError &&
+      error instanceof
+        Prisma.PrismaClientKnownRequestError &&
       error.code === "P2002"
     ) {
       return jsonResponse({
