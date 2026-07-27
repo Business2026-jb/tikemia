@@ -51,6 +51,10 @@ model User {
   platformReportsCreated  PlatformReport[]         @relation("PlatformReportReporter")
   platformReportsAssigned PlatformReport[]         @relation("PlatformReportAssignee")
 
+  ownedTickets            Ticket[]         @relation("TicketOwner")
+  sentTicketTransfers     TicketTransfer[] @relation("TicketTransferSender")
+  receivedTicketTransfers TicketTransfer[] @relation("TicketTransferRecipient")
+
   @@index([role])
   @@index([isActive])
 }
@@ -331,31 +335,127 @@ model Payment {
 }
 
 model Ticket {
-  id           String       @id @default(cuid())
-  code         String       @unique
-  qrCodeValue  String       @unique
+  id           String @id @default(cuid())
+  code         String @unique
+  qrCodeValue  String @unique
   eventId      String
   orderId      String
   orderItemId  String
   ticketTypeId String
-  holderName   String
-  holderEmail  String
-  holderPhone  String?
-  status       TicketStatus @default(VALID)
-  usedAt       DateTime?
-  createdAt    DateTime     @default(now())
-  updatedAt    DateTime     @updatedAt
-  event        Event        @relation(fields: [eventId], references: [id])
-  order        Order        @relation(fields: [orderId], references: [id], onDelete: Cascade)
-  orderItem    OrderItem    @relation(fields: [orderItemId], references: [id], onDelete: Cascade)
-  ticketType   TicketType   @relation(fields: [ticketTypeId], references: [id])
+
+  // Propriétaire actuel du billet
+  ownerId String?
+
+  holderName  String
+  holderEmail String
+  holderPhone String?
+
+  status    TicketStatus @default(VALID)
+  usedAt    DateTime?
+  createdAt DateTime     @default(now())
+  updatedAt DateTime     @updatedAt
+
+  event Event @relation(fields: [eventId], references: [id])
+
+  order Order @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  orderItem OrderItem @relation(fields: [orderItemId], references: [id], onDelete: Cascade)
+
+  ticketType TicketType @relation(fields: [ticketTypeId], references: [id])
+
+  owner User? @relation("TicketOwner", fields: [ownerId], references: [id], onDelete: SetNull)
+
+  transferItems TicketTransferItem[]
 
   @@index([eventId])
   @@index([orderId])
   @@index([orderItemId])
   @@index([ticketTypeId])
+  @@index([ownerId])
   @@index([status])
   @@index([holderEmail])
+}
+
+model TicketTransfer {
+  id          String @id @default(cuid())
+  reference   String @unique
+  senderId    String
+  recipientId String
+
+  status TicketTransferStatus @default(PENDING_VERIFICATION)
+
+  verificationCodeHash           String
+  verificationAttempts           Int                 @default(0)
+  verificationResendCount        Int                 @default(0)
+  verificationExpiresAt          DateTime
+  verificationCodeSentAt         DateTime?
+  verificationLastResentAt       DateTime?
+  verificationVerifiedAt         DateTime?
+  verificationEmailStatus        TransferEmailStatus @default(PENDING)
+  verificationEmailFailureReason String?
+
+  requestedAt DateTime  @default(now())
+  completedAt DateTime?
+  expiredAt   DateTime?
+  cancelledAt DateTime?
+  failedAt    DateTime?
+
+  failureReason String?
+
+  senderEmailStatus        TransferEmailStatus @default(PENDING)
+  senderEmailSentAt        DateTime?
+  senderEmailFailureReason String?
+
+  recipientEmailStatus        TransferEmailStatus @default(PENDING)
+  recipientEmailSentAt        DateTime?
+  recipientEmailFailureReason String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  sender User @relation("TicketTransferSender", fields: [senderId], references: [id], onDelete: Restrict)
+
+  recipient User @relation("TicketTransferRecipient", fields: [recipientId], references: [id], onDelete: Restrict)
+
+  items TicketTransferItem[]
+
+  @@index([senderId])
+  @@index([recipientId])
+  @@index([status])
+  @@index([verificationExpiresAt])
+  @@index([requestedAt])
+  @@index([completedAt])
+  @@index([senderId, status])
+  @@index([recipientId, status])
+}
+
+model TicketTransferItem {
+  id         String @id @default(cuid())
+  transferId String
+  ticketId   String
+
+  previousOwnerId     String?
+  previousHolderName  String
+  previousHolderEmail String
+  previousHolderPhone String?
+
+  newOwnerId     String
+  newHolderName  String
+  newHolderEmail String
+  newHolderPhone String?
+
+  createdAt     DateTime  @default(now())
+  transferredAt DateTime?
+
+  transfer TicketTransfer @relation(fields: [transferId], references: [id], onDelete: Cascade)
+
+  ticket Ticket @relation(fields: [ticketId], references: [id], onDelete: Restrict)
+
+  @@unique([transferId, ticketId])
+  @@index([transferId])
+  @@index([ticketId])
+  @@index([previousOwnerId])
+  @@index([newOwnerId])
 }
 
 model PayoutDestination {
@@ -1188,4 +1288,19 @@ enum ReportStatus {
   UNDER_REVIEW
   RESOLVED
   DISMISSED
+}
+
+enum TicketTransferStatus {
+  PENDING_VERIFICATION
+  PROCESSING
+  COMPLETED
+  EXPIRED
+  CANCELLED
+  FAILED
+}
+
+enum TransferEmailStatus {
+  PENDING
+  SENT
+  FAILED
 }
