@@ -1,6 +1,5 @@
 "use client";
 
-import Image from "next/image";
 import Link from "next/link";
 import { FormEvent, useEffect, useMemo, useState } from "react";
 import {
@@ -260,39 +259,6 @@ export default function ClientRegisterPage() {
       </div>
 
       <div className="relative z-10 flex min-h-screen flex-col">
-        <header className="border-b border-white/[0.07] bg-[#03070a]/90 backdrop-blur-xl">
-          <div className="mx-auto flex h-[76px] w-full max-w-[1600px] items-center justify-between px-4 sm:px-6 lg:h-[88px] lg:px-8 xl:px-12">
-            <Link
-              href="/"
-              aria-label="Retour à l’accueil Tikemia"
-              className="flex items-center"
-            >
-              <Image
-                src="/logo.png"
-                alt="Tikemia"
-                width={220}
-                height={68}
-                priority
-                className="h-auto w-[152px] object-contain sm:w-[178px]"
-              />
-            </Link>
-
-            <div className="flex items-center gap-3">
-              <div className="hidden items-center gap-2 text-sm text-neutral-400 md:flex">
-                <ShieldCheck className="h-[18px] w-[18px] text-lime-400" />
-                <span>Inscription sécurisée</span>
-              </div>
-
-              <Link
-                href="/login"
-                className="inline-flex h-10 items-center justify-center rounded-xl border border-emerald-500/50 bg-emerald-500/[0.05] px-4 text-sm font-bold text-white transition hover:border-emerald-400 hover:bg-emerald-500/[0.1] sm:h-11 sm:px-6"
-              >
-                Connexion
-              </Link>
-            </div>
-          </div>
-        </header>
-
         <section className="flex flex-1">
           <div className="mx-auto grid w-full max-w-[1600px] flex-1 lg:grid-cols-[0.92fr_1.08fr]">
             <div className="relative hidden min-h-[760px] overflow-hidden border-r border-white/[0.07] lg:flex lg:flex-col lg:justify-between">
@@ -692,23 +658,6 @@ export default function ClientRegisterPage() {
           </div>
         </section>
 
-        <footer className="border-t border-white/[0.07] bg-[#03070a]/90">
-          <div className="mx-auto flex w-full max-w-[1600px] flex-col gap-3 px-4 py-5 text-xs text-neutral-600 sm:flex-row sm:items-center sm:justify-between sm:px-6 lg:px-8 xl:px-12">
-            <p>© {new Date().getFullYear()} Tikemia. Tous droits réservés.</p>
-
-            <div className="flex items-center gap-5">
-              <Link href="/support" className="transition hover:text-white">
-                Assistance
-              </Link>
-              <Link
-                href="/privacy-policy"
-                className="transition hover:text-white"
-              >
-                Confidentialité
-              </Link>
-            </div>
-          </div>
-        </footer>
       </div>
     </main>
   );
