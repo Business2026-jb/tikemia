@@ -54,6 +54,7 @@ model User {
   ownedTickets            Ticket[]         @relation("TicketOwner")
   sentTicketTransfers     TicketTransfer[] @relation("TicketTransferSender")
   receivedTicketTransfers TicketTransfer[] @relation("TicketTransferRecipient")
+  favoriteEvents          EventFavorite[]
 
   @@index([role])
   @@index([isActive])
@@ -141,15 +142,16 @@ model PasswordReset {
 }
 
 model EventCategory {
-  id          String   @id @default(cuid())
+  id          String          @id @default(cuid())
   name        String
-  slug        String   @unique
+  slug        String          @unique
   description String?
   icon        String?
-  isActive    Boolean  @default(true)
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  isActive    Boolean         @default(true)
+  createdAt   DateTime        @default(now())
+  updatedAt   DateTime        @updatedAt
   events      Event[]
+  favoritedBy EventFavorite[]
 
   @@index([isActive])
 }
@@ -211,6 +213,7 @@ model Event {
   moderationLogs        EventModerationLog[]
   boosts                EventBoost[]
   platformReports       PlatformReport[]
+  eventFavorites        EventFavorite[]
 
   @@index([organizerId])
   @@index([categoryId])
@@ -1303,4 +1306,21 @@ enum TransferEmailStatus {
   PENDING
   SENT
   FAILED
+}
+
+model EventFavorite {
+  id        String   @id @default(cuid())
+  userId    String
+  eventId   String
+  createdAt DateTime @default(now())
+
+  user            User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  event           Event          @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  eventCategory   EventCategory? @relation(fields: [eventCategoryId], references: [id])
+  eventCategoryId String?
+
+  @@unique([userId, eventId])
+  @@index([userId])
+  @@index([eventId])
+  @@index([createdAt])
 }
