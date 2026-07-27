@@ -3,6 +3,7 @@ import type { Metadata } from "next";
 import Image from "next/image";
 import Link from "next/link";
 import {
+  ArrowRight,
   CalendarDays,
   CheckCircle2,
   CircleAlert,
@@ -24,7 +25,7 @@ import { prisma } from "@/lib/prisma";
 export const metadata: Metadata = {
   title: "Mes billets | Tikemia",
   description:
-    "Consultez et gérez vos billets Tikemia.",
+    "Consultez, téléchargez et transférez vos billets Tikemia.",
 };
 
 export const dynamic = "force-dynamic";
@@ -188,8 +189,7 @@ function getTicketStatusIcon(
 function isUpcomingEvent(
   startsAt: Date,
 ): boolean {
-  return startsAt.getTime() >
-    Date.now();
+  return startsAt.getTime() > Date.now();
 }
 
 function truncateTicketCode(
@@ -371,19 +371,80 @@ export default async function ClientTicketsPage({
       },
     });
 
+  const totalTickets =
+    tickets.length;
+
+  const validTickets =
+    tickets.filter(
+      (ticket) =>
+        ticket.status === "VALID",
+    ).length;
+
+  const upcomingTickets =
+    tickets.filter(
+      (ticket) =>
+        ticket.status === "VALID" &&
+        isUpcomingEvent(
+          ticket.event.startsAt,
+        ),
+    ).length;
+
   return (
-    <div className="w-full min-w-0 pb-[calc(7rem+env(safe-area-inset-bottom))] lg:pb-8">
-      <div className="mb-5">
-        <h1 className="text-2xl font-black tracking-[-0.04em] text-white sm:text-3xl">
-          Mes billets
-        </h1>
+    <div className="w-full min-w-0 pb-[calc(7.5rem+env(safe-area-inset-bottom))] lg:pb-10">
+      <section className="relative overflow-hidden rounded-[24px] border border-white/[0.08] bg-[#071015] p-5 shadow-[0_20px_60px_rgba(0,0,0,0.2)] sm:p-6 lg:p-7">
+        <div
+          aria-hidden="true"
+          className="absolute -right-20 -top-24 h-64 w-64 rounded-full bg-emerald-500/[0.09] blur-[100px]"
+        />
 
-        <p className="mt-2 text-sm text-neutral-500">
-          Retrouvez les billets associés à votre compte.
-        </p>
-      </div>
+        <div className="relative flex flex-col gap-5 lg:flex-row lg:items-center lg:justify-between">
+          <div className="min-w-0">
+            <p className="text-[10px] font-black uppercase tracking-[0.15em] text-lime-400">
+              {customer.firstName}, vos billets
+            </p>
 
-      <section className="rounded-[20px] border border-white/[0.08] bg-[#071015] p-4 sm:p-5">
+            <h1 className="mt-3 text-3xl font-black tracking-[-0.04em] text-white sm:text-4xl">
+              Mes billets
+            </h1>
+
+            <div className="mt-3 flex flex-wrap gap-x-5 gap-y-2 text-sm text-neutral-500">
+              <span>
+                {totalTickets} billet
+                {totalTickets > 1 ? "s" : ""}
+              </span>
+
+              <span>
+                {validTickets} valide
+                {validTickets > 1 ? "s" : ""}
+              </span>
+
+              <span>
+                {upcomingTickets} à venir
+              </span>
+            </div>
+          </div>
+
+          <div className="grid w-full gap-2 sm:grid-cols-2 lg:w-auto lg:flex">
+            <Link
+              href="/account/transfers"
+              className="inline-flex h-12 w-full items-center justify-center gap-2 rounded-xl border border-lime-400/25 bg-lime-400/[0.08] px-5 text-sm font-black text-lime-300 transition hover:bg-lime-400/[0.14] lg:w-auto"
+            >
+              <Send className="h-4.5 w-4.5" />
+              Transférer mes billets
+            </Link>
+
+            <Link
+              href="/events"
+              className="inline-flex h-12 w-full items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-emerald-500 via-lime-500 to-orange-500 px-5 text-sm font-black text-white transition hover:scale-[1.01] lg:w-auto"
+            >
+              Voir les événements
+              <ArrowRight className="h-4.5 w-4.5" />
+            </Link>
+          </div>
+        </div>
+      </section>
+
+      <section className="mt-4 rounded-[22px] border border-white/[0.08] bg-[#071015] p-4 sm:p-5">
         <form
           action="/account/tickets"
           method="GET"
@@ -396,7 +457,7 @@ export default async function ClientTicketsPage({
               type="search"
               name="search"
               defaultValue={search}
-              placeholder="Rechercher un billet"
+              placeholder="Rechercher dans mes billets"
               className="h-12 w-full rounded-xl border border-white/[0.09] bg-[#03090d] pl-11 pr-4 text-sm text-white outline-none transition placeholder:text-neutral-700 focus:border-emerald-500/50 focus:ring-4 focus:ring-emerald-500/[0.08]"
             />
           </div>
@@ -411,14 +472,14 @@ export default async function ClientTicketsPage({
 
           <button
             type="submit"
-            className="inline-flex h-12 items-center justify-center gap-2 rounded-xl border border-emerald-400/20 bg-emerald-400/[0.07] px-5 text-sm font-black text-lime-300 transition hover:bg-emerald-400/[0.12]"
+            className="inline-flex h-12 w-full items-center justify-center gap-2 rounded-xl border border-emerald-400/20 bg-emerald-400/[0.07] px-5 text-sm font-black text-lime-300 transition hover:bg-emerald-400/[0.12] sm:w-auto"
           >
             <Search className="h-4 w-4" />
             Rechercher
           </button>
         </form>
 
-        <div className="mt-4 flex gap-2 overflow-x-auto pb-1">
+        <div className="mt-4 flex gap-2 overflow-x-auto pb-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
           {STATUS_FILTERS.map(
             (filter) => {
               const active =
@@ -653,7 +714,7 @@ function ClientTicketCard({
         <div className="mt-4 grid gap-2 sm:grid-cols-3">
           <Link
             href={`/account/tickets/${ticket.id}`}
-            className="inline-flex h-11 items-center justify-center gap-2 rounded-xl border border-lime-400/20 bg-lime-400/[0.08] px-4 text-xs font-black text-lime-300 transition hover:bg-lime-400/[0.13]"
+            className="inline-flex h-11 w-full items-center justify-center gap-2 rounded-xl border border-lime-400/20 bg-lime-400/[0.08] px-4 text-xs font-black text-lime-300 transition hover:bg-lime-400/[0.13]"
           >
             <QrCode className="h-4 w-4" />
             Afficher
@@ -661,7 +722,7 @@ function ClientTicketCard({
 
           <Link
             href={`/api/client/tickets/${ticket.id}/download`}
-            className="inline-flex h-11 items-center justify-center gap-2 rounded-xl border border-white/[0.08] bg-white/[0.025] px-4 text-xs font-black text-neutral-400 transition hover:border-white/[0.13] hover:text-white"
+            className="inline-flex h-11 w-full items-center justify-center gap-2 rounded-xl border border-white/[0.08] bg-white/[0.025] px-4 text-xs font-black text-neutral-400 transition hover:border-white/[0.13] hover:text-white"
           >
             <Download className="h-4 w-4" />
             Télécharger
@@ -672,13 +733,13 @@ function ClientTicketCard({
               href={`/account/transfers?ticket=${encodeURIComponent(
                 ticket.id,
               )}`}
-              className="inline-flex h-11 items-center justify-center gap-2 rounded-xl border border-orange-400/20 bg-orange-400/[0.07] px-4 text-xs font-black text-orange-300 transition hover:bg-orange-400/[0.12]"
+              className="inline-flex h-11 w-full items-center justify-center gap-2 rounded-xl border border-orange-400/20 bg-orange-400/[0.07] px-4 text-xs font-black text-orange-300 transition hover:bg-orange-400/[0.12]"
             >
               <Send className="h-4 w-4" />
               Transférer
             </Link>
           ) : (
-            <span className="inline-flex h-11 items-center justify-center gap-2 rounded-xl border border-white/[0.06] bg-white/[0.02] px-4 text-xs font-black text-neutral-700">
+            <span className="inline-flex h-11 w-full items-center justify-center gap-2 rounded-xl border border-white/[0.06] bg-white/[0.02] px-4 text-xs font-black text-neutral-700">
               <Send className="h-4 w-4" />
               Indisponible
             </span>
@@ -740,14 +801,24 @@ function EmptyTicketsState({
           : "Vos billets apparaîtront ici après la confirmation de vos achats."}
       </p>
 
-      {hasFilters && (
+      <div className="mt-7 flex flex-col justify-center gap-3 sm:flex-row">
+        {hasFilters && (
+          <Link
+            href="/account/tickets"
+            className="inline-flex h-11 w-full items-center justify-center rounded-xl border border-white/[0.09] bg-white/[0.025] px-5 text-xs font-black text-neutral-300 transition hover:bg-white/[0.05] hover:text-white sm:w-auto"
+          >
+            Réinitialiser les filtres
+          </Link>
+        )}
+
         <Link
-          href="/account/tickets"
-          className="mt-6 inline-flex h-11 items-center justify-center rounded-xl border border-white/[0.09] bg-white/[0.025] px-5 text-xs font-black text-neutral-300 transition hover:bg-white/[0.05] hover:text-white"
+          href="/events"
+          className="inline-flex h-11 w-full items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-emerald-500 via-lime-500 to-orange-500 px-5 text-xs font-black text-white sm:w-auto"
         >
-          Réinitialiser les filtres
+          Voir les événements
+          <ArrowRight className="h-4 w-4" />
         </Link>
-      )}
+      </div>
     </section>
   );
 }
