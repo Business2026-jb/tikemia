@@ -3,13 +3,11 @@ import type { Metadata } from "next";
 import Image from "next/image";
 import Link from "next/link";
 import {
-  ArrowRight,
   CalendarDays,
   CheckCircle2,
   CircleAlert,
   Clock3,
   Download,
-  ExternalLink,
   History,
   MapPin,
   QrCode,
@@ -26,7 +24,7 @@ import { prisma } from "@/lib/prisma";
 export const metadata: Metadata = {
   title: "Mes billets | Tikemia",
   description:
-    "Retrouvez, consultez et transférez vos billets Tikemia.",
+    "Consultez et gérez vos billets Tikemia.",
 };
 
 export const dynamic = "force-dynamic";
@@ -373,84 +371,19 @@ export default async function ClientTicketsPage({
       },
     });
 
-  const totalTickets =
-    tickets.length;
-
-  const validTickets =
-    tickets.filter(
-      (ticket) =>
-        ticket.status === "VALID",
-    ).length;
-
-  const upcomingTickets =
-    tickets.filter(
-      (ticket) =>
-        ticket.status === "VALID" &&
-        isUpcomingEvent(
-          ticket.event.startsAt,
-        ),
-    ).length;
-
   return (
     <div className="w-full min-w-0 pb-[calc(7rem+env(safe-area-inset-bottom))] lg:pb-8">
-      <section className="relative overflow-hidden rounded-[24px] border border-white/[0.08] bg-[#071015] p-5 shadow-[0_20px_60px_rgba(0,0,0,0.2)] sm:p-6 lg:p-7">
-        <div
-          aria-hidden="true"
-          className="absolute -right-20 -top-24 h-64 w-64 rounded-full bg-emerald-500/[0.09] blur-[100px]"
-        />
+      <div className="mb-5">
+        <h1 className="text-2xl font-black tracking-[-0.04em] text-white sm:text-3xl">
+          Mes billets
+        </h1>
 
-        <div className="relative flex flex-col gap-5 lg:flex-row lg:items-center lg:justify-between">
-          <div className="min-w-0">
-            <p className="text-[10px] font-black uppercase tracking-[0.15em] text-lime-400">
-              {customer.firstName}, vos billets
-            </p>
+        <p className="mt-2 text-sm text-neutral-500">
+          Retrouvez les billets associés à votre compte.
+        </p>
+      </div>
 
-            <h1 className="mt-3 text-3xl font-black tracking-[-0.04em] text-white sm:text-4xl">
-              Mes billets
-            </h1>
-
-            <div className="mt-3 flex flex-wrap gap-x-5 gap-y-2 text-sm text-neutral-500">
-              <span>
-                {totalTickets} billet
-                {totalTickets > 1
-                  ? "s"
-                  : ""}
-              </span>
-
-              <span>
-                {validTickets} valide
-                {validTickets > 1
-                  ? "s"
-                  : ""}
-              </span>
-
-              <span>
-                {upcomingTickets} à venir
-              </span>
-            </div>
-          </div>
-
-          <div className="grid gap-2 sm:grid-cols-2 lg:flex">
-            <Link
-              href="/account/transfers"
-              className="inline-flex h-12 items-center justify-center gap-2 rounded-xl border border-lime-400/25 bg-lime-400/[0.08] px-5 text-sm font-black text-lime-300 transition hover:bg-lime-400/[0.14]"
-            >
-              <Send className="h-4.5 w-4.5" />
-              Transférer mes billets
-            </Link>
-
-            <Link
-              href="/events"
-              className="inline-flex h-12 items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-emerald-500 via-lime-500 to-orange-500 px-5 text-sm font-black text-white transition hover:scale-[1.01]"
-            >
-              Voir les événements
-              <ArrowRight className="h-4.5 w-4.5" />
-            </Link>
-          </div>
-        </div>
-      </section>
-
-      <section className="mt-4 rounded-[22px] border border-white/[0.08] bg-[#071015] p-4 sm:p-5">
+      <section className="rounded-[20px] border border-white/[0.08] bg-[#071015] p-4 sm:p-5">
         <form
           action="/account/tickets"
           method="GET"
@@ -463,7 +396,7 @@ export default async function ClientTicketsPage({
               type="search"
               name="search"
               defaultValue={search}
-              placeholder="Rechercher dans mes billets"
+              placeholder="Rechercher un billet"
               className="h-12 w-full rounded-xl border border-white/[0.09] bg-[#03090d] pl-11 pr-4 text-sm text-white outline-none transition placeholder:text-neutral-700 focus:border-emerald-500/50 focus:ring-4 focus:ring-emerald-500/[0.08]"
             />
           </div>
@@ -601,7 +534,7 @@ function ClientTicketCard({
     upcoming;
 
   return (
-    <article className="group min-w-0 overflow-hidden rounded-[24px] border border-white/[0.08] bg-[#071015] shadow-[0_20px_60px_rgba(0,0,0,0.18)] transition hover:border-white/[0.13]">
+    <article className="group min-w-0 overflow-hidden rounded-[22px] border border-white/[0.08] bg-[#071015] shadow-[0_18px_50px_rgba(0,0,0,0.16)] transition hover:border-white/[0.13]">
       <div className="relative aspect-[16/8] overflow-hidden bg-[#03090d] sm:aspect-[16/7]">
         {ticket.event.coverImage ? (
           <Image
@@ -717,13 +650,21 @@ function ClientTicketCard({
           </div>
         </div>
 
-        <div className="mt-4 grid gap-2 sm:grid-cols-2">
+        <div className="mt-4 grid gap-2 sm:grid-cols-3">
           <Link
             href={`/account/tickets/${ticket.id}`}
             className="inline-flex h-11 items-center justify-center gap-2 rounded-xl border border-lime-400/20 bg-lime-400/[0.08] px-4 text-xs font-black text-lime-300 transition hover:bg-lime-400/[0.13]"
           >
             <QrCode className="h-4 w-4" />
-            Afficher le billet
+            Afficher
+          </Link>
+
+          <Link
+            href={`/api/client/tickets/${ticket.id}/download`}
+            className="inline-flex h-11 items-center justify-center gap-2 rounded-xl border border-white/[0.08] bg-white/[0.025] px-4 text-xs font-black text-neutral-400 transition hover:border-white/[0.13] hover:text-white"
+          >
+            <Download className="h-4 w-4" />
+            Télécharger
           </Link>
 
           {transferAllowed ? (
@@ -739,27 +680,9 @@ function ClientTicketCard({
           ) : (
             <span className="inline-flex h-11 items-center justify-center gap-2 rounded-xl border border-white/[0.06] bg-white/[0.02] px-4 text-xs font-black text-neutral-700">
               <Send className="h-4 w-4" />
-              Transfert indisponible
+              Indisponible
             </span>
           )}
-        </div>
-
-        <div className="mt-2 grid gap-2 sm:grid-cols-2">
-          <Link
-            href={`/events/${ticket.event.slug}`}
-            className="inline-flex h-11 items-center justify-center gap-2 rounded-xl border border-white/[0.08] bg-white/[0.025] px-4 text-xs font-black text-neutral-400 transition hover:border-white/[0.13] hover:text-white"
-          >
-            <ExternalLink className="h-4 w-4" />
-            Voir l’événement
-          </Link>
-
-          <Link
-            href={`/api/client/tickets/${ticket.id}/download`}
-            className="inline-flex h-11 items-center justify-center gap-2 rounded-xl border border-white/[0.08] bg-white/[0.025] px-4 text-xs font-black text-neutral-400 transition hover:border-white/[0.13] hover:text-white"
-          >
-            <Download className="h-4 w-4" />
-            Télécharger
-          </Link>
         </div>
       </div>
     </article>
@@ -800,7 +723,7 @@ function EmptyTicketsState({
   hasFilters: boolean;
 }) {
   return (
-    <section className="mt-4 rounded-[24px] border border-dashed border-white/[0.1] bg-[#071015] px-5 py-14 text-center sm:px-8 sm:py-20">
+    <section className="mt-4 rounded-[22px] border border-dashed border-white/[0.1] bg-[#071015] px-5 py-14 text-center sm:px-8 sm:py-20">
       <span className="mx-auto flex h-16 w-16 items-center justify-center rounded-2xl border border-lime-400/15 bg-lime-400/[0.06] text-lime-300">
         <Ticket className="h-8 w-8" />
       </span>
@@ -817,24 +740,14 @@ function EmptyTicketsState({
           : "Vos billets apparaîtront ici après la confirmation de vos achats."}
       </p>
 
-      <div className="mt-7 flex flex-col justify-center gap-3 sm:flex-row">
-        {hasFilters && (
-          <Link
-            href="/account/tickets"
-            className="inline-flex h-11 items-center justify-center rounded-xl border border-white/[0.09] bg-white/[0.025] px-5 text-xs font-black text-neutral-300 transition hover:bg-white/[0.05] hover:text-white"
-          >
-            Réinitialiser les filtres
-          </Link>
-        )}
-
+      {hasFilters && (
         <Link
-          href="/events"
-          className="inline-flex h-11 items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-emerald-500 via-lime-500 to-orange-500 px-5 text-xs font-black text-white"
+          href="/account/tickets"
+          className="mt-6 inline-flex h-11 items-center justify-center rounded-xl border border-white/[0.09] bg-white/[0.025] px-5 text-xs font-black text-neutral-300 transition hover:bg-white/[0.05] hover:text-white"
         >
-          Voir les événements
-          <ArrowRight className="h-4 w-4" />
+          Réinitialiser les filtres
         </Link>
-      </div>
+      )}
     </section>
   );
 }
