@@ -5,12 +5,11 @@ import {
   Heart,
   Home,
   Search,
+  ShoppingBag,
   Ticket,
   User,
 } from "lucide-react";
-import {
-  usePathname,
-} from "next/navigation";
+import { usePathname } from "next/navigation";
 
 export type ClientMobileBottomNavUser = {
   id: string;
@@ -23,11 +22,16 @@ export type ClientMobileBottomNavProps = {
   exploreHref?: string;
   favoritesHref?: string;
   ticketsHref?: string;
+
+  /*
+   * Cette prop conserve son ancien nom pour éviter de casser
+   * app/(client)/layout.tsx. Lorsqu’un client est connecté,
+   * elle doit contenir la route /account/orders.
+   */
   accountHref?: string;
+
   loginHref?: string;
-
   hiddenPathPrefixes?: string[];
-
   className?: string;
 };
 
@@ -36,6 +40,7 @@ type NavigationIconName =
   | "search"
   | "heart"
   | "ticket"
+  | "orders"
   | "user";
 
 type NavigationItem = {
@@ -67,13 +72,17 @@ function normalizePath(
   value: string,
 ): string {
   const pathname =
-    value.split("?")[0]?.trim() || "/";
+    value.split("?")[0]?.trim() ||
+    "/";
 
   if (pathname === "/") {
     return "/";
   }
 
-  return pathname.replace(/\/+$/, "");
+  return pathname.replace(
+    /\/+$/,
+    "",
+  );
 }
 
 function isPathActive({
@@ -136,13 +145,12 @@ function renderNavigationIcon({
   icon: NavigationIconName;
   active: boolean;
 }) {
-  const className =
-    cn(
-      "h-[19px] w-[19px] transition duration-200",
-      active
-        ? "text-lime-400"
-        : "text-neutral-500 group-hover:text-neutral-300",
-    );
+  const className = cn(
+    "h-[19px] w-[19px] transition duration-200",
+    active
+      ? "text-lime-400"
+      : "text-neutral-500 group-hover:text-neutral-300",
+  );
 
   switch (icon) {
     case "home":
@@ -177,6 +185,14 @@ function renderNavigationIcon({
         />
       );
 
+    case "orders":
+      return (
+        <ShoppingBag
+          aria-hidden="true"
+          className={className}
+        />
+      );
+
     default:
       return (
         <User
@@ -194,7 +210,7 @@ export default function ClientMobileBottomNav({
   exploreHref = "/events",
   favoritesHref = "/favorites",
   ticketsHref = "/account/tickets",
-  accountHref = "/account/profile",
+  accountHref = "/account/orders",
   loginHref = "/login",
 
   hiddenPathPrefixes = [
@@ -206,14 +222,16 @@ export default function ClientMobileBottomNav({
   const pathname =
     usePathname();
 
+  const normalizedPath =
+    normalizePath(pathname);
+
   const shouldHide =
     hiddenPathPrefixes.some(
-      (prefix) => {
+      (
+        prefix,
+      ) => {
         const normalizedPrefix =
           normalizePath(prefix);
-
-        const normalizedPath =
-          normalizePath(pathname);
 
         return (
           normalizedPath ===
@@ -231,76 +249,50 @@ export default function ClientMobileBottomNav({
 
   const navigationItems: NavigationItem[] = [
     {
-      id:
-        "home",
-
-      label:
-        "Accueil",
-
-      href:
-        homeHref,
-
-      icon:
-        "home",
+      id: "home",
+      label: "Accueil",
+      href: homeHref,
+      icon: "home",
     },
     {
-      id:
-        "explore",
-
-      label:
-        "Explorer",
-
-      href:
-        exploreHref,
-
-      icon:
-        "search",
+      id: "explore",
+      label: "Explorer",
+      href: exploreHref,
+      icon: "search",
     },
     {
-      id:
-        "favorites",
-
-      label:
-        "Favoris",
-
-      href:
-        favoritesHref,
-
-      icon:
-        "heart",
+      id: "favorites",
+      label: "Favoris",
+      href: favoritesHref,
+      icon: "heart",
+      requiresAuthentication: true,
     },
     {
-      id:
-        "tickets",
+      id: "tickets",
+      label: "Billets",
+      href: ticketsHref,
+      icon: "ticket",
+      requiresAuthentication: true,
+    },
+    {
+      id: user
+        ? "orders"
+        : "login",
 
-      label:
-        "Billets",
+      label: user
+        ? "Commandes"
+        : "Connexion",
 
-      href:
-        ticketsHref,
+      href: user
+        ? accountHref
+        : loginHref,
 
-      icon:
-        "ticket",
+      icon: user
+        ? "orders"
+        : "user",
 
       requiresAuthentication:
-        true,
-    },
-    {
-      id:
-        "account",
-
-      label:
-        user
-          ? "Compte"
-          : "Connexion",
-
-      href:
-        user
-          ? accountHref
-          : loginHref,
-
-      icon:
-        "user",
+        Boolean(user),
     },
   ];
 
@@ -315,19 +307,12 @@ export default function ClientMobileBottomNav({
     >
       <div className="mx-auto grid w-full max-w-md grid-cols-5 gap-1">
         {navigationItems.map(
-          (item) => {
-            const active =
-              isPathActive({
-                pathname,
-
-                href:
-                  item.href,
-              });
-
+          (
+            item,
+          ) => {
             const resolvedHref =
               createProtectedHref({
-                href:
-                  item.href,
+                href: item.href,
 
                 requiresAuthentication:
                   item.requiresAuthentication,
@@ -337,22 +322,23 @@ export default function ClientMobileBottomNav({
                 loginHref,
               });
 
+            const active =
+              isPathActive({
+                pathname,
+
+                href: item.href,
+              });
+
             return (
               <Link
-                key={
-                  item.id
-                }
-                href={
-                  resolvedHref
-                }
+                key={item.id}
+                href={resolvedHref}
                 aria-current={
                   active
                     ? "page"
                     : undefined
                 }
-                aria-label={
-                  item.label
-                }
+                aria-label={item.label}
                 className={cn(
                   "group relative flex min-w-0 flex-col items-center justify-center gap-1 rounded-xl px-1 py-2 text-center outline-none transition duration-200",
                   "focus-visible:ring-2 focus-visible:ring-lime-400/70 focus-visible:ring-offset-2 focus-visible:ring-offset-[#03070a]",
@@ -378,9 +364,7 @@ export default function ClientMobileBottomNav({
                   )}
                 >
                   {renderNavigationIcon({
-                    icon:
-                      item.icon,
-
+                    icon: item.icon,
                     active,
                   })}
                 </span>
@@ -393,9 +377,7 @@ export default function ClientMobileBottomNav({
                       : "text-neutral-600 group-hover:text-neutral-300",
                   )}
                 >
-                  {
-                    item.label
-                  }
+                  {item.label}
                 </span>
               </Link>
             );

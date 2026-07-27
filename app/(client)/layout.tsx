@@ -13,17 +13,13 @@ const APP_URL =
 
 export const metadata: Metadata = {
   metadataBase: new URL(APP_URL),
-
   title: {
     default: "Tikemia — Billetterie en ligne",
     template: "%s | Tikemia",
   },
-
   description:
     "Découvrez et achetez vos billets pour les meilleurs concerts, festivals, conférences, spectacles, événements sportifs et culturels sur Tikemia.",
-
   applicationName: "Tikemia",
-
   keywords: [
     "Tikemia",
     "billetterie",
@@ -36,16 +32,13 @@ export const metadata: Metadata = {
     "sport",
     "Afrique",
   ],
-
   authors: [{ name: "Tikemia" }],
   creator: "Tikemia",
   publisher: "Tikemia",
   category: "Billetterie et événements",
-
   alternates: {
     canonical: "/",
   },
-
   openGraph: {
     type: "website",
     locale: "fr_FR",
@@ -63,7 +56,6 @@ export const metadata: Metadata = {
       },
     ],
   },
-
   twitter: {
     card: "summary_large_image",
     title: "Tikemia — Billetterie en ligne",
@@ -76,11 +68,9 @@ export const metadata: Metadata = {
       },
     ],
   },
-
   robots: {
     index: true,
     follow: true,
-
     googleBot: {
       index: true,
       follow: true,
@@ -108,6 +98,14 @@ export default async function ClientLayout({
   children,
 }: ClientLayoutProps) {
   const headerData = await getClientHeaderData();
+
+  const mobileUser = headerData.user
+    ? { id: headerData.user.id }
+    : null;
+
+  const mobileAccountHref = mobileUser
+    ? "/account/orders"
+    : headerData.loginHref;
 
   return (
     <div className="relative min-h-dvh overflow-x-clip bg-[#03070a] text-white">
@@ -142,18 +140,12 @@ export default async function ClientLayout({
       </div>
 
       <ClientMobileBottomNav
-        user={
-          headerData.user
-            ? {
-                id: headerData.user.id,
-              }
-            : null
-        }
+        user={mobileUser}
         homeHref="/"
         exploreHref="/events"
         favoritesHref={headerData.favoritesHref}
         ticketsHref={headerData.ticketsHref}
-        accountHref={headerData.profileHref}
+        accountHref={mobileAccountHref}
         loginHref={headerData.loginHref}
       />
     </div>

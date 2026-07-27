@@ -1,16 +1,12 @@
 import Image from "next/image";
 import Link from "next/link";
 import {
-  BadgeCheck,
   Clock3,
   Globe2,
-  Headphones,
-  LockKeyhole,
   Mail,
   MapPin,
   Phone,
   ShieldCheck,
-  TicketCheck,
 } from "lucide-react";
 
 import ClientFooterLinks from "@/components/client/footer/client-footer-links";
@@ -29,10 +25,12 @@ type SocialLinkItem = {
   shortLabel: string;
 };
 
-type TrustItem = {
-  label: string;
-  description: string;
-  icon: typeof ShieldCheck;
+type PaymentMethod = {
+  name: string;
+  imageSrc: string;
+  width: number;
+  height: number;
+  imageClassName?: string;
 };
 
 const SOCIAL_LINKS: SocialLinkItem[] = [
@@ -63,46 +61,56 @@ const SOCIAL_LINKS: SocialLinkItem[] = [
   },
 ];
 
-const TRUST_ITEMS: TrustItem[] = [
+const PAYMENT_METHODS: PaymentMethod[] = [
   {
-    label: "Paiements sécurisés",
-    description: "Transactions protégées",
-    icon: LockKeyhole,
+    name: "Visa",
+    imageSrc: "/images/payments/visa.png",
+    width: 96,
+    height: 42,
+    imageClassName: "max-h-7 max-w-[72px]",
   },
   {
-    label: "Billets vérifiés",
-    description: "QR codes uniques",
-    icon: TicketCheck,
+    name: "Mastercard",
+    imageSrc: "/images/payments/mastercard.webp",
+    width: 96,
+    height: 42,
+    imageClassName: "max-h-8 max-w-[72px]",
   },
   {
-    label: "Données protégées",
-    description: "Confidentialité renforcée",
-    icon: ShieldCheck,
+    name: "MTN Mobile Money",
+    imageSrc: "/images/payments/mtn-momo.webp",
+    width: 104,
+    height: 46,
+    imageClassName: "max-h-9 max-w-[82px]",
   },
   {
-    label: "Support disponible",
-    description: "Assistance client",
-    icon: Headphones,
+    name: "Moov Money",
+    imageSrc: "/images/payments/moov-money.jpeg",
+    width: 104,
+    height: 46,
+    imageClassName: "max-h-9 max-w-[82px]",
   },
   {
-    label: "Plateforme fiable",
-    description: "Expérience sécurisée",
-    icon: BadgeCheck,
+    name: "Orange Money",
+    imageSrc: "/images/payments/orange-money.png",
+    width: 104,
+    height: 46,
+    imageClassName: "max-h-9 max-w-[82px]",
+  },
+  {
+    name: "Wave",
+    imageSrc: "/images/payments/wave.png",
+    width: 96,
+    height: 42,
+    imageClassName: "max-h-8 max-w-[72px]",
   },
 ];
 
-const PAYMENT_METHODS = [
-  "Visa",
-  "Mastercard",
-  "MTN MoMo",
-  "Moov Money",
-  "Orange Money",
-  "Wave",
-] as const;
-
 const CURRENT_YEAR = new Date().getFullYear();
 
-function normalizeTelephoneHref(value: string): string {
+function normalizeTelephoneHref(
+  value: string,
+): string {
   return value.replace(/[^\d+]/g, "");
 }
 
@@ -122,35 +130,6 @@ export default function ClientFooter({
         <div className="absolute -left-40 top-10 h-80 w-80 rounded-full bg-emerald-500/[0.035] blur-[110px]" />
         <div className="absolute -right-40 bottom-20 h-80 w-80 rounded-full bg-orange-500/[0.03] blur-[120px]" />
       </div>
-
-      <section className="relative border-b border-white/[0.07] bg-white/[0.012]">
-        <div className="mx-auto grid w-full max-w-[1600px] gap-3 px-4 py-5 sm:grid-cols-2 sm:px-5 lg:grid-cols-5 xl:px-8">
-          {TRUST_ITEMS.map((item) => {
-            const Icon = item.icon;
-
-            return (
-              <article
-                key={item.label}
-                className="flex items-center gap-3 rounded-2xl border border-white/[0.07] bg-white/[0.02] p-3.5"
-              >
-                <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-emerald-500/20 bg-emerald-500/[0.07] text-emerald-300">
-                  <Icon className="h-[18px] w-[18px]" />
-                </span>
-
-                <div className="min-w-0">
-                  <p className="truncate text-xs font-black text-white">
-                    {item.label}
-                  </p>
-
-                  <p className="mt-0.5 truncate text-[10px] text-neutral-600">
-                    {item.description}
-                  </p>
-                </div>
-              </article>
-            );
-          })}
-        </div>
-      </section>
 
       <div className="relative mx-auto w-full max-w-[1600px] px-4 py-10 sm:px-5 sm:py-12 xl:px-8">
         <div className="grid gap-10 lg:grid-cols-[minmax(260px,1.1fr)_minmax(0,2fr)_minmax(240px,0.9fr)]">
@@ -176,7 +155,7 @@ export default function ClientFooter({
 
             <p className="mt-3 max-w-md text-xs leading-5 text-neutral-600">
               Concerts, festivals, conférences, spectacles, sport et expériences
-              uniques, réunis dans une seule plateforme simple et sécurisée.
+              uniques, réunis dans une seule plateforme.
             </p>
 
             <div className="mt-5 flex flex-wrap gap-2">
@@ -215,7 +194,9 @@ export default function ClientFooter({
               <ContactItem
                 icon={Phone}
                 label={supportPhone}
-                href={`tel:${normalizeTelephoneHref(supportPhone)}`}
+                href={`tel:${normalizeTelephoneHref(
+                  supportPhone,
+                )}`}
               />
 
               <ContactItem
@@ -241,8 +222,7 @@ export default function ClientFooter({
               </p>
 
               <p className="mt-1 text-[11px] leading-5 text-neutral-600">
-                Notre équipe vous accompagne pour vos commandes, billets et
-                paiements.
+                Notre équipe vous accompagne pour vos commandes, billets et paiements.
               </p>
 
               <Link
@@ -255,27 +235,33 @@ export default function ClientFooter({
           </section>
         </div>
 
-        <section className="mt-10 rounded-3xl border border-white/[0.07] bg-white/[0.018] p-4 sm:p-5">
-          <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-            <div>
+        <section className="mt-10 rounded-3xl border border-white/[0.07] bg-white/[0.018] p-4 sm:p-5 lg:p-6">
+          <div className="flex flex-col gap-5 lg:flex-row lg:items-center lg:justify-between">
+            <div className="max-w-md">
               <h2 className="text-sm font-black text-white">
                 Moyens de paiement acceptés
               </h2>
 
-              <p className="mt-1 text-[11px] text-neutral-600">
-                Les moyens disponibles peuvent varier selon le pays et
-                l’événement.
+              <p className="mt-1 text-[11px] leading-5 text-neutral-600">
+                Les moyens disponibles peuvent varier selon le pays et l’événement.
               </p>
             </div>
 
-            <div className="flex flex-wrap gap-2">
+            <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-3 xl:grid-cols-6">
               {PAYMENT_METHODS.map((method) => (
-                <span
-                  key={method}
-                  className="inline-flex h-9 items-center rounded-xl border border-white/[0.08] bg-white/[0.03] px-3 text-[11px] font-black text-neutral-300"
+                <div
+                  key={method.name}
+                  title={method.name}
+                  className="flex h-[68px] min-w-0 items-center justify-center rounded-2xl border border-white/[0.08] bg-white px-3 shadow-[0_10px_28px_rgba(0,0,0,0.16)]"
                 >
-                  {method}
-                </span>
+                  <Image
+                    src={method.imageSrc}
+                    alt={method.name}
+                    width={method.width}
+                    height={method.height}
+                    className={`h-auto w-auto object-contain ${method.imageClassName ?? ""}`}
+                  />
+                </div>
               ))}
             </div>
           </div>

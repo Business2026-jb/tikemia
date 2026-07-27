@@ -15,7 +15,6 @@ import {
   LogOut,
   Menu,
   Search,
-  Settings,
   ShoppingBag,
   Ticket,
   User,
@@ -95,12 +94,11 @@ const DESKTOP_NAVIGATION: NavigationItem[] = [
   },
 ];
 
-const MOBILE_NAVIGATION: NavigationItem[] = [
-  ...DESKTOP_NAVIGATION,
+const AUTHENTICATED_MOBILE_NAVIGATION: NavigationItem[] = [
   {
-    label: "Mes billets",
-    href: "/account/tickets",
-    icon: Ticket,
+    label: "Mon profil",
+    href: "/account/profile",
+    icon: UserRound,
   },
   {
     label: "Mes commandes",
@@ -108,19 +106,14 @@ const MOBILE_NAVIGATION: NavigationItem[] = [
     icon: ShoppingBag,
   },
   {
+    label: "Mes billets",
+    href: "/account/tickets",
+    icon: Ticket,
+  },
+  {
     label: "Mes favoris",
     href: "/favorites",
     icon: Heart,
-  },
-  {
-    label: "Mon profil",
-    href: "/account/profile",
-    icon: UserRound,
-  },
-  {
-    label: "Paramètres",
-    href: "/account/settings",
-    icon: Settings,
   },
 ];
 
@@ -319,6 +312,13 @@ export default function ClientHeader({
   ]);
 
   useEffect(() => {
+    setDrawerOpen(false);
+    setAccountOpen(false);
+    setLanguageOpen(false);
+    setSearchOpen(false);
+  }, [pathname]);
+
+  useEffect(() => {
     if (!searchOpen) {
       return;
     }
@@ -363,7 +363,7 @@ export default function ClientHeader({
         await onLogout();
       } else {
         const response = await fetch(
-          "/api/customer/auth/logout",
+          "/api/client/auth/logout",
           {
             method: "POST",
 
@@ -381,7 +381,7 @@ export default function ClientHeader({
         }
       }
 
-      router.push("/");
+      router.replace("/");
       router.refresh();
     } catch (error) {
       console.error(
@@ -553,7 +553,7 @@ export default function ClientHeader({
             </button>
 
             <Link
-              href="/favorites"
+              href={user ? "/favorites" : loginHref}
               className="flex h-10 items-center gap-2 rounded-xl px-3 text-sm font-semibold text-neutral-300 transition hover:bg-white/[0.04] hover:text-white"
             >
               <Heart className="h-4 w-4" />
@@ -564,7 +564,7 @@ export default function ClientHeader({
             </Link>
 
             <Link
-              href="/account/tickets"
+              href={user ? "/account/tickets" : loginHref}
               className="flex h-10 items-center gap-2 rounded-xl px-3 text-sm font-semibold text-neutral-300 transition hover:bg-white/[0.04] hover:text-white"
             >
               <Ticket className="h-4 w-4" />
@@ -590,6 +590,11 @@ export default function ClientHeader({
                 }}
                 aria-expanded={
                   accountOpen
+                }
+                aria-label={
+                  user
+                    ? "Ouvrir le menu de mon compte"
+                    : "Ouvrir les options de connexion"
                 }
                 className="flex h-11 items-center gap-2 rounded-xl border border-white/[0.08] bg-white/[0.025] px-2 pr-3 transition hover:border-white/[0.14] hover:bg-white/[0.055]"
               >
@@ -853,11 +858,6 @@ function AccountDropdown({
               label="Mon profil"
             />
 
-            <AccountLink
-              href="/account/settings"
-              icon={Settings}
-              label="Paramètres"
-            />
           </div>
 
           <div className="border-t border-white/[0.07] p-2">
@@ -1063,8 +1063,12 @@ function MobileDrawer({
           </p>
 
           <div className="space-y-1">
-            {MOBILE_NAVIGATION.map(
-              (item) => {
+            {[
+              ...DESKTOP_NAVIGATION,
+              ...(user
+                ? AUTHENTICATED_MOBILE_NAVIGATION
+                : []),
+            ].map((item) => {
                 const active =
                   isPathActive(
                     pathname,
