@@ -8,11 +8,14 @@ import { redirect } from "next/navigation";
 
 import { prisma } from "@/lib/prisma";
 
-const SESSION_COOKIE_FALLBACK_NAME =
-  "tikemia_session";
-
 const CUSTOMER_LOGIN_PATH =
   "/login";
+
+const DEFAULT_CLIENT_SESSION_COOKIE_NAME =
+  "tikemia_client_session";
+
+const LEGACY_SESSION_COOKIE_NAME =
+  "tikemia_session";
 
 export type CurrentClient = {
   id: string;
@@ -45,6 +48,11 @@ export type RequireCurrentClientOptions = {
   loginPath?: string;
 };
 
+type SessionCandidate = {
+  cookieName: string;
+  token: string;
+};
+
 function normalizeText(
   value: string | null | undefined,
 ): string {
@@ -71,6 +79,40 @@ function buildFullName({
     .trim();
 }
 
+function normalizeLoginPath(
+  value: string | undefined,
+): string {
+  const normalized =
+    normalizeText(value);
+
+  if (
+    !normalized ||
+    !normalized.startsWith("/") ||
+    normalized.startsWith("//")
+  ) {
+    return CUSTOMER_LOGIN_PATH;
+  }
+
+  return normalized;
+}
+
+function normalizeRedirectPath(
+  value: string | undefined,
+): string {
+  const normalized =
+    normalizeText(value);
+
+  if (
+    !normalized ||
+    !normalized.startsWith("/") ||
+    normalized.startsWith("//")
+  ) {
+    return "";
+  }
+
+  return normalized;
+}
+
 function createLoginRedirectUrl({
   loginPath,
   redirectTo,
@@ -78,25 +120,81 @@ function createLoginRedirectUrl({
   loginPath: string;
   redirectTo?: string;
 }): string {
-  const normalizedLoginPath =
-    normalizeText(loginPath) ||
-    CUSTOMER_LOGIN_PATH;
+  const safeLoginPath =
+    normalizeLoginPath(loginPath);
 
-  const normalizedRedirectTo =
-    normalizeText(redirectTo);
+  const safeRedirectTo =
+    normalizeRedirectPath(redirectTo);
 
-  if (!normalizedRedirectTo) {
-    return normalizedLoginPath;
+  if (!safeRedirectTo) {
+    return safeLoginPath;
   }
 
   const separator =
-    normalizedLoginPath.includes("?")
+    safeLoginPath.includes("?")
       ? "&"
       : "?";
 
-  return `${normalizedLoginPath}${separator}redirect=${encodeURIComponent(
-    normalizedRedirectTo,
+  return `${safeLoginPath}${separator}redirect=${encodeURIComponent(
+    safeRedirectTo,
   )}`;
+}
+
+function getSessionCookieNames(): string[] {
+  return Array.from(
+    new Set(
+      [
+        normalizeText(
+          process.env.CLIENT_SESSION_COOKIE_NAME,
+        ),
+        DEFAULT_CLIENT_SESSION_COOKIE_NAME,
+        normalizeText(
+          process.env.SESSION_COOKIE_NAME,
+        ),
+        LEGACY_SESSION_COOKIE_NAME,
+      ].filter(Boolean),
+    ),
+  );
+}
+
+async function getSessionCandidates(): Promise<
+  SessionCandidate[]
+> {
+  const cookieStore =
+    await cookies();
+
+  const candidates: SessionCandidate[] =
+    [];
+
+  for (
+    const cookieName of
+    getSessionCookieNames()
+  ) {
+    const token =
+      normalizeText(
+        cookieStore.get(cookieName)?.value,
+      );
+
+    if (!token) {
+      continue;
+    }
+
+    if (
+      candidates.some(
+        (candidate) =>
+          candidate.token === token,
+      )
+    ) {
+      continue;
+    }
+
+    candidates.push({
+      cookieName,
+      token,
+    });
+  }
+
+  return candidates;
 }
 
 async function deleteExpiredSession(
@@ -124,184 +222,172 @@ async function deleteExpiredSession(
 /**
  * Retourne le client actuellement connecté.
  *
- * Cette fonction ne redirige jamais :
- * - elle retourne `null` pour un visiteur invité ;
- * - elle retourne `null` si la session est absente, invalide ou expirée ;
- * - elle retourne `null` si le compte n'est pas un compte CUSTOMER actif
- *   et vérifié.
+ * La fonction accepte les noms de cookies actuels et historiques :
  *
- * Elle peut donc être utilisée en toute sécurité dans le layout client
- * commun aux visiteurs invités et aux clients connectés.
+ * - CLIENT_SESSION_COOKIE_NAME
+ * - tikemia_client_session
+ * - SESSION_COOKIE_NAME
+ * - tikemia_session
+ *
+ * Chaque cookie trouvé est vérifié jusqu'à ce qu'une session client
+ * valide soit reconnue. Un ancien cookie invalide ne bloque donc pas
+ * la lecture d'un cookie client valide.
+ *
+ * Cette fonction ne redirige jamais.
  */
 export async function getCurrentClient(): Promise<CurrentClient | null> {
-  const cookieStore =
-    await cookies();
+  const sessionCandidates =
+    await getSessionCandidates();
 
-  const sessionCookieName =
-    normalizeText(
-      process.env
-        .SESSION_COOKIE_NAME,
-    ) ||
-    SESSION_COOKIE_FALLBACK_NAME;
-
-  const rawSessionToken =
-    cookieStore.get(
-      sessionCookieName,
-    )?.value;
-
-  if (!rawSessionToken) {
-    return null;
-  }
-
-  const normalizedSessionToken =
-    rawSessionToken.trim();
-
-  if (!normalizedSessionToken) {
+  if (
+    sessionCandidates.length ===
+    0
+  ) {
     return null;
   }
 
   try {
-    const session =
-      await prisma.session.findUnique({
-        where: {
-          tokenHash:
-            hashSessionToken(
-              normalizedSessionToken,
-            ),
-        },
+    for (
+      const candidate of
+      sessionCandidates
+    ) {
+      const session =
+        await prisma.session.findUnique({
+          where: {
+            tokenHash:
+              hashSessionToken(
+                candidate.token,
+              ),
+          },
 
-        select: {
-          id: true,
-          expiresAt: true,
+          select: {
+            id: true,
+            expiresAt: true,
 
-          user: {
-            select: {
-              id: true,
+            user: {
+              select: {
+                id: true,
 
-              firstName: true,
-              lastName: true,
+                firstName: true,
+                lastName: true,
 
-              email: true,
-              phone: true,
+                email: true,
+                phone: true,
 
-              country: true,
-              countryCode: true,
-              dialCode: true,
+                country: true,
+                countryCode: true,
+                dialCode: true,
 
-              role: true,
-              emailVerified: true,
-              isActive: true,
+                role: true,
+                emailVerified: true,
+                isActive: true,
+              },
             },
           },
-        },
-      });
+        });
 
-    if (!session) {
-      return null;
-    }
+      if (!session) {
+        continue;
+      }
 
-    if (
-      session.expiresAt.getTime() <=
-      Date.now()
-    ) {
-      await deleteExpiredSession(
-        session.id,
-      );
+      if (
+        session.expiresAt.getTime() <=
+        Date.now()
+      ) {
+        await deleteExpiredSession(
+          session.id,
+        );
 
-      return null;
-    }
+        continue;
+      }
 
-    const client =
-      session.user;
+      const client =
+        session.user;
 
-    if (
-      client.role !==
-        UserRole.CUSTOMER ||
-      !client.emailVerified ||
-      !client.isActive
-    ) {
-      return null;
-    }
+      if (
+        client.role !==
+          UserRole.CUSTOMER ||
+        !client.emailVerified ||
+        !client.isActive
+      ) {
+        continue;
+      }
 
-    const firstName =
-      normalizeText(
-        client.firstName,
-      );
+      const firstName =
+        normalizeText(
+          client.firstName,
+        );
 
-    const lastName =
-      normalizeText(
-        client.lastName,
-      );
+      const lastName =
+        normalizeText(
+          client.lastName,
+        );
 
-    return {
-      id:
-        client.id,
-
-      firstName,
-      lastName,
-
-      fullName:
+      const fullName =
         buildFullName({
           firstName,
           lastName,
-        }) ||
-        "Client Tikemia",
+        });
 
-      email:
-        normalizeText(
-          client.email,
-        ),
-
-      phone:
-        normalizeText(
-          client.phone,
-        ),
-
-      country:
-        normalizeText(
-          client.country,
-        ),
-
-      countryCode:
-        normalizeText(
-          client.countryCode,
-        ),
-
-      dialCode:
-        normalizeText(
-          client.dialCode,
-        ),
-
-      emailVerified:
-        client.emailVerified,
-
-      isActive:
-        client.isActive,
-
-      /*
-       * Le schéma client actuel ne possède pas encore de champ avatar.
-       * Cette valeur reste donc nulle jusqu'à l'ajout éventuel d'un
-       * profil client dédié dans Prisma.
-       */
-      avatarUrl:
-        null,
-
-      /*
-       * Le modèle de notifications client n'est pas encore présent
-       * dans le schéma actuel. Le header reçoit donc zéro notification
-       * non lue sans provoquer de requête ou d'erreur supplémentaire.
-       */
-      unreadNotificationsCount:
-        0,
-
-      session: {
+      return {
         id:
-          session.id,
+          client.id,
 
-        expiresAt:
-          session.expiresAt.toISOString(),
-      },
-    };
+        firstName,
+        lastName,
+
+        fullName:
+          fullName ||
+          "Client Tikemia",
+
+        email:
+          normalizeText(
+            client.email,
+          ),
+
+        phone:
+          normalizeText(
+            client.phone,
+          ),
+
+        country:
+          normalizeText(
+            client.country,
+          ),
+
+        countryCode:
+          normalizeText(
+            client.countryCode,
+          ),
+
+        dialCode:
+          normalizeText(
+            client.dialCode,
+          ),
+
+        emailVerified:
+          client.emailVerified,
+
+        isActive:
+          client.isActive,
+
+        avatarUrl:
+          null,
+
+        unreadNotificationsCount:
+          0,
+
+        session: {
+          id:
+            session.id,
+
+          expiresAt:
+            session.expiresAt.toISOString(),
+        },
+      };
+    }
+
+    return null;
   } catch (error) {
     console.error(
       "[GET_CURRENT_CLIENT_ERROR]",
@@ -322,11 +408,6 @@ export async function getCurrentClient(): Promise<CurrentClient | null> {
         : error,
     );
 
-    /*
-     * La partie client accepte le mode invité.
-     * En cas d'indisponibilité temporaire de la session ou de la base,
-     * on retourne donc `null` au lieu de casser tout le layout.
-     */
     return null;
   }
 }
@@ -334,13 +415,13 @@ export async function getCurrentClient(): Promise<CurrentClient | null> {
 /**
  * Retourne obligatoirement un client connecté.
  *
- * Cette variante est destinée aux pages comme :
+ * Pages protégées concernées :
+ *
  * - /account/tickets
  * - /account/orders
  * - /account/profile
- * - /account/settings
- *
- * Un visiteur invité est redirigé vers la connexion.
+ * - /account/transfers
+ * - /favorites
  */
 export async function requireCurrentClient(
   options: RequireCurrentClientOptions = {},

@@ -19,11 +19,17 @@ export const runtime =
 export const dynamic =
   "force-dynamic";
 
+const DEFAULT_CLIENT_SESSION_COOKIE_NAME =
+  "tikemia_client_session";
+
+const LEGACY_SESSION_COOKIE_NAME =
+  "tikemia_session";
+
 const CLIENT_SESSION_COOKIE_NAME =
   process.env
     .CLIENT_SESSION_COOKIE_NAME
     ?.trim() ||
-  "tikemia_client_session";
+  DEFAULT_CLIENT_SESSION_COOKIE_NAME;
 
 function hashSessionToken(
   token: string,
@@ -39,142 +45,170 @@ function hashSessionToken(
     );
 }
 
-function clearClientSessionCookie(
+function getSessionCookieNames(): string[] {
+  return Array.from(
+    new Set(
+      [
+        CLIENT_SESSION_COOKIE_NAME,
+
+        process.env
+          .SESSION_COOKIE_NAME
+          ?.trim(),
+
+        DEFAULT_CLIENT_SESSION_COOKIE_NAME,
+
+        LEGACY_SESSION_COOKIE_NAME,
+      ].filter(
+        (
+          value,
+        ): value is string =>
+          Boolean(
+            value?.trim(),
+          ),
+      ),
+    ),
+  );
+}
+
+function clearSessionCookies(
   response: NextResponse,
 ): void {
-  response.cookies.set({
-    name:
-      CLIENT_SESSION_COOKIE_NAME,
+  for (
+    const cookieName of
+    getSessionCookieNames()
+  ) {
+    response.cookies.set({
+      name:
+        cookieName,
 
-    value:
-      "",
+      value:
+        "",
 
-    httpOnly:
-      true,
+      httpOnly:
+        true,
 
-    secure:
-      process.env
-        .NODE_ENV ===
-      "production",
+      secure:
+        process.env
+          .NODE_ENV ===
+        "production",
 
-    sameSite:
-      "lax",
+      sameSite:
+        "lax",
 
-    path:
-      "/",
+      path:
+        "/",
 
-    maxAge:
-      0,
+      maxAge:
+        0,
 
-    expires:
-      new Date(0),
-  });
+      expires:
+        new Date(0),
+    });
+  }
 }
 
 export async function POST() {
-  try {
-    const cookieStore =
-      await cookies();
+  const cookieStore =
+    await cookies();
 
-    const sessionToken =
-      cookieStore.get(
-        CLIENT_SESSION_COOKIE_NAME,
-      )?.value;
-
-    if (
-      sessionToken
-    ) {
-      const tokenHash =
-        hashSessionToken(
-          sessionToken,
-        );
-
-      await prisma.session
-        .deleteMany({
-          where: {
-            tokenHash,
-          },
-        })
-        .catch(
-          (
-            error,
-          ) => {
-            console.error(
-              "[CLIENT_LOGOUT_SESSION_DELETE_ERROR]",
-              error,
-            );
-          },
-        );
-    }
-
-    const response =
-      NextResponse.json(
-        {
-          success:
-            true,
-
-          message:
-            "Déconnexion réussie.",
-
-          redirectTo:
-            "/login",
-        },
-        {
-          status:
-            200,
-
-          headers: {
-            "Cache-Control":
-              "no-store",
-          },
-        },
-      );
-
-    clearClientSessionCookie(
-      response,
+  const sessionTokens =
+    Array.from(
+      new Set(
+        getSessionCookieNames()
+          .map(
+            (
+              cookieName,
+            ) =>
+              cookieStore
+                .get(
+                  cookieName,
+                )
+                ?.value
+                ?.trim(),
+          )
+          .filter(
+            (
+              token,
+            ): token is string =>
+              Boolean(
+                token,
+              ),
+          ),
+      ),
     );
 
-    return response;
+  let sessionDeletionFailed =
+    false;
+
+  try {
+    const tokenHashes =
+      sessionTokens.map(
+        (
+          token,
+        ) =>
+          hashSessionToken(
+            token,
+          ),
+      );
+
+    if (
+      tokenHashes.length >
+      0
+    ) {
+      await prisma.session.deleteMany({
+        where: {
+          tokenHash: {
+            in:
+              tokenHashes,
+          },
+        },
+      });
+    }
   } catch (
     error
   ) {
+    sessionDeletionFailed =
+      true;
+
     console.error(
-      "[CLIENT_LOGOUT_ERROR]",
+      "[CLIENT_LOGOUT_SESSION_DELETE_ERROR]",
       error,
     );
+  }
 
-    /*
-     * Même si la suppression en base échoue,
-     * on supprime le cookie local afin de déconnecter
-     * le client de son navigateur.
-     */
-    const response =
-      NextResponse.json(
-        {
-          success:
-            false,
+  const response =
+    NextResponse.json(
+      {
+        success:
+          !sessionDeletionFailed,
 
-          message:
-            "La session locale a été supprimée, mais une erreur est survenue.",
+        message:
+          sessionDeletionFailed
+            ? "La session locale a été supprimée, mais une erreur est survenue lors de la suppression de la session en base."
+            : "Déconnexion réussie.",
 
-          redirectTo:
-            "/login",
+        redirectTo:
+          "/",
+      },
+      {
+        status:
+          sessionDeletionFailed
+            ? 500
+            : 200,
+
+        headers: {
+          "Cache-Control":
+            "no-store, max-age=0",
+
+          Pragma:
+            "no-cache",
         },
-        {
-          status:
-            500,
-
-          headers: {
-            "Cache-Control":
-              "no-store",
-          },
-        },
-      );
-
-    clearClientSessionCookie(
-      response,
+      },
     );
 
-    return response;
-  }
+  clearSessionCookies(
+    response,
+  );
+
+  return response;
 }

@@ -19,7 +19,6 @@ import {
   useState,
 } from "react";
 import {
-  useRouter,
   useSearchParams,
 } from "next/navigation";
 
@@ -41,6 +40,14 @@ const initialForm: LoginFormData = {
   rememberMe: false,
 };
 
+const BLOCKED_REDIRECT_PATHS = [
+  "/login",
+  "/register",
+  "/verify-email",
+  "/forgot-password",
+  "/reset-password",
+] as const;
+
 function normalizeRedirectPath(
   value: string | null,
 ): string {
@@ -52,13 +59,33 @@ function normalizeRedirectPath(
     return "/account/tickets";
   }
 
+  const pathWithoutHash =
+    value.split("#")[0] ?? value;
+
+  const pathWithoutQuery =
+    pathWithoutHash.split("?")[0] ??
+    pathWithoutHash;
+
+  const blocked =
+    BLOCKED_REDIRECT_PATHS.some(
+      (
+        blockedPath,
+      ) =>
+        pathWithoutQuery ===
+          blockedPath ||
+        pathWithoutQuery.startsWith(
+          `${blockedPath}/`,
+        ),
+    );
+
+  if (blocked) {
+    return "/account/tickets";
+  }
+
   return value;
 }
 
 export default function ClientLoginPage() {
-  const router =
-    useRouter();
-
   const searchParams =
     useSearchParams();
 
@@ -182,10 +209,16 @@ export default function ClientLoginPage() {
             headers: {
               "Content-Type":
                 "application/json",
+
+              Accept:
+                "application/json",
             },
 
             credentials:
               "include",
+
+            cache:
+              "no-store",
 
             body:
               JSON.stringify({
@@ -216,12 +249,27 @@ export default function ClientLoginPage() {
         );
       }
 
-      router.replace(
-        result.redirectTo ??
-          redirectPath,
-      );
+      const finalRedirect =
+        normalizeRedirectPath(
+          result.redirectTo ??
+            redirectPath,
+        );
 
-      router.refresh();
+      /*
+       * Une navigation complète est volontairement utilisée après la
+       * connexion. Elle force Next.js à reconstruire le layout côté serveur
+       * avec le nouveau cookie de session.
+       *
+       * Ainsi, le header et la barre mobile affichent immédiatement :
+       * - Mon profil ;
+       * - Mes billets ;
+       * - Mes commandes ;
+       * - Mes favoris ;
+       * - Déconnexion.
+       */
+      window.location.assign(
+        finalRedirect,
+      );
     } catch (
       error
     ) {
@@ -231,7 +279,7 @@ export default function ClientLoginPage() {
           ? error.message
           : "Une erreur est survenue. Réessayez.",
       );
-    } finally {
+
       setIsSubmitting(
         false,
       );

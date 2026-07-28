@@ -11,15 +11,28 @@ const APP_URL =
   process.env.APP_URL?.trim() ||
   "https://tikemia.com";
 
+/**
+ * Le layout dépend du cookie de session du client.
+ * Il doit donc être recalculé à chaque requête afin que le header
+ * et la navigation mobile reflètent immédiatement la connexion
+ * ou la déconnexion.
+ */
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
+
 export const metadata: Metadata = {
   metadataBase: new URL(APP_URL),
+
   title: {
     default: "Tikemia — Billetterie en ligne",
     template: "%s | Tikemia",
   },
+
   description:
     "Découvrez et achetez vos billets pour les meilleurs concerts, festivals, conférences, spectacles, événements sportifs et culturels sur Tikemia.",
+
   applicationName: "Tikemia",
+
   keywords: [
     "Tikemia",
     "billetterie",
@@ -32,13 +45,21 @@ export const metadata: Metadata = {
     "sport",
     "Afrique",
   ],
-  authors: [{ name: "Tikemia" }],
+
+  authors: [
+    {
+      name: "Tikemia",
+    },
+  ],
+
   creator: "Tikemia",
   publisher: "Tikemia",
   category: "Billetterie et événements",
+
   alternates: {
     canonical: "/",
   },
+
   openGraph: {
     type: "website",
     locale: "fr_FR",
@@ -47,6 +68,7 @@ export const metadata: Metadata = {
     title: "Tikemia — Billetterie en ligne",
     description:
       "Découvrez et achetez vos billets pour les meilleurs événements sur Tikemia.",
+
     images: [
       {
         url: "/imageclient.png",
@@ -56,11 +78,13 @@ export const metadata: Metadata = {
       },
     ],
   },
+
   twitter: {
     card: "summary_large_image",
     title: "Tikemia — Billetterie en ligne",
     description:
       "Découvrez et achetez vos billets pour les meilleurs événements sur Tikemia.",
+
     images: [
       {
         url: "/imageclient.png",
@@ -68,9 +92,11 @@ export const metadata: Metadata = {
       },
     ],
   },
+
   robots: {
     index: true,
     follow: true,
+
     googleBot: {
       index: true,
       follow: true,
@@ -97,15 +123,15 @@ type ClientLayoutProps = Readonly<{
 export default async function ClientLayout({
   children,
 }: ClientLayoutProps) {
-  const headerData = await getClientHeaderData();
+  const headerData =
+    await getClientHeaderData();
 
-  const mobileUser = headerData.user
-    ? { id: headerData.user.id }
-    : null;
-
-  const mobileAccountHref = mobileUser
-    ? "/account/orders"
-    : headerData.loginHref;
+  const mobileUser =
+    headerData.user
+      ? {
+          id: headerData.user.id,
+        }
+      : null;
 
   return (
     <div className="relative min-h-dvh overflow-x-clip bg-[#03070a] text-white">
@@ -121,12 +147,18 @@ export default async function ClientLayout({
         className="pointer-events-none fixed inset-0 z-0 overflow-hidden"
       >
         <div className="absolute -left-40 -top-40 h-[420px] w-[420px] rounded-full bg-emerald-500/[0.045] blur-[120px]" />
+
         <div className="absolute -right-48 top-[18%] h-[430px] w-[430px] rounded-full bg-orange-500/[0.035] blur-[130px]" />
+
         <div className="absolute bottom-[-220px] left-1/2 h-[460px] w-[720px] -translate-x-1/2 rounded-full bg-red-500/[0.025] blur-[150px]" />
       </div>
 
       <div className="relative z-10 flex min-h-dvh w-full flex-col">
-        <ClientHeader user={headerData.user} />
+        <ClientHeader
+          user={headerData.user}
+          loginHref={headerData.loginHref}
+          registerHref={headerData.registerHref}
+        />
 
         <main
           id="client-main-content"
@@ -145,7 +177,7 @@ export default async function ClientLayout({
         exploreHref="/events"
         favoritesHref={headerData.favoritesHref}
         ticketsHref={headerData.ticketsHref}
-        accountHref={mobileAccountHref}
+        accountHref={headerData.ordersHref}
         loginHref={headerData.loginHref}
       />
     </div>

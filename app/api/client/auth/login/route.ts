@@ -4,11 +4,11 @@ import {
 } from "node:crypto";
 
 import {
+  UserRole,
+} from "@prisma/client";
+import {
   compare,
 } from "bcryptjs";
-import {
-  cookies,
-} from "next/headers";
 import {
   NextResponse,
 } from "next/server";
@@ -26,11 +26,17 @@ export const runtime =
 export const dynamic =
   "force-dynamic";
 
+const DEFAULT_CLIENT_SESSION_COOKIE_NAME =
+  "tikemia_client_session";
+
+const LEGACY_SESSION_COOKIE_NAME =
+  "tikemia_session";
+
 const CLIENT_SESSION_COOKIE_NAME =
   process.env
     .CLIENT_SESSION_COOKIE_NAME
     ?.trim() ||
-  "tikemia_client_session";
+  DEFAULT_CLIENT_SESSION_COOKIE_NAME;
 
 const CLIENT_SESSION_MAX_AGE =
   getPositiveInteger(
@@ -47,55 +53,57 @@ const CLIENT_TEMPORARY_SESSION_MAX_AGE =
   );
 
 const loginSchema =
-  z.object({
-    email:
-      z
-        .string()
-        .trim()
-        .email(
-          "L’adresse e-mail est invalide.",
-        )
-        .max(
-          190,
-          "L’adresse e-mail est trop longue.",
-        )
-        .transform(
-          (
-            value,
-          ) =>
-            value.toLowerCase(),
-        ),
+  z
+    .object({
+      email:
+        z
+          .string()
+          .trim()
+          .email(
+            "L’adresse e-mail est invalide.",
+          )
+          .max(
+            190,
+            "L’adresse e-mail est trop longue.",
+          )
+          .transform(
+            (
+              value,
+            ) =>
+              value.toLowerCase(),
+          ),
 
-    password:
-      z
-        .string()
-        .min(
-          1,
-          "Le mot de passe est obligatoire.",
-        )
-        .max(
-          200,
-          "Le mot de passe est trop long.",
-        ),
+      password:
+        z
+          .string()
+          .min(
+            1,
+            "Le mot de passe est obligatoire.",
+          )
+          .max(
+            200,
+            "Le mot de passe est trop long.",
+          ),
 
-    rememberMe:
-      z
-        .boolean()
-        .optional()
-        .default(
-          false,
-        ),
+      rememberMe:
+        z
+          .boolean()
+          .optional()
+          .default(
+            false,
+          ),
 
-    redirectTo:
-      z
-        .string()
-        .trim()
-        .max(
-          500,
-          "La destination de redirection est invalide.",
-        )
-        .optional(),
-  });
+      redirectTo:
+        z
+          .string()
+          .trim()
+          .max(
+            500,
+            "La destination de redirection est invalide.",
+          )
+          .optional(),
+    })
+    .strict();
 
 function getPositiveInteger(
   value:
@@ -183,7 +191,7 @@ function normalizeRedirectPath(
     )[0] ??
     normalizedPath;
 
-  if (
+  const isBlocked =
     blockedPaths.some(
       (
         blockedPath,
@@ -193,7 +201,10 @@ function normalizeRedirectPath(
         pathWithoutQuery.startsWith(
           `${blockedPath}/`,
         ),
-    )
+    );
+
+  if (
+    isBlocked
   ) {
     return "/account/tickets";
   }
@@ -232,10 +243,75 @@ function createErrorResponse({
 
       headers: {
         "Cache-Control":
-          "no-store",
+          "no-store, max-age=0",
+
+        Pragma:
+          "no-cache",
       },
     },
   );
+}
+
+function clearOtherSessionCookies(
+  response:
+    NextResponse,
+): void {
+  const cookieNames =
+    Array.from(
+      new Set(
+        [
+          process.env
+            .SESSION_COOKIE_NAME
+            ?.trim(),
+
+          DEFAULT_CLIENT_SESSION_COOKIE_NAME,
+
+          LEGACY_SESSION_COOKIE_NAME,
+        ].filter(
+          (
+            value,
+          ): value is string =>
+            Boolean(
+              value &&
+                value !==
+                  CLIENT_SESSION_COOKIE_NAME,
+            ),
+        ),
+      ),
+    );
+
+  for (
+    const cookieName of
+    cookieNames
+  ) {
+    response.cookies.set({
+      name:
+        cookieName,
+
+      value:
+        "",
+
+      httpOnly:
+        true,
+
+      secure:
+        process.env
+          .NODE_ENV ===
+        "production",
+
+      sameSite:
+        "lax",
+
+      path:
+        "/",
+
+      maxAge:
+        0,
+
+      expires:
+        new Date(0),
+    });
+  }
 }
 
 export async function POST(
@@ -329,11 +405,6 @@ export async function POST(
         },
       });
 
-    /*
-     * Le même message est utilisé lorsque l’adresse
-     * n’existe pas ou lorsque le mot de passe est incorrect.
-     * Cela évite de révéler les comptes enregistrés.
-     */
     if (
       !user
     ) {
@@ -366,7 +437,7 @@ export async function POST(
 
     if (
       user.role !==
-        "CUSTOMER"
+        UserRole.CUSTOMER
     ) {
       return createErrorResponse({
         message:
@@ -441,10 +512,6 @@ export async function POST(
       async (
         transaction,
       ) => {
-        /*
-         * Supprime uniquement les sessions déjà expirées.
-         * Les autres appareils connectés restent actifs.
-         */
         await transaction
           .session
           .deleteMany({
@@ -472,10 +539,6 @@ export async function POST(
             },
           });
 
-        /*
-         * Rattache les anciennes commandes invitées
-         * créées avec la même adresse e-mail.
-         */
         await transaction
           .order
           .updateMany({
@@ -500,10 +563,47 @@ export async function POST(
       },
     );
 
-    const cookieStore =
-      await cookies();
+    const response =
+      NextResponse.json(
+        {
+          success:
+            true,
 
-    cookieStore.set({
+          message:
+            "Connexion réussie.",
+
+          redirectTo:
+            finalRedirectTo,
+
+          customer: {
+            id:
+              user.id,
+
+            firstName:
+              user.firstName,
+
+            lastName:
+              user.lastName,
+
+            email:
+              user.email,
+          },
+        },
+        {
+          status:
+            200,
+
+          headers: {
+            "Cache-Control":
+              "no-store, max-age=0",
+
+            Pragma:
+              "no-cache",
+          },
+        },
+      );
+
+    response.cookies.set({
       name:
         CLIENT_SESSION_COOKIE_NAME,
 
@@ -531,41 +631,11 @@ export async function POST(
         expiresAt,
     });
 
-    return NextResponse.json(
-      {
-        success:
-          true,
-
-        message:
-          "Connexion réussie.",
-
-        redirectTo:
-          finalRedirectTo,
-
-        customer: {
-          id:
-            user.id,
-
-          firstName:
-            user.firstName,
-
-          lastName:
-            user.lastName,
-
-          email:
-            user.email,
-        },
-      },
-      {
-        status:
-          200,
-
-        headers: {
-          "Cache-Control":
-            "no-store",
-        },
-      },
+    clearOtherSessionCookies(
+      response,
     );
+
+    return response;
   } catch (
     error
   ) {

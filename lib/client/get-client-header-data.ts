@@ -7,20 +7,15 @@ import {
 
 export type ClientHeaderUserData = {
   id: string;
-
   firstName: string;
   lastName: string;
-
   email: string;
-
   avatarUrl: string | null;
-
   unreadNotificationsCount: number;
 };
 
 export type ClientHeaderData = {
   user: ClientHeaderUserData | null;
-
   isAuthenticated: boolean;
 
   displayName: string;
@@ -33,7 +28,6 @@ export type ClientHeaderData = {
   ordersHref: string;
   favoritesHref: string;
   profileHref: string;
-  settingsHref: string;
 };
 
 export type GetClientHeaderDataOptions = {
@@ -44,7 +38,6 @@ export type GetClientHeaderDataOptions = {
   ordersHref?: string;
   favoritesHref?: string;
   profileHref?: string;
-  settingsHref?: string;
 };
 
 const DEFAULT_LOGIN_HREF =
@@ -64,9 +57,6 @@ const DEFAULT_FAVORITES_HREF =
 
 const DEFAULT_PROFILE_HREF =
   "/account/profile";
-
-const DEFAULT_SETTINGS_HREF =
-  "/account/settings";
 
 function normalizeText(
   value: string | null | undefined,
@@ -106,17 +96,36 @@ function getClientDisplayName(
     return "Connexion";
   }
 
+  const firstName =
+    normalizeText(
+      client.firstName,
+    );
+
+  const lastName =
+    normalizeText(
+      client.lastName,
+    );
+
   const fullName =
+    [firstName, lastName]
+      .filter(Boolean)
+      .join(" ");
+
+  if (fullName) {
+    return fullName;
+  }
+
+  const storedFullName =
     normalizeText(
       client.fullName,
     );
 
   if (
-    fullName &&
-    fullName !==
+    storedFullName &&
+    storedFullName !==
       "Client Tikemia"
   ) {
-    return fullName;
+    return storedFullName;
   }
 
   const email =
@@ -148,13 +157,43 @@ function getClientInitials(
       client.lastName,
     );
 
-  const initials =
+  const directInitials =
     `${firstName.charAt(0)}${lastName.charAt(0)}`
       .trim()
       .toUpperCase();
 
-  if (initials) {
-    return initials;
+  if (directInitials) {
+    return directInitials;
+  }
+
+  const fullName =
+    normalizeText(
+      client.fullName,
+    );
+
+  if (fullName) {
+    const parts =
+      fullName
+        .split(/\s+/)
+        .filter(Boolean);
+
+    const firstInitial =
+      parts[0]?.charAt(0) ?? "";
+
+    const lastInitial =
+      parts.length > 1
+        ? parts[
+            parts.length - 1
+          ]?.charAt(0) ?? ""
+        : "";
+
+    const fullNameInitials =
+      `${firstInitial}${lastInitial}`
+        .toUpperCase();
+
+    if (fullNameInitials) {
+      return fullNameInitials;
+    }
   }
 
   const emailInitial =
@@ -174,60 +213,80 @@ function mapClientToHeaderUser(
     return null;
   }
 
+  const unreadNotificationsCount =
+    Number.isFinite(
+      client.unreadNotificationsCount,
+    )
+      ? Math.max(
+          client.unreadNotificationsCount,
+          0,
+        )
+      : 0;
+
   return {
     id:
       client.id,
 
     firstName:
-      client.firstName,
+      normalizeText(
+        client.firstName,
+      ),
 
     lastName:
-      client.lastName,
+      normalizeText(
+        client.lastName,
+      ),
 
     email:
-      client.email,
+      normalizeText(
+        client.email,
+      ),
 
     avatarUrl:
-      client.avatarUrl,
+      normalizeText(
+        client.avatarUrl,
+      ) || null,
 
-    unreadNotificationsCount:
-      Math.max(
-        client.unreadNotificationsCount,
-        0,
-      ),
+    unreadNotificationsCount,
   };
 }
 
 /**
- * Prépare toutes les données nécessaires au header client.
+ * Prépare les données globales utilisées par :
  *
- * Cette fonction est destinée aux composants serveur, notamment :
- *
- * - app/(client)/layout.tsx
  * - components/client/header/client-header.tsx
+ * - components/client/navigation/client-mobile-bottom-nav.tsx
+ * - app/(client)/layout.tsx
  *
- * Elle accepte aussi bien :
- *
- * - un visiteur invité ;
- * - un client connecté.
- *
- * Une absence de session ne provoque jamais d'erreur et retourne
- * simplement `user: null`.
+ * Cette fonction lit la session client avec getCurrentClient().
+ * Elle ne crée aucune session et ne redirige jamais.
  */
 export async function getClientHeaderData(
   options: GetClientHeaderDataOptions = {},
 ): Promise<ClientHeaderData> {
-  const client =
-    await getCurrentClient();
+  let client: CurrentClient | null =
+    null;
+
+  try {
+    client =
+      await getCurrentClient();
+  } catch (error) {
+    console.error(
+      "[GET_CLIENT_HEADER_DATA_ERROR]",
+      error,
+    );
+  }
+
+  const user =
+    mapClientToHeaderUser(
+      client,
+    );
 
   return {
-    user:
-      mapClientToHeaderUser(
-        client,
-      ),
+    user,
 
     isAuthenticated:
-      Boolean(client),
+      user !== null,
 
     displayName:
       getClientDisplayName(
@@ -291,15 +350,6 @@ export async function getClientHeaderData(
 
         fallback:
           DEFAULT_PROFILE_HREF,
-      }),
-
-    settingsHref:
-      normalizeHref({
-        value:
-          options.settingsHref,
-
-        fallback:
-          DEFAULT_SETTINGS_HREF,
       }),
   };
 }

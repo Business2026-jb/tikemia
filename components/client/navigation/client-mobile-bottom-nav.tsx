@@ -23,10 +23,12 @@ export type ClientMobileBottomNavProps = {
   favoritesHref?: string;
   ticketsHref?: string;
 
-  /*
-   * Cette prop conserve son ancien nom pour éviter de casser
-   * app/(client)/layout.tsx. Lorsqu’un client est connecté,
-   * elle doit contenir la route /account/orders.
+  /**
+   * Cette prop conserve son nom actuel pour rester compatible
+   * avec app/(client)/layout.tsx.
+   *
+   * Quand le client est connecté, elle doit contenir :
+   * /account/orders
    */
   accountHref?: string;
 
@@ -72,7 +74,9 @@ function normalizePath(
   value: string,
 ): string {
   const pathname =
-    value.split("?")[0]?.trim() ||
+    value
+      .split("?")[0]
+      ?.trim() ||
     "/";
 
   if (pathname === "/") {
@@ -145,12 +149,13 @@ function renderNavigationIcon({
   icon: NavigationIconName;
   active: boolean;
 }) {
-  const className = cn(
-    "h-[19px] w-[19px] transition duration-200",
-    active
-      ? "text-lime-400"
-      : "text-neutral-500 group-hover:text-neutral-300",
-  );
+  const className =
+    cn(
+      "h-[19px] w-[19px] transition duration-200",
+      active
+        ? "text-lime-400"
+        : "text-neutral-500 group-hover:text-neutral-300",
+    );
 
   switch (icon) {
     case "home":
@@ -275,21 +280,25 @@ export default function ClientMobileBottomNav({
       requiresAuthentication: true,
     },
     {
-      id: user
-        ? "orders"
-        : "login",
+      id:
+        user
+          ? "orders"
+          : "login",
 
-      label: user
-        ? "Commandes"
-        : "Connexion",
+      label:
+        user
+          ? "Mes commandes"
+          : "Connexion",
 
-      href: user
-        ? accountHref
-        : loginHref,
+      href:
+        user
+          ? accountHref
+          : loginHref,
 
-      icon: user
-        ? "orders"
-        : "user",
+      icon:
+        user
+          ? "orders"
+          : "user",
 
       requiresAuthentication:
         Boolean(user),
@@ -312,7 +321,8 @@ export default function ClientMobileBottomNav({
           ) => {
             const resolvedHref =
               createProtectedHref({
-                href: item.href,
+                href:
+                  item.href,
 
                 requiresAuthentication:
                   item.requiresAuthentication,
@@ -326,19 +336,26 @@ export default function ClientMobileBottomNav({
               isPathActive({
                 pathname,
 
-                href: item.href,
+                href:
+                  item.href,
               });
 
             return (
               <Link
-                key={item.id}
-                href={resolvedHref}
+                key={
+                  item.id
+                }
+                href={
+                  resolvedHref
+                }
                 aria-current={
                   active
                     ? "page"
                     : undefined
                 }
-                aria-label={item.label}
+                aria-label={
+                  item.label
+                }
                 className={cn(
                   "group relative flex min-w-0 flex-col items-center justify-center gap-1 rounded-xl px-1 py-2 text-center outline-none transition duration-200",
                   "focus-visible:ring-2 focus-visible:ring-lime-400/70 focus-visible:ring-offset-2 focus-visible:ring-offset-[#03070a]",
@@ -364,20 +381,24 @@ export default function ClientMobileBottomNav({
                   )}
                 >
                   {renderNavigationIcon({
-                    icon: item.icon,
+                    icon:
+                      item.icon,
+
                     active,
                   })}
                 </span>
 
                 <span
                   className={cn(
-                    "max-w-full truncate text-[10px] font-bold transition duration-200",
+                    "max-w-full truncate text-[9px] font-bold transition duration-200 sm:text-[10px]",
                     active
                       ? "text-emerald-300"
                       : "text-neutral-600 group-hover:text-neutral-300",
                   )}
                 >
-                  {item.label}
+                  {
+                    item.label
+                  }
                 </span>
               </Link>
             );

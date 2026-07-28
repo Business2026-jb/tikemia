@@ -134,6 +134,20 @@ function normalizeSearchValue(
     .slice(0, 120);
 }
 
+function createLoginRedirectHref(
+  loginHref: string,
+  destination: string,
+): string {
+  const separator =
+    loginHref.includes("?")
+      ? "&"
+      : "?";
+
+  return `${loginHref}${separator}redirect=${encodeURIComponent(
+    destination,
+  )}`;
+}
+
 function getInitials(
   user?: ClientHeaderUser | null,
 ): string {
@@ -247,6 +261,30 @@ export default function ClientHeader({
     [user],
   );
 
+  const favoritesHref =
+    user
+      ? "/favorites"
+      : createLoginRedirectHref(
+          loginHref,
+          "/favorites",
+        );
+
+  const ticketsHref =
+    user
+      ? "/account/tickets"
+      : createLoginRedirectHref(
+          loginHref,
+          "/account/tickets",
+        );
+
+  const profileHref =
+    user
+      ? "/account/profile"
+      : createLoginRedirectHref(
+          loginHref,
+          "/account/profile",
+        );
+
   useEffect(() => {
     if (
       !drawerOpen &&
@@ -357,6 +395,8 @@ export default function ClientHeader({
     }
 
     setIsLoggingOut(true);
+    setAccountOpen(false);
+    setDrawerOpen(false);
 
     try {
       if (onLogout) {
@@ -366,32 +406,57 @@ export default function ClientHeader({
           "/api/client/auth/logout",
           {
             method: "POST",
-
+            credentials: "include",
+            cache: "no-store",
             headers: {
-              "Content-Type":
-                "application/json",
+              Accept: "application/json",
             },
           },
         );
 
+        const result =
+          (await response
+            .json()
+            .catch(() => null)) as
+            | {
+                success?: boolean;
+                redirectTo?: string;
+                message?: string;
+              }
+            | null;
+
         if (!response.ok) {
-          throw new Error(
-            "La déconnexion a échoué.",
+          console.error(
+            "[CLIENT_HEADER_LOGOUT_API_ERROR]",
+            result?.message ||
+              "La session locale a été supprimée avec une erreur côté serveur.",
           );
         }
+
+        window.location.assign(
+          result?.redirectTo || "/",
+        );
+
+        return;
       }
 
-      router.replace("/");
-      router.refresh();
+      /*
+       * Une navigation complète force le layout serveur à relire
+       * immédiatement les cookies supprimés.
+       */
+      window.location.assign("/");
     } catch (error) {
       console.error(
         "[CLIENT_HEADER_LOGOUT_ERROR]",
         error,
       );
-    } finally {
-      setIsLoggingOut(false);
-      setAccountOpen(false);
-      setDrawerOpen(false);
+
+      /*
+       * Même si la réponse réseau échoue, on recharge l'accueil.
+       * La route de déconnexion supprime déjà les cookies locaux
+       * lorsqu'elle a été atteinte.
+       */
+      window.location.assign("/");
     }
   }
 
@@ -553,7 +618,7 @@ export default function ClientHeader({
             </button>
 
             <Link
-              href={user ? "/favorites" : loginHref}
+              href={favoritesHref}
               className="flex h-10 items-center gap-2 rounded-xl px-3 text-sm font-semibold text-neutral-300 transition hover:bg-white/[0.04] hover:text-white"
             >
               <Heart className="h-4 w-4" />
@@ -564,7 +629,7 @@ export default function ClientHeader({
             </Link>
 
             <Link
-              href={user ? "/account/tickets" : loginHref}
+              href={ticketsHref}
               className="flex h-10 items-center gap-2 rounded-xl px-3 text-sm font-semibold text-neutral-300 transition hover:bg-white/[0.04] hover:text-white"
             >
               <Ticket className="h-4 w-4" />
@@ -682,14 +747,10 @@ export default function ClientHeader({
             </button>
 
             <Link
-              href={
-                user
-                  ? "/account/profile"
-                  : loginHref
-              }
+              href={profileHref}
               aria-label={
                 user
-                  ? "Mon compte"
+                  ? "Mon profil"
                   : "Connexion"
               }
               className="relative flex h-11 w-11 items-center justify-center rounded-xl border border-white/[0.08] bg-white/[0.025] text-white transition active:scale-95"
@@ -815,7 +876,10 @@ function AccountDropdown({
     <div className="absolute right-0 top-[calc(100%+10px)] z-50 w-[290px] overflow-hidden rounded-2xl border border-white/[0.09] bg-[#081015] shadow-[0_24px_70px_rgba(0,0,0,0.55)]">
       {user ? (
         <>
-          <div className="flex items-center gap-3 border-b border-white/[0.07] px-4 py-4">
+          <Link
+            href="/account/profile"
+            className="flex items-center gap-3 border-b border-white/[0.07] px-4 py-4 transition hover:bg-white/[0.025]"
+          >
             <ClientAvatar
               user={user}
               initials={initials}
@@ -831,13 +895,13 @@ function AccountDropdown({
                 {user.email}
               </p>
             </div>
-          </div>
+          </Link>
 
           <div className="p-2">
             <AccountLink
-              href="/account/tickets"
-              icon={Ticket}
-              label="Mes billets"
+              href="/account/profile"
+              icon={UserRound}
+              label="Mon profil"
             />
 
             <AccountLink
@@ -847,17 +911,16 @@ function AccountDropdown({
             />
 
             <AccountLink
+              href="/account/tickets"
+              icon={Ticket}
+              label="Mes billets"
+            />
+
+            <AccountLink
               href="/favorites"
               icon={Heart}
               label="Mes favoris"
             />
-
-            <AccountLink
-              href="/account/profile"
-              icon={UserRound}
-              label="Mon profil"
-            />
-
           </div>
 
           <div className="border-t border-white/[0.07] p-2">
@@ -885,9 +948,7 @@ function AccountDropdown({
             </p>
 
             <p className="mt-1 text-xs leading-5 text-neutral-500">
-              Connectez-vous pour consulter
-              vos commandes, billets et
-              favoris.
+              Connectez-vous pour consulter vos commandes, billets et favoris.
             </p>
           </div>
 
@@ -956,6 +1017,14 @@ function MobileDrawer({
   onClose: () => void;
   onLogout: () => void | Promise<void>;
 }) {
+  const navigationItems =
+    user
+      ? [
+          ...DESKTOP_NAVIGATION,
+          ...AUTHENTICATED_MOBILE_NAVIGATION,
+        ]
+      : DESKTOP_NAVIGATION;
+
   return (
     <div
       className={cn(
@@ -1063,12 +1132,8 @@ function MobileDrawer({
           </p>
 
           <div className="space-y-1">
-            {[
-              ...DESKTOP_NAVIGATION,
-              ...(user
-                ? AUTHENTICATED_MOBILE_NAVIGATION
-                : []),
-            ].map((item) => {
+            {navigationItems.map(
+              (item) => {
                 const active =
                   isPathActive(
                     pathname,
@@ -1080,7 +1145,7 @@ function MobileDrawer({
 
                 return (
                   <Link
-                    key={item.href}
+                    key={`${item.label}-${item.href}`}
                     href={item.href}
                     onClick={onClose}
                     className={cn(
@@ -1115,7 +1180,7 @@ function MobileDrawer({
                 void onLogout()
               }
               disabled={isLoggingOut}
-              className="flex h-11 w-full items-center justify-center gap-2 rounded-xl border border-red-500/20 bg-red-500/[0.07] text-sm font-bold text-red-400 disabled:opacity-50"
+              className="flex h-11 w-full items-center justify-center gap-2 rounded-xl border border-red-500/20 bg-red-500/[0.07] text-sm font-bold text-red-400 transition hover:bg-red-500/[0.12] disabled:opacity-50"
             >
               <LogOut className="h-4 w-4" />
 
@@ -1125,8 +1190,7 @@ function MobileDrawer({
             </button>
           ) : (
             <p className="text-center text-[11px] leading-5 text-neutral-600">
-              Achetez vos billets avec ou
-              sans compte.
+              Achetez vos billets avec ou sans compte.
             </p>
           )}
         </div>
@@ -1237,18 +1301,28 @@ function SearchOverlay({
               "Cotonou",
               "Abidjan",
               "Dakar",
-            ].map((suggestion) => (
-              <button
-                key={suggestion}
-                type="button"
-                onClick={() =>
-                  onChange(suggestion)
-                }
-                className="rounded-full border border-white/[0.08] bg-white/[0.025] px-3 py-1.5 text-xs font-semibold text-neutral-400 transition hover:border-emerald-500/25 hover:bg-emerald-500/[0.07] hover:text-emerald-300"
-              >
-                {suggestion}
-              </button>
-            ))}
+            ].map(
+              (
+                suggestion,
+              ) => (
+                <button
+                  key={
+                    suggestion
+                  }
+                  type="button"
+                  onClick={() =>
+                    onChange(
+                      suggestion,
+                    )
+                  }
+                  className="rounded-full border border-white/[0.08] bg-white/[0.025] px-3 py-1.5 text-xs font-semibold text-neutral-400 transition hover:border-emerald-500/25 hover:bg-emerald-500/[0.07] hover:text-emerald-300"
+                >
+                  {
+                    suggestion
+                  }
+                </button>
+              ),
+            )}
           </div>
         </div>
       </div>
