@@ -8,6 +8,9 @@ import {
 import {
   useRouter,
 } from "next/navigation";
+import {
+  AlertCircle,
+} from "lucide-react";
 
 import ClientEventDescription from "@/components/client/events/detail/client-event-description";
 import ClientEventGallery from "@/components/client/events/detail/client-event-gallery";
@@ -42,24 +45,46 @@ export type ClientEventDetailCheckoutProps = {
   currentClient?: ClientEventDetailCheckoutClient | null;
 };
 
-type CheckoutDraft = {
-  version: 1;
-  eventId: string;
-  customerId: string | null;
-  isAuthenticated: boolean;
-  eventSlug: string;
-  currency: string;
-  ticketSelection: ClientTicketSelection;
+type CheckoutOrderItem = {
+  id: string;
+  ticketTypeId: string;
+  ticketTypeName: string;
+  quantity: number;
+  unitPrice: string;
+  subtotal: string;
+  platformFee: string;
+  total: string;
+};
 
-  guestInformation: {
-    firstName: string;
-    lastName: string;
-    email: string;
-    phone: string;
-    countryCode: string;
+type CheckoutOrderResponse = {
+  success: boolean;
+  code?: string;
+  message?: string;
+
+  order?: {
+    id: string;
+    reference: string;
+    status: string;
+    currency: string;
+    subtotal: string;
+    platformFee: string;
+    total: string;
+    reservationExpiresAt: string | null;
+    checkoutToken: string;
+
+    event: {
+      id: string;
+      slug: string;
+      title: string;
+    };
+
+    items: CheckoutOrderItem[];
   };
 
-  createdAt: string;
+  error?: {
+    code?: string;
+    message?: string;
+  };
 };
 
 const EMPTY_GUEST_INFORMATION: ClientGuestInformation = {
@@ -81,11 +106,24 @@ function createInitialGuestInformation(
   }
 
   return {
-    firstName: currentClient.firstName.trim(),
-    lastName: currentClient.lastName.trim(),
-    email: currentClient.email.trim().toLowerCase(),
-    phone: currentClient.phone.trim(),
-    countryCode: currentClient.countryCode.trim(),
+    firstName:
+      currentClient.firstName.trim(),
+
+    lastName:
+      currentClient.lastName.trim(),
+
+    email:
+      currentClient.email
+        .trim()
+        .toLowerCase(),
+
+    phone:
+      currentClient.phone.trim(),
+
+    countryCode:
+      currentClient.countryCode
+        .trim()
+        .toUpperCase(),
   };
 }
 
@@ -148,7 +186,9 @@ function validateGuestInformation(
   }
 
   if (
-    !value.countryCode
+    !/^[A-Za-z]{2}$/.test(
+      value.countryCode.trim(),
+    )
   ) {
     errors.countryCode =
       "Veuillez sélectionner votre pays.";
@@ -174,6 +214,59 @@ function scrollToSection(
 
       block,
     });
+}
+
+function createCheckoutIdempotencyKey(
+  eventId: string,
+): string {
+  const storageKey =
+    `tikemia:checkout:idempotency:${eventId}`;
+
+  const existingKey =
+    window.sessionStorage.getItem(
+      storageKey,
+    );
+
+  if (
+    existingKey
+  ) {
+    return existingKey;
+  }
+
+  const randomValue =
+    typeof crypto !==
+      "undefined" &&
+    "randomUUID" in crypto
+      ? crypto.randomUUID()
+      : `${Date.now()}_${Math.random()
+          .toString(36)
+          .slice(2)}`;
+
+  const idempotencyKey =
+    `checkout_${eventId}_${randomValue}`
+      .replace(
+        /[^A-Za-z0-9._:-]/g,
+        "_",
+      )
+      .slice(
+        0,
+        190,
+      );
+
+  window.sessionStorage.setItem(
+    storageKey,
+    idempotencyKey,
+  );
+
+  return idempotencyKey;
+}
+
+function clearCheckoutIdempotencyKey(
+  eventId: string,
+): void {
+  window.sessionStorage.removeItem(
+    `tikemia:checkout:idempotency:${eventId}`,
+  );
 }
 
 export default function ClientEventDetailCheckout({
@@ -208,6 +301,14 @@ export default function ClientEventDetailCheckout({
   ] =
     useState<ClientGuestInformationErrors>(
       {},
+    );
+
+  const [
+    checkoutError,
+    setCheckoutError,
+  ] =
+    useState<string | null>(
+      null,
     );
 
   const [
@@ -333,10 +434,15 @@ export default function ClientEventDetailCheckout({
 
   async function handleCheckout(): Promise<void> {
     if (
-      isPreparingCheckout
+      isPreparingCheckout ||
+      checkoutDisabled
     ) {
       return;
     }
+
+    setCheckoutError(
+      null,
+    );
 
     if (
       selectedTicketsCount <=
@@ -377,71 +483,164 @@ export default function ClientEventDetailCheckout({
     );
 
     try {
-      const checkoutDraft: CheckoutDraft = {
-        version:
-          1,
-
-        eventId:
+      const idempotencyKey =
+        createCheckoutIdempotencyKey(
           event.id,
+        );
 
-        customerId:
-          currentClient?.id ??
-          null,
+      const response =
+        await fetch(
+          "/api/client/checkout/orders",
+          {
+            method:
+              "POST",
 
-        isAuthenticated:
-          Boolean(
-            currentClient,
-          ),
+            headers: {
+              Accept:
+                "application/json",
 
-        eventSlug:
-          event.slug,
+              "Content-Type":
+                "application/json",
 
-        currency:
-          event.currency,
+              "Idempotency-Key":
+                idempotencyKey,
+            },
 
-        ticketSelection,
+            body:
+              JSON.stringify({
+                eventId:
+                  event.id,
 
-        guestInformation: {
-          firstName:
-            normalizeText(
-              guestInformation.firstName,
-            ),
+                items:
+                  selectedItems.map(
+                    (
+                      item,
+                    ) => ({
+                      ticketTypeId:
+                        item.id,
 
-          lastName:
-            normalizeText(
-              guestInformation.lastName,
-            ),
+                      quantity:
+                        item.quantity,
+                    }),
+                  ),
 
-          email:
-            guestInformation.email
-              .trim()
-              .toLowerCase(),
+                customer: {
+                  firstName:
+                    normalizeText(
+                      guestInformation.firstName,
+                    ),
 
-          phone:
-            guestInformation.phone
-              .trim(),
+                  lastName:
+                    normalizeText(
+                      guestInformation.lastName,
+                    ),
 
-          countryCode:
-            guestInformation.countryCode,
+                  email:
+                    guestInformation.email
+                      .trim()
+                      .toLowerCase(),
+
+                  phone:
+                    guestInformation.phone
+                      .trim(),
+
+                  countryCode:
+                    guestInformation.countryCode
+                      .trim()
+                      .toUpperCase(),
+                },
+
+                idempotencyKey,
+              }),
+          },
+        );
+
+      const payload =
+        await response
+          .json() as CheckoutOrderResponse;
+
+      if (
+        !response.ok ||
+        !payload.success
+      ) {
+        throw new Error(
+          payload.error
+            ?.message ||
+          payload.message ||
+          "Impossible de préparer la commande.",
+        );
+      }
+
+      if (
+        !payload.order?.id ||
+        !payload.order.checkoutToken
+      ) {
+        throw new Error(
+          "La commande sécurisée est incomplète.",
+        );
+      }
+
+      const checkoutOrder = {
+        ...payload.order,
+
+        event: {
+          ...payload.order.event,
+
+          coverImage:
+            event.coverImage ??
+            event.images[0]
+              ?.publicUrl ??
+            null,
+
+          venueName:
+            event.venueName,
+
+          city:
+            event.city,
+
+          country:
+            event.country,
+
+          startsAt:
+            event.startsAt,
         },
-
-        createdAt:
-          new Date().toISOString(),
       };
 
       window.sessionStorage.setItem(
-        `tikemia-checkout:${event.id}`,
-        JSON.stringify(
-          checkoutDraft,
-        ),
+        `tikemia:checkout:${payload.order.id}`,
+        JSON.stringify({
+          order:
+            checkoutOrder,
+        }),
+      );
+
+      window.sessionStorage.setItem(
+        "tikemia:checkout:current",
+        JSON.stringify({
+          order:
+            checkoutOrder,
+        }),
+      );
+
+      clearCheckoutIdempotencyKey(
+        event.id,
       );
 
       router.push(
         `/checkout/${encodeURIComponent(
-          event.slug,
+          payload.order.id,
         )}`,
       );
-    } catch {
+    } catch (
+      error
+    ) {
+      setCheckoutError(
+        error instanceof
+          Error
+          ? error.message
+          : "Impossible de préparer la commande.",
+      );
+
       setIsPreparingCheckout(
         false,
       );
@@ -489,9 +688,21 @@ export default function ClientEventDetailCheckout({
                   checkoutDisabled ||
                   isPreparingCheckout
                 }
-                onChange={
-                  setTicketSelection
-                }
+                onChange={(
+                  nextSelection,
+                ) => {
+                  setTicketSelection(
+                    nextSelection,
+                  );
+
+                  setCheckoutError(
+                    null,
+                  );
+
+                  clearCheckoutIdempotencyKey(
+                    event.id,
+                  );
+                }}
               />
             </div>
 
@@ -519,6 +730,22 @@ export default function ClientEventDetailCheckout({
               }
             />
 
+            {checkoutError && (
+              <div
+                role="alert"
+                className="flex items-start gap-3 rounded-2xl border border-red-500/20 bg-red-500/[0.07] p-4 text-sm leading-6 text-red-300"
+              >
+                <AlertCircle
+                  aria-hidden="true"
+                  className="mt-0.5 h-4 w-4 shrink-0"
+                />
+
+                <span>
+                  {checkoutError}
+                </span>
+              </div>
+            )}
+
             <div
               id="client-event-guest-information"
               data-authenticated-client={
@@ -543,6 +770,14 @@ export default function ClientEventDetailCheckout({
                 ) => {
                   setGuestInformation(
                     nextValue,
+                  );
+
+                  setCheckoutError(
+                    null,
+                  );
+
+                  clearCheckoutIdempotencyKey(
+                    event.id,
                   );
 
                   if (
