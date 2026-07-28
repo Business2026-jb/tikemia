@@ -105,8 +105,8 @@ export default async function ClientProfilePage() {
         }}
       />
 
-      <main className="min-h-screen w-full bg-[#03070a] text-white">
-        <div className="w-full px-4 py-5 pb-[calc(8rem+env(safe-area-inset-bottom))] sm:px-6 sm:py-7 lg:px-8 lg:py-9 lg:pb-12 xl:px-10">
+      <main className="min-h-screen w-full max-w-none self-stretch bg-[#03070a] text-white">
+        <div className="w-full max-w-none px-4 py-5 pb-[calc(8rem+env(safe-area-inset-bottom))] sm:px-6 sm:py-7 lg:px-8 lg:py-9 lg:pb-12 xl:px-10 2xl:px-12">
           <section className="relative overflow-hidden rounded-[24px] border border-white/[0.08] bg-[#071015] p-5 shadow-[0_24px_70px_rgba(0,0,0,0.24)] sm:p-6 lg:p-8">
             <div aria-hidden="true" className="absolute -right-24 -top-28 h-72 w-72 rounded-full bg-emerald-500/[0.09] blur-[110px]" />
             <div aria-hidden="true" className="absolute -bottom-36 left-1/3 h-72 w-72 rounded-full bg-orange-500/[0.05] blur-[120px]" />
@@ -174,7 +174,7 @@ export default async function ClientProfilePage() {
             </div>
           </section>
 
-          <section className="mt-5 grid gap-4 xl:grid-cols-[minmax(0,1.6fr)_minmax(320px,0.8fr)]">
+          <section className="mt-5 grid w-full max-w-none gap-4 xl:grid-cols-[minmax(0,1.65fr)_minmax(340px,0.85fr)]">
             <div className="rounded-[22px] border border-white/[0.08] bg-[#071015] p-5 sm:p-6">
               <div className="flex items-center gap-3">
                 <span className="flex h-11 w-11 items-center justify-center rounded-xl border border-lime-400/15 bg-lime-400/[0.06] text-lime-300">

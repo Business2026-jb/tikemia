@@ -859,8 +859,8 @@ export default function ClientTransfersPage() {
         }}
       />
 
-      <main className="min-h-screen w-full bg-[#03070a] text-white">
-        <div className="mx-auto w-full max-w-[1500px] px-4 py-5 pb-[calc(8rem+env(safe-area-inset-bottom))] sm:px-6 sm:py-7 lg:px-8 lg:py-9 lg:pb-12 xl:px-10">
+      <main className="min-h-screen w-full max-w-none self-stretch bg-[#03070a] text-white">
+        <div className="w-full max-w-none px-4 py-5 pb-[calc(8rem+env(safe-area-inset-bottom))] sm:px-6 sm:py-7 lg:px-8 lg:py-9 lg:pb-12 xl:px-10 2xl:px-12">
           <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
             <div>
               <p className="text-[10px] font-black uppercase tracking-[0.16em] text-lime-400">
@@ -973,7 +973,7 @@ export default function ClientTransfersPage() {
 
               {step ===
                 "RECIPIENT" && (
-                <div className="mx-auto max-w-3xl">
+                <div className="w-full max-w-none">
                   <div className="flex items-center gap-3">
                     <span className="flex h-11 w-11 items-center justify-center rounded-xl border border-lime-400/15 bg-lime-400/[0.06] text-lime-300">
                       <UserRound className="h-5 w-5" />
@@ -1447,7 +1447,7 @@ export default function ClientTransfersPage() {
 
               {step ===
                 "CODE" && (
-                <div className="mx-auto max-w-xl">
+                <div className="w-full max-w-none">
                   <div className="text-center">
                     <span className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl border border-lime-400/20 bg-lime-400/[0.07] text-lime-300">
                       <ShieldCheck className="h-7 w-7" />
@@ -1582,7 +1582,7 @@ export default function ClientTransfersPage() {
 
               {step ===
                 "SUCCESS" && (
-                <div className="mx-auto max-w-2xl text-center">
+                <div className="w-full max-w-none text-center">
                   <span className="mx-auto flex h-16 w-16 items-center justify-center rounded-full border border-emerald-400/20 bg-emerald-400/[0.09] text-emerald-300">
                     <CheckCircle2 className="h-8 w-8" />
                   </span>

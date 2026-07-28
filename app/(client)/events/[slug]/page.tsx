@@ -3,12 +3,14 @@ import { notFound } from "next/navigation";
 import { cache } from "react";
 
 import ClientEventDetailCheckout from "@/components/client/events/detail/client-event-detail-checkout";
+import { getCurrentClient } from "@/lib/client/get-current-client";
 import {
   getClientEventDetail,
   GetClientEventDetailError,
 } from "@/lib/client/get-client-event-detail";
 
 export const dynamic = "force-dynamic";
+export const revalidate = 0;
 
 type ClientEventDetailPageProps = {
   params: Promise<{
@@ -59,9 +61,14 @@ function buildDescription({
   );
 }
 
-function buildAbsoluteUrl(path: string): string {
+function buildAbsoluteUrl(
+  path: string,
+): string {
   try {
-    return new URL(path, APP_URL).toString();
+    return new URL(
+      path,
+      APP_URL,
+    ).toString();
   } catch {
     return path;
   }
@@ -70,34 +77,46 @@ function buildAbsoluteUrl(path: string): string {
 export async function generateMetadata({
   params,
 }: ClientEventDetailPageProps): Promise<Metadata> {
-  const { slug } = await params;
+  const { slug } =
+    await params;
 
-  const result = await getEventDetail(slug);
+  const result =
+    await getEventDetail(
+      slug,
+    );
 
   if (!result) {
     return {
-      title: "Événement introuvable",
+      title:
+        "Événement introuvable",
 
       description:
         "Cet événement n’est pas disponible sur Tikemia.",
 
       robots: {
-        index: false,
-        follow: false,
-        noarchive: true,
+        index:
+          false,
+
+        follow:
+          false,
+
+        noarchive:
+          true,
       },
     };
   }
 
-  const { event } = result;
+  const { event } =
+    result;
 
-  const description = buildDescription({
-    shortDescription:
-      event.shortDescription,
+  const description =
+    buildDescription({
+      shortDescription:
+        event.shortDescription,
 
-    description:
-      event.description,
-  });
+      description:
+        event.description,
+    });
 
   const canonicalPath =
     `/events/${event.slug}`;
@@ -108,7 +127,8 @@ export async function generateMetadata({
     "/imageclient.png";
 
   return {
-    title: event.title,
+    title:
+      event.title,
 
     description,
 
@@ -125,7 +145,9 @@ export async function generateMetadata({
       (
         value,
       ): value is string =>
-        Boolean(value),
+        Boolean(
+          value,
+        ),
     ),
 
     alternates: {
@@ -134,9 +156,11 @@ export async function generateMetadata({
     },
 
     openGraph: {
-      type: "website",
+      type:
+        "website",
 
-      locale: "fr_FR",
+      locale:
+        "fr_FR",
 
       url:
         canonicalPath,
@@ -181,15 +205,27 @@ export async function generateMetadata({
     },
 
     robots: {
-      index: true,
-      follow: true,
+      index:
+        true,
+
+      follow:
+        true,
 
       googleBot: {
-        index: true,
-        follow: true,
-        "max-image-preview": "large",
-        "max-snippet": -1,
-        "max-video-preview": -1,
+        index:
+          true,
+
+        follow:
+          true,
+
+        "max-image-preview":
+          "large",
+
+        "max-snippet":
+          -1,
+
+        "max-video-preview":
+          -1,
       },
     },
   };
@@ -198,16 +234,27 @@ export async function generateMetadata({
 export default async function ClientEventDetailPage({
   params,
 }: ClientEventDetailPageProps) {
-  const { slug } = await params;
+  const { slug } =
+    await params;
 
-  const result =
-    await getEventDetail(slug);
+  const [
+    result,
+    currentClient,
+  ] =
+    await Promise.all([
+      getEventDetail(
+        slug,
+      ),
+
+      getCurrentClient(),
+    ]);
 
   if (!result) {
     notFound();
   }
 
-  const { event } = result;
+  const { event } =
+    result;
 
   const eventUrl =
     buildAbsoluteUrl(
@@ -363,8 +410,31 @@ export default async function ClientEventDetailPage({
       : {}),
   };
 
+  const checkoutClient =
+    currentClient
+      ? {
+          id:
+            currentClient.id,
+
+          firstName:
+            currentClient.firstName,
+
+          lastName:
+            currentClient.lastName,
+
+          email:
+            currentClient.email,
+
+          phone:
+            currentClient.phone,
+
+          countryCode:
+            currentClient.countryCode,
+        }
+      : null;
+
   return (
-    <>
+    <div className="w-full max-w-none self-stretch">
       <script
         type="application/ld+json"
         dangerouslySetInnerHTML={{
@@ -379,8 +449,13 @@ export default async function ClientEventDetailPage({
       />
 
       <ClientEventDetailCheckout
-        event={event}
+        event={
+          event
+        }
+        currentClient={
+          checkoutClient
+        }
       />
-    </>
+    </div>
   );
 }

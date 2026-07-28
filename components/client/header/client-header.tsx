@@ -115,6 +115,11 @@ const AUTHENTICATED_MOBILE_NAVIGATION: NavigationItem[] = [
     href: "/favorites",
     icon: Heart,
   },
+  {
+    label: "Déconnexion",
+    href: "#logout",
+    icon: LogOut,
+  },
 ];
 
 function cn(
@@ -1134,6 +1139,21 @@ function MobileDrawer({
           <div className="space-y-1">
             {navigationItems.map(
               (item) => {
+                if (item.href === "#logout") {
+                  return (
+                    <button
+                      key="mobile-logout"
+                      type="button"
+                      onClick={() => void onLogout()}
+                      disabled={isLoggingOut}
+                      className="flex w-full items-center gap-3 rounded-xl border border-red-500/20 bg-red-500/[0.07] px-3 py-3 text-left text-sm font-semibold text-red-400 transition hover:bg-red-500/[0.12] disabled:opacity-50"
+                    >
+                      <LogOut className="h-[18px] w-[18px]" />
+                      {isLoggingOut ? "Déconnexion..." : "Déconnexion"}
+                    </button>
+                  );
+                }
+
                 const active =
                   isPathActive(
                     pathname,

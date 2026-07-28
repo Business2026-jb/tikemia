@@ -1,6 +1,7 @@
 "use client";
 
 import {
+  useEffect,
   useMemo,
   useState,
 } from "react";
@@ -27,13 +28,25 @@ import type {
   ClientEventDetail,
 } from "@/lib/client/get-client-event-detail";
 
+export type ClientEventDetailCheckoutClient = {
+  id: string;
+  firstName: string;
+  lastName: string;
+  email: string;
+  phone: string;
+  countryCode: string;
+};
+
 export type ClientEventDetailCheckoutProps = {
   event: ClientEventDetail;
+  currentClient?: ClientEventDetailCheckoutClient | null;
 };
 
 type CheckoutDraft = {
   version: 1;
   eventId: string;
+  customerId: string | null;
+  isAuthenticated: boolean;
   eventSlug: string;
   currency: string;
   ticketSelection: ClientTicketSelection;
@@ -56,6 +69,25 @@ const EMPTY_GUEST_INFORMATION: ClientGuestInformation = {
   phone: "",
   countryCode: "",
 };
+
+function createInitialGuestInformation(
+  currentClient:
+    | ClientEventDetailCheckoutClient
+    | null
+    | undefined,
+): ClientGuestInformation {
+  if (!currentClient) {
+    return EMPTY_GUEST_INFORMATION;
+  }
+
+  return {
+    firstName: currentClient.firstName.trim(),
+    lastName: currentClient.lastName.trim(),
+    email: currentClient.email.trim().toLowerCase(),
+    phone: currentClient.phone.trim(),
+    countryCode: currentClient.countryCode.trim(),
+  };
+}
 
 function normalizeText(
   value: string,
@@ -146,6 +178,7 @@ function scrollToSection(
 
 export default function ClientEventDetailCheckout({
   event,
+  currentClient = null,
 }: ClientEventDetailCheckoutProps) {
   const router =
     useRouter();
@@ -163,7 +196,10 @@ export default function ClientEventDetailCheckout({
     setGuestInformation,
   ] =
     useState<ClientGuestInformation>(
-      EMPTY_GUEST_INFORMATION,
+      () =>
+        createInitialGuestInformation(
+          currentClient,
+        ),
     );
 
   const [
@@ -181,6 +217,22 @@ export default function ClientEventDetailCheckout({
     useState(
       false,
     );
+
+  useEffect(() => {
+    if (!currentClient) {
+      return;
+    }
+
+    setGuestInformation(
+      createInitialGuestInformation(
+        currentClient,
+      ),
+    );
+
+    setGuestErrors(
+      {},
+    );
+  }, [currentClient]);
 
   const selectedItems =
     useMemo<ClientOrderSummaryItem[]>(
@@ -332,6 +384,15 @@ export default function ClientEventDetailCheckout({
         eventId:
           event.id,
 
+        customerId:
+          currentClient?.id ??
+          null,
+
+        isAuthenticated:
+          Boolean(
+            currentClient,
+          ),
+
         eventSlug:
           event.slug,
 
@@ -390,10 +451,10 @@ export default function ClientEventDetailCheckout({
   return (
     <div
       data-client-event-detail-page="true"
-      className="min-h-screen bg-[#03070a] text-white"
+      className="min-h-screen w-full max-w-none self-stretch bg-[#03070a] text-white"
     >
-      <main className="mx-auto w-full max-w-[1600px] px-4 pb-56 pt-4 sm:px-5 sm:pt-6 lg:px-8 lg:pb-16 lg:pt-8">
-        <div className="grid min-w-0 gap-5 xl:grid-cols-[minmax(0,1.6fr)_minmax(360px,0.72fr)] xl:items-start xl:gap-7">
+      <main className="w-full max-w-none px-4 pb-56 pt-4 sm:px-5 sm:pt-6 lg:px-8 lg:pb-16 lg:pt-8 xl:px-10 2xl:px-12">
+        <div className="grid w-full min-w-0 max-w-none gap-5 xl:grid-cols-[minmax(0,1.65fr)_minmax(360px,0.75fr)] xl:items-start xl:gap-7 2xl:gap-8">
           <div className="min-w-0 space-y-5 xl:col-start-1 xl:row-start-1">
             <ClientEventGallery
               event={
@@ -460,6 +521,11 @@ export default function ClientEventDetailCheckout({
 
             <div
               id="client-event-guest-information"
+              data-authenticated-client={
+                currentClient
+                  ? "true"
+                  : "false"
+              }
               className="scroll-mt-28"
             >
               <ClientGuestInformationForm
