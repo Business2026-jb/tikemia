@@ -1837,73 +1837,120 @@ function getOrderStatusTone(
   | "orange"
   | "red"
   | "neutral" {
-  if (status === "PAID") {
-    return "green";
-  }
+  switch (status) {
+    case "PAID":
+      return "green";
 
-  if (status === "PENDING") {
-    return "orange";
-  }
+    case "PENDING":
+    case "PROCESSING":
+      return "orange";
 
-  if (
-    status === "FAILED" ||
-    status === "CANCELLED"
-  ) {
-    return "red";
-  }
+    case "FAILED":
+    case "CANCELLED":
+      return "red";
 
-  return "neutral";
+    case "EXPIRED":
+    case "PARTIALLY_REFUNDED":
+    case "REFUNDED":
+    default:
+      return "neutral";
+  }
 }
 
 function getOrderStatusPresentation(
   status: OrganizerOrderDetails["status"],
 ) {
-  const presentations = {
-    PENDING: {
-      label:
-        "En attente",
-      icon:
-        Clock3,
-      badge:
-        "border-amber-500/25 bg-amber-500/[0.08] text-amber-300",
-    },
-    PAID: {
-      label:
-        "Payée",
-      icon:
-        BadgeCheck,
-      badge:
-        "border-emerald-500/25 bg-emerald-500/[0.08] text-lime-400",
-    },
-    CANCELLED: {
-      label:
-        "Annulée",
-      icon:
-        XCircle,
-      badge:
-        "border-red-500/25 bg-red-500/[0.08] text-red-400",
-    },
-    REFUNDED: {
-      label:
-        "Remboursée",
-      icon:
-        RefreshCcw,
-      badge:
-        "border-violet-500/25 bg-violet-500/[0.08] text-violet-400",
-    },
-    FAILED: {
-      label:
-        "Échouée",
-      icon:
-        XCircle,
-      badge:
-        "border-red-500/25 bg-red-500/[0.08] text-red-400",
-    },
-  } as const;
+  switch (status) {
+    case "PENDING":
+      return {
+        label:
+          "En attente",
+        icon:
+          Clock3,
+        badge:
+          "border-amber-500/25 bg-amber-500/[0.08] text-amber-300",
+      };
 
-  return presentations[
-    status
-  ];
+    case "PROCESSING":
+      return {
+        label:
+          "Paiement en cours",
+        icon:
+          RefreshCcw,
+        badge:
+          "border-sky-500/25 bg-sky-500/[0.08] text-sky-300",
+      };
+
+    case "PAID":
+      return {
+        label:
+          "Payée",
+        icon:
+          BadgeCheck,
+        badge:
+          "border-emerald-500/25 bg-emerald-500/[0.08] text-lime-400",
+      };
+
+    case "CANCELLED":
+      return {
+        label:
+          "Annulée",
+        icon:
+          XCircle,
+        badge:
+          "border-red-500/25 bg-red-500/[0.08] text-red-400",
+      };
+
+    case "EXPIRED":
+      return {
+        label:
+          "Expirée",
+        icon:
+          Clock3,
+        badge:
+          "border-orange-500/25 bg-orange-500/[0.08] text-orange-300",
+      };
+
+    case "PARTIALLY_REFUNDED":
+      return {
+        label:
+          "Partiellement remboursée",
+        icon:
+          RefreshCcw,
+        badge:
+          "border-fuchsia-500/25 bg-fuchsia-500/[0.08] text-fuchsia-300",
+      };
+
+    case "REFUNDED":
+      return {
+        label:
+          "Remboursée",
+        icon:
+          RefreshCcw,
+        badge:
+          "border-violet-500/25 bg-violet-500/[0.08] text-violet-400",
+      };
+
+    case "FAILED":
+      return {
+        label:
+          "Échouée",
+        icon:
+          XCircle,
+        badge:
+          "border-red-500/25 bg-red-500/[0.08] text-red-400",
+      };
+
+    default:
+      return {
+        label:
+          "Statut inconnu",
+        icon:
+          AlertTriangle,
+        badge:
+          "border-white/[0.12] bg-white/[0.04] text-neutral-300",
+      };
+  }
 }
 
 function getPaymentStatusLabel(
@@ -1921,87 +1968,183 @@ function getPaymentStatusPresentation(
     OrganizerOrderDetails["payment"]
   >["status"],
 ) {
-  const presentations = {
-    PENDING: {
-      label:
-        "En attente",
-      icon:
-        Clock3,
-      badge:
-        "border-amber-500/25 bg-amber-500/[0.08] text-amber-300",
-    },
-    SUCCESS: {
-      label:
-        "Réussi",
-      icon:
-        CheckCircle2,
-      badge:
-        "border-emerald-500/25 bg-emerald-500/[0.08] text-lime-400",
-    },
-    FAILED: {
-      label:
-        "Échoué",
-      icon:
-        XCircle,
-      badge:
-        "border-red-500/25 bg-red-500/[0.08] text-red-400",
-    },
-    REFUNDED: {
-      label:
-        "Remboursé",
-      icon:
-        RefreshCcw,
-      badge:
-        "border-violet-500/25 bg-violet-500/[0.08] text-violet-400",
-    },
-  } as const;
+  switch (status) {
+    case "PENDING":
+      return {
+        label:
+          "En attente",
+        icon:
+          Clock3,
+        badge:
+          "border-amber-500/25 bg-amber-500/[0.08] text-amber-300",
+      };
 
-  return presentations[
-    status
-  ];
+    case "PROCESSING":
+      return {
+        label:
+          "Traitement en cours",
+        icon:
+          RefreshCcw,
+        badge:
+          "border-sky-500/25 bg-sky-500/[0.08] text-sky-300",
+      };
+
+    case "SUCCESS":
+      return {
+        label:
+          "Réussi",
+        icon:
+          CheckCircle2,
+        badge:
+          "border-emerald-500/25 bg-emerald-500/[0.08] text-lime-400",
+      };
+
+    case "FAILED":
+      return {
+        label:
+          "Échoué",
+        icon:
+          XCircle,
+        badge:
+          "border-red-500/25 bg-red-500/[0.08] text-red-400",
+      };
+
+    case "CANCELLED":
+      return {
+        label:
+          "Annulé",
+        icon:
+          XCircle,
+        badge:
+          "border-neutral-500/25 bg-neutral-500/[0.08] text-neutral-300",
+      };
+
+    case "EXPIRED":
+      return {
+        label:
+          "Expiré",
+        icon:
+          Clock3,
+        badge:
+          "border-orange-500/25 bg-orange-500/[0.08] text-orange-300",
+      };
+
+    case "PARTIALLY_REFUNDED":
+      return {
+        label:
+          "Partiellement remboursé",
+        icon:
+          RefreshCcw,
+        badge:
+          "border-fuchsia-500/25 bg-fuchsia-500/[0.08] text-fuchsia-300",
+      };
+
+    case "REFUNDED":
+      return {
+        label:
+          "Remboursé",
+        icon:
+          RefreshCcw,
+        badge:
+          "border-violet-500/25 bg-violet-500/[0.08] text-violet-400",
+      };
+
+    case "DISPUTED":
+      return {
+        label:
+          "Contesté",
+        icon:
+          ShieldAlert,
+        badge:
+          "border-red-500/25 bg-red-500/[0.08] text-red-300",
+      };
+
+    default:
+      return {
+        label:
+          "Statut inconnu",
+        icon:
+          AlertTriangle,
+        badge:
+          "border-white/[0.12] bg-white/[0.04] text-neutral-300",
+      };
+  }
 }
 
 function getTicketStatusPresentation(
   status: OrganizerOrderDetailTicket["status"],
 ) {
-  const presentations = {
-    VALID: {
-      label:
-        "Valide",
-      icon:
-        CheckCircle2,
-      badge:
-        "border-emerald-500/25 bg-emerald-500/[0.08] text-lime-400",
-    },
-    USED: {
-      label:
-        "Utilisé",
-      icon:
-        TicketCheck,
-      badge:
-        "border-sky-500/25 bg-sky-500/[0.08] text-sky-400",
-    },
-    CANCELLED: {
-      label:
-        "Annulé",
-      icon:
-        XCircle,
-      badge:
-        "border-red-500/25 bg-red-500/[0.08] text-red-400",
-    },
-    REFUNDED: {
-      label:
-        "Remboursé",
-      icon:
-        RefreshCcw,
-      badge:
-        "border-violet-500/25 bg-violet-500/[0.08] text-violet-400",
-    },
-  } as const;
+  switch (status) {
+    case "VALID":
+      return {
+        label:
+          "Valide",
+        icon:
+          CheckCircle2,
+        badge:
+          "border-emerald-500/25 bg-emerald-500/[0.08] text-lime-400",
+      };
 
-  return presentations[
-    status
-  ];
+    case "USED":
+      return {
+        label:
+          "Utilisé",
+        icon:
+          TicketCheck,
+        badge:
+          "border-sky-500/25 bg-sky-500/[0.08] text-sky-400",
+      };
+
+    case "CANCELLED":
+      return {
+        label:
+          "Annulé",
+        icon:
+          XCircle,
+        badge:
+          "border-red-500/25 bg-red-500/[0.08] text-red-400",
+      };
+
+    case "REFUNDED":
+      return {
+        label:
+          "Remboursé",
+        icon:
+          RefreshCcw,
+        badge:
+          "border-violet-500/25 bg-violet-500/[0.08] text-violet-400",
+      };
+
+    case "REVOKED":
+      return {
+        label:
+          "Révoqué",
+        icon:
+          ShieldAlert,
+        badge:
+          "border-amber-500/25 bg-amber-500/[0.08] text-amber-300",
+      };
+
+    case "EXPIRED":
+      return {
+        label:
+          "Expiré",
+        icon:
+          Clock3,
+        badge:
+          "border-neutral-500/25 bg-neutral-500/[0.08] text-neutral-300",
+      };
+
+    default:
+      return {
+        label:
+          "Statut inconnu",
+        icon:
+          AlertTriangle,
+        badge:
+          "border-white/[0.12] bg-white/[0.04] text-neutral-300",
+      };
+  }
 }
 
 function OrderDetailsError({

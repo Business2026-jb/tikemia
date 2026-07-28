@@ -152,13 +152,16 @@ function formatEventDate(
 function getOrderStatusLabel(
   status: OrderStatus,
 ): string {
-  const labels: Record<OrderStatus, string> = {
-    PENDING: "En attente",
-    PAID: "Payée",
-    CANCELLED: "Annulée",
-    REFUNDED: "Remboursée",
-    FAILED: "Échouée",
-  };
+const labels: Record<OrderStatus, string> = {
+  PENDING: "En attente",
+  PROCESSING: "Paiement en cours",
+  PAID: "Payée",
+  CANCELLED: "Annulée",
+  EXPIRED: "Expirée",
+  PARTIALLY_REFUNDED: "Partiellement remboursée",
+  REFUNDED: "Remboursée",
+  FAILED: "Échouée",
+};
 
   return labels[status];
 }

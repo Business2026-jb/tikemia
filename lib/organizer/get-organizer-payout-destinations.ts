@@ -8,21 +8,13 @@ import {
 import { prisma } from "@/lib/prisma";
 
 export type OrganizerPayoutDestinationType =
-  | "MOBILE_MONEY"
-  | "BANK_ACCOUNT"
-  | "CRYPTO_USDT_TRC20";
+  PayoutDestinationType;
 
 export type OrganizerPayoutDestinationStatus =
-  | "PENDING"
-  | "VERIFIED"
-  | "REJECTED"
-  | "DISABLED";
+  PayoutDestinationStatus;
 
 export type OrganizerMobileMoneyProvider =
-  | "MTN_MOMO"
-  | "MOOV_MONEY"
-  | "ORANGE_MONEY"
-  | "WAVE";
+  MobileMoneyProvider;
 
 export type OrganizerPayoutDestinationOption = {
   id: string;
@@ -153,11 +145,33 @@ const STATUS_LABELS: Record<OrganizerPayoutDestinationStatus, string> = {
   DISABLED: "Désactivé",
 };
 
-const MOBILE_PROVIDER_LABELS: Record<OrganizerMobileMoneyProvider, string> = {
-  MTN_MOMO: "MTN Mobile Money",
-  MOOV_MONEY: "Moov Money",
-  ORANGE_MONEY: "Orange Money",
-  WAVE: "Wave",
+const MOBILE_PROVIDER_LABELS: Record<
+  OrganizerMobileMoneyProvider,
+  string
+> = {
+  MTN_MOMO:
+    "MTN Mobile Money",
+
+  MOOV_MONEY:
+    "Moov Money",
+
+  CELTIIS_CASH:
+    "Celtiis Cash",
+
+  ORANGE_MONEY:
+    "Orange Money",
+
+  WAVE:
+    "Wave",
+
+  FREE_MONEY:
+    "Free Money",
+
+  AIRTEL_MONEY:
+    "Airtel Money",
+
+  MIXX_BY_YAS:
+    "Mixx by Yas",
 };
 
 const PAYOUT_DESTINATION_SELECT =

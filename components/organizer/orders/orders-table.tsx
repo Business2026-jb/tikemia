@@ -38,6 +38,11 @@ type OrderStatusStyle = {
   }>;
 };
 
+type PaymentStatusStyle = {
+  label: string;
+  className: string;
+};
+
 const ORDER_STATUS_STYLES: Record<
   OrganizerOrderListItem["status"],
   OrderStatusStyle
@@ -47,6 +52,13 @@ const ORDER_STATUS_STYLES: Record<
     badge:
       "border-amber-500/25 bg-amber-500/[0.08] text-amber-300",
     icon: Clock3,
+  },
+
+  PROCESSING: {
+    label: "Paiement en cours",
+    badge:
+      "border-sky-500/25 bg-sky-500/[0.08] text-sky-300",
+    icon: RefreshCcw,
   },
 
   PAID: {
@@ -61,6 +73,20 @@ const ORDER_STATUS_STYLES: Record<
     badge:
       "border-red-500/25 bg-red-500/[0.08] text-red-400",
     icon: XCircle,
+  },
+
+  EXPIRED: {
+    label: "Expirée",
+    badge:
+      "border-orange-500/25 bg-orange-500/[0.08] text-orange-300",
+    icon: Clock3,
+  },
+
+  PARTIALLY_REFUNDED: {
+    label: "Partiellement remboursée",
+    badge:
+      "border-fuchsia-500/25 bg-fuchsia-500/[0.08] text-fuchsia-300",
+    icon: RefreshCcw,
   },
 
   REFUNDED: {
@@ -78,23 +104,66 @@ const ORDER_STATUS_STYLES: Record<
   },
 };
 
-const PAYMENT_STATUS_STYLES = {
-  PENDING:
-    "border-amber-500/20 bg-amber-500/[0.07] text-amber-300",
-  SUCCESS:
-    "border-emerald-500/20 bg-emerald-500/[0.07] text-lime-400",
-  FAILED:
-    "border-red-500/20 bg-red-500/[0.07] text-red-400",
-  REFUNDED:
-    "border-violet-500/20 bg-violet-500/[0.07] text-violet-400",
-} as const;
+const PAYMENT_STATUS_STYLES: Record<
+  NonNullable<
+    OrganizerOrderListItem["payment"]
+  >["status"],
+  PaymentStatusStyle
+> = {
+  PENDING: {
+    label: "En attente",
+    className:
+      "border-amber-500/20 bg-amber-500/[0.07] text-amber-300",
+  },
 
-const PAYMENT_STATUS_LABELS = {
-  PENDING: "En attente",
-  SUCCESS: "Réussi",
-  FAILED: "Échoué",
-  REFUNDED: "Remboursé",
-} as const;
+  PROCESSING: {
+    label: "En cours",
+    className:
+      "border-sky-500/20 bg-sky-500/[0.07] text-sky-300",
+  },
+
+  SUCCESS: {
+    label: "Réussi",
+    className:
+      "border-emerald-500/20 bg-emerald-500/[0.07] text-lime-400",
+  },
+
+  FAILED: {
+    label: "Échoué",
+    className:
+      "border-red-500/20 bg-red-500/[0.07] text-red-400",
+  },
+
+  CANCELLED: {
+    label: "Annulé",
+    className:
+      "border-neutral-500/20 bg-neutral-500/[0.07] text-neutral-300",
+  },
+
+  EXPIRED: {
+    label: "Expiré",
+    className:
+      "border-orange-500/20 bg-orange-500/[0.07] text-orange-300",
+  },
+
+  PARTIALLY_REFUNDED: {
+    label: "Partiellement remboursé",
+    className:
+      "border-fuchsia-500/20 bg-fuchsia-500/[0.07] text-fuchsia-300",
+  },
+
+  REFUNDED: {
+    label: "Remboursé",
+    className:
+      "border-violet-500/20 bg-violet-500/[0.07] text-violet-400",
+  },
+
+  DISPUTED: {
+    label: "Contesté",
+    className:
+      "border-rose-500/20 bg-rose-500/[0.07] text-rose-300",
+  },
+};
 
 function formatDateTime(
   value: string | null,
@@ -432,13 +501,13 @@ export default function OrdersTable({
                               className={`inline-flex rounded-full border px-2 py-0.5 text-[9px] font-black ${
                                 PAYMENT_STATUS_STYLES[
                                   order.payment.status
-                                ]
+                                ].className
                               }`}
                             >
                               {
-                                PAYMENT_STATUS_LABELS[
+                                PAYMENT_STATUS_STYLES[
                                   order.payment.status
-                                ]
+                                ].label
                               }
                             </span>
 

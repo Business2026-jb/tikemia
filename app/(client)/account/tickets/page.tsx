@@ -44,7 +44,9 @@ type TicketStatusFilter =
   | "VALID"
   | "USED"
   | "CANCELLED"
-  | "REFUNDED";
+  | "REFUNDED"
+  | "REVOKED"
+  | "EXPIRED";
 
 const STATUS_FILTERS: Array<{
   value: TicketStatusFilter;
@@ -55,6 +57,8 @@ const STATUS_FILTERS: Array<{
   { value: "USED", label: "Utilisés" },
   { value: "CANCELLED", label: "Annulés" },
   { value: "REFUNDED", label: "Remboursés" },
+  { value: "REVOKED", label: "Révoqués" },
+  { value: "EXPIRED", label: "Expirés" },
 ];
 
 function getSingleSearchParam(
@@ -75,7 +79,9 @@ function normalizeTicketStatus(
     normalizedValue === "VALID" ||
     normalizedValue === "USED" ||
     normalizedValue === "CANCELLED" ||
-    normalizedValue === "REFUNDED"
+    normalizedValue === "REFUNDED" ||
+    normalizedValue === "REVOKED" ||
+    normalizedValue === "EXPIRED"
   ) {
     return normalizedValue;
   }
@@ -145,6 +151,8 @@ function getTicketStatusLabel(
     USED: "Utilisé",
     CANCELLED: "Annulé",
     REFUNDED: "Remboursé",
+    REVOKED: "Révoqué",
+    EXPIRED: "Expiré",
   };
 
   return labels[status];
@@ -165,6 +173,15 @@ function getTicketStatusClassName(
 
     case "CANCELLED":
       return "border-red-400/20 bg-red-400/[0.09] text-red-300";
+
+    case "REVOKED":
+      return "border-orange-400/20 bg-orange-400/[0.09] text-orange-300";
+
+    case "EXPIRED":
+      return "border-neutral-400/20 bg-neutral-400/[0.09] text-neutral-300";
+
+    default:
+      return "border-white/[0.10] bg-white/[0.04] text-neutral-300";
   }
 }
 
@@ -183,6 +200,15 @@ function getTicketStatusIcon(
 
     case "CANCELLED":
       return XCircle;
+
+    case "REVOKED":
+      return CircleAlert;
+
+    case "EXPIRED":
+      return Clock3;
+
+    default:
+      return CircleAlert;
   }
 }
 
@@ -390,7 +416,7 @@ export default async function ClientTicketsPage({
     ).length;
 
   return (
-    <div className="w-full min-w-0 pb-[calc(7.5rem+env(safe-area-inset-bottom))] lg:pb-10">
+    <div className="w-full min-w-0 max-w-none self-stretch pb-[calc(7.5rem+env(safe-area-inset-bottom))] lg:pb-10">
       <section className="relative overflow-hidden rounded-[24px] border border-white/[0.08] bg-[#071015] p-5 shadow-[0_20px_60px_rgba(0,0,0,0.2)] sm:p-6 lg:p-7">
         <div
           aria-hidden="true"

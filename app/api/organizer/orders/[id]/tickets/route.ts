@@ -287,39 +287,53 @@ function formatDateTime(
 function formatTicketStatus(
   status: OrganizerOrderDetailTicket["status"],
 ): string {
-  const labels = {
-    VALID:
-      "Valide",
+  switch (status) {
+    case "VALID":
+      return "Valide";
 
-    USED:
-      "Utilisé",
+    case "USED":
+      return "Utilisé";
 
-    CANCELLED:
-      "Annulé",
+    case "CANCELLED":
+      return "Annulé";
 
-    REFUNDED:
-      "Remboursé",
-  } as const;
+    case "REFUNDED":
+      return "Remboursé";
 
-  return labels[status];
+    case "REVOKED":
+      return "Révoqué";
+
+    case "EXPIRED":
+      return "Expiré";
+
+    default:
+      return "Statut inconnu";
+  }
 }
 
 function getTicketStatusColor(
   status: OrganizerOrderDetailTicket["status"],
 ) {
-  if (status === "VALID") {
-    return COLORS.green;
-  }
+  switch (status) {
+    case "VALID":
+      return COLORS.green;
 
-  if (status === "USED") {
-    return COLORS.blue;
-  }
+    case "USED":
+      return COLORS.blue;
 
-  if (status === "REFUNDED") {
-    return COLORS.violet;
-  }
+    case "REFUNDED":
+      return COLORS.violet;
 
-  return COLORS.red;
+    case "REVOKED":
+      return COLORS.amber;
+
+    case "EXPIRED":
+      return COLORS.muted;
+
+    case "CANCELLED":
+    default:
+      return COLORS.red;
+  }
 }
 
 function sanitizeFilenamePart(

@@ -44,6 +44,11 @@ type StatusStyle = {
   iconColor: string;
 };
 
+type PaymentStatusStyle = {
+  label: string;
+  className: string;
+};
+
 const ORDER_STATUS_STYLES: Record<
   OrganizerOrderListItem["status"],
   StatusStyle
@@ -57,6 +62,17 @@ const ORDER_STATUS_STYLES: Record<
       "border-amber-500/25 bg-amber-500/10",
     iconColor:
       "text-amber-400",
+  },
+
+  PROCESSING: {
+    label: "Paiement en cours",
+    icon: RefreshCcw,
+    badge:
+      "border-sky-500/25 bg-sky-500/[0.08] text-sky-300",
+    iconWrapper:
+      "border-sky-500/25 bg-sky-500/10",
+    iconColor:
+      "text-sky-400",
   },
 
   PAID: {
@@ -79,6 +95,28 @@ const ORDER_STATUS_STYLES: Record<
       "border-red-500/25 bg-red-500/10",
     iconColor:
       "text-red-400",
+  },
+
+  EXPIRED: {
+    label: "Expirée",
+    icon: Clock3,
+    badge:
+      "border-orange-500/25 bg-orange-500/[0.08] text-orange-300",
+    iconWrapper:
+      "border-orange-500/25 bg-orange-500/10",
+    iconColor:
+      "text-orange-400",
+  },
+
+  PARTIALLY_REFUNDED: {
+    label: "Partiellement remboursée",
+    icon: RefreshCcw,
+    badge:
+      "border-fuchsia-500/25 bg-fuchsia-500/[0.08] text-fuchsia-300",
+    iconWrapper:
+      "border-fuchsia-500/25 bg-fuchsia-500/10",
+    iconColor:
+      "text-fuchsia-400",
   },
 
   REFUNDED: {
@@ -104,11 +142,22 @@ const ORDER_STATUS_STYLES: Record<
   },
 };
 
-const PAYMENT_STATUS_STYLES = {
+const PAYMENT_STATUS_STYLES: Record<
+  NonNullable<
+    OrganizerOrderListItem["payment"]
+  >["status"],
+  PaymentStatusStyle
+> = {
   PENDING: {
     label: "Paiement en attente",
     className:
       "border-amber-500/20 bg-amber-500/[0.07] text-amber-300",
+  },
+
+  PROCESSING: {
+    label: "Paiement en cours",
+    className:
+      "border-sky-500/20 bg-sky-500/[0.07] text-sky-300",
   },
 
   SUCCESS: {
@@ -123,12 +172,36 @@ const PAYMENT_STATUS_STYLES = {
       "border-red-500/20 bg-red-500/[0.07] text-red-400",
   },
 
+  CANCELLED: {
+    label: "Paiement annulé",
+    className:
+      "border-neutral-500/20 bg-neutral-500/[0.07] text-neutral-300",
+  },
+
+  EXPIRED: {
+    label: "Paiement expiré",
+    className:
+      "border-orange-500/20 bg-orange-500/[0.07] text-orange-300",
+  },
+
+  PARTIALLY_REFUNDED: {
+    label: "Paiement partiellement remboursé",
+    className:
+      "border-fuchsia-500/20 bg-fuchsia-500/[0.07] text-fuchsia-300",
+  },
+
   REFUNDED: {
     label: "Paiement remboursé",
     className:
       "border-violet-500/20 bg-violet-500/[0.07] text-violet-400",
   },
-} as const;
+
+  DISPUTED: {
+    label: "Paiement contesté",
+    className:
+      "border-rose-500/20 bg-rose-500/[0.07] text-rose-300",
+  },
+};
 
 function formatDateTime(
   value: string | null,

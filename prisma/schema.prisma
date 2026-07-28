@@ -55,6 +55,8 @@ model User {
   sentTicketTransfers     TicketTransfer[] @relation("TicketTransferSender")
   receivedTicketTransfers TicketTransfer[] @relation("TicketTransferRecipient")
   favoriteEvents          EventFavorite[]
+  deliveryLogs            DeliveryLog[]    @relation("DeliveryLogUser")
+  performedTicketScans    TicketScan[]     @relation("TicketScanPerformedBy")
 
   @@index([role])
   @@index([isActive])
@@ -244,26 +246,31 @@ model EventImage {
 }
 
 model TicketType {
-  id           String      @id @default(cuid())
-  eventId      String
-  name         String
-  description  String?
-  price        Decimal     @db.Decimal(18, 2)
-  quantity     Int
-  maxPerOrder  Int         @default(10)
-  saleStartsAt DateTime?
-  saleEndsAt   DateTime?
-  isActive     Boolean     @default(true)
-  createdAt    DateTime    @default(now())
-  updatedAt    DateTime    @updatedAt
-  orderItems   OrderItem[]
-  tickets      Ticket[]
-  event        Event       @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  id             String              @id @default(cuid())
+  eventId        String
+  name           String
+  description    String?
+  price          Decimal             @db.Decimal(18, 2)
+  quantity       Int
+  sold           Int                 @default(0)
+  reserved       Int                 @default(0)
+  maxPerOrder    Int                 @default(10)
+  saleStartsAt   DateTime?
+  saleEndsAt     DateTime?
+  isActive       Boolean             @default(true)
+  isTransferable Boolean             @default(true)
+  createdAt      DateTime            @default(now())
+  updatedAt      DateTime            @updatedAt
+  orderItems     OrderItem[]
+  tickets        Ticket[]
+  reservations   TicketReservation[]
+  event          Event               @relation(fields: [eventId], references: [id], onDelete: Cascade)
 
   @@index([eventId])
   @@index([isActive])
   @@index([saleStartsAt])
   @@index([saleEndsAt])
+  @@index([eventId, isActive])
 }
 
 model Order {
@@ -279,7 +286,18 @@ model Order {
   platformFee          Decimal               @db.Decimal(18, 2)
   total                Decimal               @db.Decimal(18, 2)
   status               OrderStatus           @default(PENDING)
+  checkoutTokenHash    String?               @unique
+  idempotencyKey       String?               @unique
+  reservationExpiresAt DateTime?
+  checkoutStartedAt    DateTime?
+  paymentConfirmedAt   DateTime?
+  finalizedAt          DateTime?
+  ticketsIssuedAt      DateTime?
   paidAt               DateTime?
+  cancelledAt          DateTime?
+  failedAt             DateTime?
+  expiredAt            DateTime?
+  refundedAt           DateTime?
   createdAt            DateTime              @default(now())
   updatedAt            DateTime              @updatedAt
   marketingAttribution MarketingAttribution?
@@ -289,6 +307,10 @@ model Order {
   payment              Payment?
   promoCodeUsages      PromoCodeUsage[]
   tickets              Ticket[]
+  reservations         TicketReservation[]
+  deliveryLogs         DeliveryLog[]
+  paymentWebhookEvents PaymentWebhookEvent[]
+  refunds              PaymentRefund[]
 
   @@index([eventId])
   @@index([customerId])
@@ -296,6 +318,8 @@ model Order {
   @@index([paidAt])
   @@index([eventId, status])
   @@index([customerEmail])
+  @@index([reservationExpiresAt])
+  @@index([createdAt])
 }
 
 model OrderItem {
@@ -316,31 +340,52 @@ model OrderItem {
 }
 
 model Payment {
-  id                String        @id @default(cuid())
-  orderId           String        @unique
-  provider          String
-  providerReference String?       @unique
-  method            String
-  amount            Decimal       @db.Decimal(18, 2)
-  currency          String
-  status            PaymentStatus @default(PENDING)
-  failureReason     String?
-  metadata          Json?
-  paidAt            DateTime?
-  createdAt         DateTime      @default(now())
-  updatedAt         DateTime      @updatedAt
-  order             Order         @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  id                    String                @id @default(cuid())
+  orderId               String                @unique
+  provider              String
+  providerReference     String?               @unique
+  providerTransactionId String?               @unique
+  method                String
+  amount                Decimal               @db.Decimal(18, 2)
+  currency              String
+  status                PaymentStatus         @default(PENDING)
+  checkoutUrl           String?
+  returnUrl             String?
+  cancelUrl             String?
+  customerEmail         String?
+  customerPhone         String?
+  idempotencyKey        String?               @unique
+  failureCode           String?
+  failureReason         String?
+  metadata              Json?
+  initiatedAt           DateTime              @default(now())
+  expiresAt             DateTime?
+  processingAt          DateTime?
+  paidAt                DateTime?
+  failedAt              DateTime?
+  cancelledAt           DateTime?
+  refundedAt            DateTime?
+  createdAt             DateTime              @default(now())
+  updatedAt             DateTime              @updatedAt
+  order                 Order                 @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  attempts              PaymentAttempt[]
+  webhookEvents         PaymentWebhookEvent[]
+  refunds               PaymentRefund[]
 
   @@index([status])
   @@index([paidAt])
   @@index([provider])
   @@index([method])
+  @@index([expiresAt])
+  @@index([createdAt])
 }
 
 model Ticket {
-  id           String @id @default(cuid())
-  code         String @unique
-  qrCodeValue  String @unique
+  id           String  @id @default(cuid())
+  code         String  @unique
+  qrCodeValue  String  @unique
+  qrTokenHash  String? @unique
+  qrVersion    Int     @default(1)
   eventId      String
   orderId      String
   orderItemId  String
@@ -353,10 +398,17 @@ model Ticket {
   holderEmail String
   holderPhone String?
 
-  status    TicketStatus @default(VALID)
-  usedAt    DateTime?
-  createdAt DateTime     @default(now())
-  updatedAt DateTime     @updatedAt
+  status           TicketStatus @default(VALID)
+  issuedAt         DateTime     @default(now())
+  qrGeneratedAt    DateTime?
+  pdfGeneratedAt   DateTime?
+  lastDownloadedAt DateTime?
+  scannedAt        DateTime?
+  usedAt           DateTime?
+  revokedAt        DateTime?
+  revocationReason String?
+  createdAt        DateTime     @default(now())
+  updatedAt        DateTime     @updatedAt
 
   event Event @relation(fields: [eventId], references: [id])
 
@@ -369,6 +421,9 @@ model Ticket {
   owner User? @relation("TicketOwner", fields: [ownerId], references: [id], onDelete: SetNull)
 
   transferItems TicketTransferItem[]
+  documents     TicketDocument[]
+  deliveryLogs  DeliveryLog[]
+  scans         TicketScan[]
 
   @@index([eventId])
   @@index([orderId])
@@ -377,6 +432,224 @@ model Ticket {
   @@index([ownerId])
   @@index([status])
   @@index([holderEmail])
+  @@index([issuedAt])
+  @@index([scannedAt])
+}
+
+model TicketReservation {
+  id           String                  @id @default(cuid())
+  orderId      String
+  ticketTypeId String
+  quantity     Int
+  status       TicketReservationStatus @default(PENDING)
+  expiresAt    DateTime
+  confirmedAt  DateTime?
+  releasedAt   DateTime?
+  cancelledAt  DateTime?
+  createdAt    DateTime                @default(now())
+  updatedAt    DateTime                @updatedAt
+  order        Order                   @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  ticketType   TicketType              @relation(fields: [ticketTypeId], references: [id], onDelete: Restrict)
+
+  @@unique([orderId, ticketTypeId])
+  @@index([orderId])
+  @@index([ticketTypeId])
+  @@index([status])
+  @@index([expiresAt])
+  @@index([ticketTypeId, status, expiresAt])
+}
+
+model PaymentAttempt {
+  id                    String                @id @default(cuid())
+  paymentId             String
+  provider              String
+  providerReference     String?               @unique
+  providerTransactionId String?               @unique
+  method                String
+  amount                Decimal               @db.Decimal(18, 2)
+  currency              String
+  status                PaymentStatus         @default(PENDING)
+  checkoutUrl           String?
+  idempotencyKey        String?               @unique
+  requestPayload        Json?
+  responsePayload       Json?
+  failureCode           String?
+  failureReason         String?
+  initiatedAt           DateTime              @default(now())
+  expiresAt             DateTime?
+  processingAt          DateTime?
+  paidAt                DateTime?
+  failedAt              DateTime?
+  cancelledAt           DateTime?
+  createdAt             DateTime              @default(now())
+  updatedAt             DateTime              @updatedAt
+  payment               Payment               @relation(fields: [paymentId], references: [id], onDelete: Cascade)
+  webhookEvents         PaymentWebhookEvent[]
+
+  @@index([paymentId])
+  @@index([provider])
+  @@index([method])
+  @@index([status])
+  @@index([expiresAt])
+  @@index([createdAt])
+}
+
+model PaymentWebhookEvent {
+  id                  String                  @id @default(cuid())
+  provider            String
+  providerEventId     String
+  eventType           String
+  paymentId           String?
+  paymentAttemptId    String?
+  orderId             String?
+  payload             Json
+  headers             Json?
+  signatureVerified   Boolean                 @default(false)
+  status              WebhookProcessingStatus @default(RECEIVED)
+  processingAttempts  Int                     @default(0)
+  receivedAt          DateTime                @default(now())
+  processingStartedAt DateTime?
+  processedAt         DateTime?
+  failedAt            DateTime?
+  lastError           String?
+  createdAt           DateTime                @default(now())
+  updatedAt           DateTime                @updatedAt
+  payment             Payment?                @relation(fields: [paymentId], references: [id], onDelete: SetNull)
+  paymentAttempt      PaymentAttempt?         @relation(fields: [paymentAttemptId], references: [id], onDelete: SetNull)
+  order               Order?                  @relation(fields: [orderId], references: [id], onDelete: SetNull)
+
+  @@unique([provider, providerEventId])
+  @@index([paymentId])
+  @@index([paymentAttemptId])
+  @@index([orderId])
+  @@index([status])
+  @@index([receivedAt])
+  @@index([provider, eventType])
+}
+
+model PaymentRefund {
+  id                    String       @id @default(cuid())
+  reference             String       @unique
+  paymentId             String
+  orderId               String
+  providerReference     String?      @unique
+  providerTransactionId String?      @unique
+  amount                Decimal      @db.Decimal(18, 2)
+  currency              String
+  status                RefundStatus @default(PENDING)
+  reason                String?
+  requestedBy           String?
+  metadata              Json?
+  requestedAt           DateTime     @default(now())
+  processingAt          DateTime?
+  refundedAt            DateTime?
+  failedAt              DateTime?
+  failureReason         String?
+  createdAt             DateTime     @default(now())
+  updatedAt             DateTime     @updatedAt
+  payment               Payment      @relation(fields: [paymentId], references: [id], onDelete: Cascade)
+  order                 Order        @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  @@index([paymentId])
+  @@index([orderId])
+  @@index([status])
+  @@index([requestedAt])
+}
+
+model TicketDocument {
+  id              String               @id @default(cuid())
+  ticketId        String
+  type            TicketDocumentType
+  status          TicketDocumentStatus @default(PENDING)
+  storageProvider String?
+  storagePath     String?
+  secureUrl       String?
+  mimeType        String?
+  fileName        String?
+  fileSize        Int?
+  checksum        String?
+  generationKey   String?              @unique
+  generatedAt     DateTime?
+  expiresAt       DateTime?
+  failureReason   String?
+  metadata        Json?
+  createdAt       DateTime             @default(now())
+  updatedAt       DateTime             @updatedAt
+  ticket          Ticket               @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+
+  @@unique([ticketId, type])
+  @@index([ticketId])
+  @@index([type])
+  @@index([status])
+  @@index([generatedAt])
+}
+
+model DeliveryLog {
+  id                String          @id @default(cuid())
+  userId            String?
+  orderId           String?
+  ticketId          String?
+  channel           DeliveryChannel
+  type              DeliveryType
+  status            DeliveryStatus  @default(PENDING)
+  recipient         String
+  provider          String?
+  providerMessageId String?         @unique
+  subject           String?
+  attachmentName    String?
+  attachmentUrl     String?
+  attempts          Int             @default(0)
+  maxAttempts       Int             @default(5)
+  scheduledAt       DateTime?
+  lastAttemptAt     DateTime?
+  nextAttemptAt     DateTime?
+  sentAt            DateTime?
+  deliveredAt       DateTime?
+  failedAt          DateTime?
+  errorCode         String?
+  errorMessage      String?
+  metadata          Json?
+  createdAt         DateTime        @default(now())
+  updatedAt         DateTime        @updatedAt
+  user              User?           @relation("DeliveryLogUser", fields: [userId], references: [id], onDelete: SetNull)
+  order             Order?          @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  ticket            Ticket?         @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([orderId])
+  @@index([ticketId])
+  @@index([channel])
+  @@index([type])
+  @@index([status])
+  @@index([scheduledAt])
+  @@index([nextAttemptAt])
+  @@index([createdAt])
+}
+
+model TicketScan {
+  id              String           @id @default(cuid())
+  ticketId        String
+  performedById   String?
+  result          TicketScanResult
+  scannedCodeHash String?
+  deviceId        String?
+  deviceName      String?
+  gateName        String?
+  ipAddress       String?
+  userAgent       String?
+  latitude        Decimal?         @db.Decimal(10, 7)
+  longitude       Decimal?         @db.Decimal(10, 7)
+  metadata        Json?
+  scannedAt       DateTime         @default(now())
+  createdAt       DateTime         @default(now())
+  ticket          Ticket           @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  performedBy     User?            @relation("TicketScanPerformedBy", fields: [performedById], references: [id], onDelete: SetNull)
+
+  @@index([ticketId])
+  @@index([performedById])
+  @@index([result])
+  @@index([scannedAt])
+  @@index([ticketId, scannedAt])
 }
 
 model TicketTransfer {
@@ -1047,17 +1320,25 @@ enum EventStatus {
 
 enum OrderStatus {
   PENDING
+  PROCESSING
   PAID
   CANCELLED
+  EXPIRED
+  PARTIALLY_REFUNDED
   REFUNDED
   FAILED
 }
 
 enum PaymentStatus {
   PENDING
+  PROCESSING
   SUCCESS
   FAILED
+  CANCELLED
+  EXPIRED
+  PARTIALLY_REFUNDED
   REFUNDED
+  DISPUTED
 }
 
 enum TicketStatus {
@@ -1065,6 +1346,8 @@ enum TicketStatus {
   USED
   CANCELLED
   REFUNDED
+  REVOKED
+  EXPIRED
 }
 
 enum PayoutStatus {
@@ -1090,8 +1373,12 @@ enum PayoutDestinationStatus {
 enum MobileMoneyProvider {
   MTN_MOMO
   MOOV_MONEY
+  CELTIIS_CASH
   ORANGE_MONEY
   WAVE
+  FREE_MONEY
+  AIRTEL_MONEY
+  MIXX_BY_YAS
 }
 
 enum CouponType {
@@ -1306,6 +1593,84 @@ enum TransferEmailStatus {
   PENDING
   SENT
   FAILED
+}
+
+enum TicketReservationStatus {
+  PENDING
+  CONFIRMED
+  RELEASED
+  EXPIRED
+  CANCELLED
+}
+
+enum WebhookProcessingStatus {
+  RECEIVED
+  PROCESSING
+  PROCESSED
+  IGNORED
+  FAILED
+}
+
+enum RefundStatus {
+  PENDING
+  PROCESSING
+  SUCCESS
+  FAILED
+  CANCELLED
+}
+
+enum TicketDocumentType {
+  PDF
+  QR_IMAGE
+  WALLET_PASS
+}
+
+enum TicketDocumentStatus {
+  PENDING
+  GENERATING
+  READY
+  FAILED
+  EXPIRED
+}
+
+enum DeliveryChannel {
+  EMAIL
+  WHATSAPP
+  IN_APP
+  DOWNLOAD
+}
+
+enum DeliveryType {
+  PAYMENT_CONFIRMATION
+  ORDER_CONFIRMATION
+  TICKET_NOTIFICATION
+  TICKET_PDF
+  TICKET_QR
+  REFUND_CONFIRMATION
+  TRANSFER_CODE
+  TRANSFER_SENDER_CONFIRMATION
+  TRANSFER_RECIPIENT_NOTIFICATION
+}
+
+enum DeliveryStatus {
+  PENDING
+  PROCESSING
+  SENT
+  DELIVERED
+  FAILED
+  CANCELLED
+}
+
+enum TicketScanResult {
+  ACCEPTED
+  ALREADY_USED
+  INVALID
+  EXPIRED
+  CANCELLED
+  REFUNDED
+  REVOKED
+  WRONG_EVENT
+  ERROR
 }
 
 model EventFavorite {
