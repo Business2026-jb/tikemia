@@ -6,17 +6,13 @@ import { useParams, useRouter } from "next/navigation";
 import {
   ArrowLeft,
   BadgeCheck,
-  Banknote,
   CalendarDays,
-  Check,
   ChevronRight,
   Clock3,
-  CreditCard,
   LoaderCircle,
   LockKeyhole,
   MapPin,
   ShieldCheck,
-  Smartphone,
   Ticket,
   TriangleAlert,
 } from "lucide-react";
@@ -26,14 +22,6 @@ import {
   useMemo,
   useState,
 } from "react";
-
-type CheckoutPaymentMethod =
-  | "CARD"
-  | "MTN_MOMO"
-  | "MOOV_MONEY"
-  | "CELTIIS_CASH"
-  | "ORANGE_MONEY"
-  | "WAVE";
 
 type CheckoutOrderItem = {
   id: string;
@@ -99,90 +87,6 @@ type CreatePaymentResponse = {
     message?: string;
   };
 };
-
-type PaymentMethodOption = {
-  id: CheckoutPaymentMethod;
-  title: string;
-  description: string;
-  icon: "card" | "phone";
-  logos?: Array<{
-    src: string;
-    alt: string;
-  }>;
-};
-
-const PAYMENT_METHODS: PaymentMethodOption[] = [
-  {
-    id: "CARD",
-    title: "Carte bancaire",
-    description: "Visa et Mastercard",
-    icon: "card",
-    logos: [
-      {
-        src: "/images/payments/visa.png",
-        alt: "Visa",
-      },
-      {
-        src: "/images/payments/mastercard.webp",
-        alt: "Mastercard",
-      },
-    ],
-  },
-  {
-    id: "MTN_MOMO",
-    title: "MTN Mobile Money",
-    description: "Paiement depuis votre compte MTN MoMo",
-    icon: "phone",
-    logos: [
-      {
-        src: "/images/payments/mtn-momo.webp",
-        alt: "MTN Mobile Money",
-      },
-    ],
-  },
-  {
-    id: "MOOV_MONEY",
-    title: "Moov Money",
-    description: "Paiement depuis votre compte Moov Money",
-    icon: "phone",
-    logos: [
-      {
-        src: "/images/payments/moov-money.jpeg",
-        alt: "Moov Money",
-      },
-    ],
-  },
-  {
-    id: "CELTIIS_CASH",
-    title: "Celtiis Cash",
-    description: "Paiement depuis votre compte Celtiis Cash",
-    icon: "phone",
-  },
-  {
-    id: "ORANGE_MONEY",
-    title: "Orange Money",
-    description: "Paiement depuis votre compte Orange Money",
-    icon: "phone",
-    logos: [
-      {
-        src: "/images/payments/orange-money.png",
-        alt: "Orange Money",
-      },
-    ],
-  },
-  {
-    id: "WAVE",
-    title: "Wave",
-    description: "Paiement depuis votre compte Wave",
-    icon: "phone",
-    logos: [
-      {
-        src: "/images/payments/wave.png",
-        alt: "Wave",
-      },
-    ],
-  },
-];
 
 function cn(
   ...classes: Array<
@@ -490,35 +394,10 @@ function formatCountdown(
   )}`;
 }
 
-function PaymentMethodIcon({
-  option,
-}: {
-  option: PaymentMethodOption;
-}) {
-  if (
-    option.icon ===
-    "card"
-  ) {
-    return (
-      <CreditCard
-        aria-hidden="true"
-        className="h-5 w-5"
-      />
-    );
-  }
-
-  return (
-    <Smartphone
-      aria-hidden="true"
-      className="h-5 w-5"
-    />
-  );
-}
-
 function CheckoutSkeleton() {
   return (
     <div className="min-h-[70vh] w-full animate-pulse px-4 py-8 sm:px-6 lg:px-8">
-      <div className="mx-auto grid w-full max-w-[1500px] gap-6 xl:grid-cols-[minmax(0,1fr)_420px]">
+      <div className="mx-auto grid w-full max-w-[1280px] gap-6 xl:grid-cols-[minmax(0,1fr)_420px]">
         <div className="space-y-5">
           <div className="h-32 rounded-3xl bg-white/[0.04]" />
           <div className="h-72 rounded-3xl bg-white/[0.04]" />
@@ -592,13 +471,6 @@ export default function ClientCheckoutPage() {
       null,
     );
 
-  const [
-    selectedPaymentMethod,
-    setSelectedPaymentMethod,
-  ] =
-    useState<CheckoutPaymentMethod>(
-      "CARD",
-    );
 
   const [
     remainingTime,
@@ -800,8 +672,13 @@ export default function ClientCheckoutPage() {
                     checkoutToken:
                       order.checkoutToken,
 
+                    /*
+                     * Le client choisit le moyen de paiement directement
+                     * sur la page sécurisée du processeur de paiement.
+                     * "CARD" conserve la compatibilité avec l’API actuelle.
+                     */
                     paymentMethod:
-                      selectedPaymentMethod,
+                      "CARD",
 
                     idempotencyKey,
                   }),
@@ -878,7 +755,6 @@ export default function ClientCheckoutPage() {
         isExpired,
         isSubmitting,
         order,
-        selectedPaymentMethod,
       ],
     );
 
@@ -928,7 +804,7 @@ export default function ClientCheckoutPage() {
 
   return (
     <div className="w-full px-4 pb-28 pt-6 sm:px-6 sm:pt-8 lg:px-8 lg:pb-12">
-      <div className="mx-auto w-full max-w-[1500px]">
+      <div className="mx-auto w-full max-w-[1280px]">
         <div className="mb-6 flex flex-wrap items-center justify-between gap-4">
           <Link
             href={eventHref}
@@ -962,7 +838,7 @@ export default function ClientCheckoutPage() {
           </div>
         </div>
 
-        <div className="grid w-full gap-6 xl:grid-cols-[minmax(0,1fr)_430px]">
+        <div className="grid w-full gap-6 xl:grid-cols-[minmax(0,1fr)_420px]">
           <section className="min-w-0 space-y-6">
             <div className="overflow-hidden rounded-[30px] border border-white/[0.08] bg-[#071015] shadow-[0_26px_80px_rgba(0,0,0,0.26)]">
               <div className="grid gap-0 md:grid-cols-[220px_minmax(0,1fr)]">
@@ -1048,130 +924,20 @@ export default function ClientCheckoutPage() {
               </div>
             </div>
 
-            <div className="rounded-[30px] border border-white/[0.08] bg-[#071015] p-5 shadow-[0_26px_80px_rgba(0,0,0,0.24)] sm:p-6">
-              <div className="flex items-center gap-3">
-                <div className="flex h-11 w-11 items-center justify-center rounded-2xl border border-lime-400/20 bg-lime-400/[0.08] text-lime-400">
-                  <Banknote
-                    aria-hidden="true"
-                    className="h-5 w-5"
-                  />
-                </div>
+            <div className="flex items-start gap-3 rounded-[24px] border border-emerald-500/15 bg-emerald-500/[0.05] p-4 sm:p-5">
+              <ShieldCheck
+                aria-hidden="true"
+                className="mt-0.5 h-5 w-5 shrink-0 text-emerald-400"
+              />
 
-                <div>
-                  <h2 className="text-xl font-black text-white">
-                    Moyen de paiement
-                  </h2>
+              <div>
+                <p className="text-sm font-black text-white">
+                  Paiement sécurisé
+                </p>
 
-                  <p className="mt-1 text-sm text-neutral-500">
-                    Choisissez une option sécurisée.
-                  </p>
-                </div>
-              </div>
-
-              <div className="mt-6 grid gap-3 sm:grid-cols-2">
-                {PAYMENT_METHODS.map(
-                  (
-                    option,
-                  ) => {
-                    const selected =
-                      selectedPaymentMethod ===
-                      option.id;
-
-                    return (
-                      <button
-                        key={option.id}
-                        type="button"
-                        onClick={() =>
-                          setSelectedPaymentMethod(
-                            option.id,
-                          )
-                        }
-                        disabled={
-                          isSubmitting ||
-                          isExpired
-                        }
-                        className={cn(
-                          "group relative flex min-h-[104px] items-center gap-4 rounded-2xl border p-4 text-left outline-none transition",
-                          "focus-visible:ring-2 focus-visible:ring-lime-400/70 focus-visible:ring-offset-2 focus-visible:ring-offset-[#071015]",
-                          selected
-                            ? "border-lime-400/35 bg-lime-400/[0.08]"
-                            : "border-white/[0.08] bg-black/10 hover:border-white/[0.16] hover:bg-white/[0.025]",
-                          (isSubmitting ||
-                            isExpired) &&
-                            "cursor-not-allowed opacity-60",
-                        )}
-                      >
-                        <span
-                          className={cn(
-                            "flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl border",
-                            selected
-                              ? "border-lime-400/25 bg-lime-400/[0.09] text-lime-400"
-                              : "border-white/[0.08] bg-white/[0.025] text-neutral-400",
-                          )}
-                        >
-                          <PaymentMethodIcon
-                            option={
-                              option
-                            }
-                          />
-                        </span>
-
-                        <span className="min-w-0 flex-1">
-                          <span className="block text-sm font-black text-white">
-                            {option.title}
-                          </span>
-
-                          <span className="mt-1 block text-xs leading-5 text-neutral-500">
-                            {option.description}
-                          </span>
-
-                          {option.logos && (
-                            <span className="mt-3 flex flex-wrap items-center gap-2">
-                              {option.logos.map(
-                                (
-                                  logo,
-                                ) => (
-                                  <span
-                                    key={
-                                      logo.src
-                                    }
-                                    className="relative h-5 w-10 overflow-hidden rounded bg-white px-1"
-                                  >
-                                    <Image
-                                      src={
-                                        logo.src
-                                      }
-                                      alt={
-                                        logo.alt
-                                      }
-                                      fill
-                                      sizes="40px"
-                                      className="object-contain p-0.5"
-                                    />
-                                  </span>
-                                ),
-                              )}
-                            </span>
-                          )}
-                        </span>
-
-                        <span
-                          className={cn(
-                            "flex h-6 w-6 shrink-0 items-center justify-center rounded-full border",
-                            selected
-                              ? "border-lime-400 bg-lime-400 text-black"
-                              : "border-white/[0.12] text-transparent",
-                          )}
-                        >
-                          <Check
-                            aria-hidden="true"
-                            className="h-3.5 w-3.5"
-                          />
-                        </span>
-                      </button>
-                    );
-                  },
-                )}
+                <p className="mt-1 text-xs leading-5 text-neutral-500 sm:text-sm">
+                  Vous choisirez votre moyen de paiement sur la page sécurisée du processeur.
+                </p>
               </div>
             </div>
           </section>

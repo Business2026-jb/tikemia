@@ -97,6 +97,14 @@ type FedaPayErrorPayload = {
 const MAX_ERROR_BODY_LENGTH =
   4_000;
 
+const PAYMENT_LINK_RETRY_DELAYS_MS =
+  [
+    0,
+    500,
+    1_500,
+    3_000,
+  ] as const;
+
 function normalizeText(
   value:
     | string
@@ -472,59 +480,19 @@ function normalizeCustomer(
     });
   }
 
-  const normalizedCustomer:
-    Record<string, unknown> = {
-      email,
-      firstname,
-      lastname,
+  /*
+   * Le numéro saisi sur Tikemia sert uniquement aux communications,
+   * à la livraison des billets et au suivi de la commande.
+   *
+   * Il n’est volontairement pas transmis à FedaPay, car le client
+   * peut payer avec un autre numéro Mobile Money ou par carte bancaire.
+   * Le numéro de paiement est demandé directement sur la page FedaPay.
+   */
+  return {
+    email,
+    firstname,
+    lastname,
   };
-
-  if (
-    customer.phoneNumber
-  ) {
-    const number =
-      normalizeText(
-        customer.phoneNumber
-          .number,
-      );
-
-    const country =
-      normalizeText(
-        customer.phoneNumber
-          .country,
-      ).toUpperCase();
-
-    if (
-      !number ||
-      !/^[A-Z]{2}$/.test(
-        country,
-      )
-    ) {
-      throw new PaymentValidationError({
-        code:
-          "PAYMENT_INVALID_REQUEST",
-
-        message:
-          "Le numéro de téléphone ou le pays du client est invalide.",
-
-        status:
-          400,
-
-        details: {
-          field:
-            "customer.phoneNumber",
-        },
-      });
-    }
-
-    normalizedCustomer
-      .phone_number = {
-        number,
-        country,
-      };
-  }
-
-  return normalizedCustomer;
 }
 
 function isRecord(
@@ -574,13 +542,35 @@ function readNumber(
       key
     ];
 
-  return typeof value ===
+  if (
+    typeof value ===
       "number" &&
     Number.isFinite(
       value,
     )
-    ? value
-    : null;
+  ) {
+    return value;
+  }
+
+  if (
+    typeof value ===
+      "string" &&
+    value.trim() !==
+      ""
+  ) {
+    const parsed =
+      Number(
+        value,
+      );
+
+    return Number.isFinite(
+      parsed,
+    )
+      ? parsed
+      : null;
+  }
+
+  return null;
 }
 
 function readObject(
@@ -599,6 +589,81 @@ function readObject(
   )
     ? value
     : null;
+}
+
+function unwrapRecordPayload({
+  payload,
+  preferredKeys,
+}: {
+  payload:
+    unknown;
+  preferredKeys:
+    readonly string[];
+}): Record<string, unknown> | null {
+  if (
+    !isRecord(
+      payload,
+    )
+  ) {
+    return null;
+  }
+
+  for (
+    const key of
+    preferredKeys
+  ) {
+    const nested =
+      readObject(
+        payload,
+        key,
+      );
+
+    if (
+      nested
+    ) {
+      return nested;
+    }
+  }
+
+  return payload;
+}
+
+function getTransactionPayload(
+  payload:
+    unknown,
+): Record<string, unknown> | null {
+  return unwrapRecordPayload({
+    payload,
+
+    preferredKeys: [
+      "transaction",
+      "v1/transaction",
+      "data",
+      "resource",
+      "response",
+      "result",
+    ],
+  });
+}
+
+function getPaymentLinkPayload(
+  payload:
+    unknown,
+): Record<string, unknown> | null {
+  return unwrapRecordPayload({
+    payload,
+
+    preferredKeys: [
+      "payment_link",
+      "paymentLink",
+      "v1/token",
+      "token",
+      "data",
+      "resource",
+      "response",
+      "result",
+    ],
+  });
 }
 
 function normalizeTransactionStatus(
@@ -639,10 +704,13 @@ function parseTransaction(
   payload:
     unknown,
 ): FedaPayTransaction {
-  if (
-    !isRecord(
+  const transactionPayload =
+    getTransactionPayload(
       payload,
-    )
+    );
+
+  if (
+    !transactionPayload
   ) {
     throw new PaymentProviderError({
       code:
@@ -661,31 +729,31 @@ function parseTransaction(
 
   const id =
     readNumber(
-      payload,
+      transactionPayload,
       "id",
     );
 
   const reference =
     readString(
-      payload,
+      transactionPayload,
       "reference",
     );
 
   const amount =
     readNumber(
-      payload,
+      transactionPayload,
       "amount",
     );
 
   const description =
     readString(
-      payload,
+      transactionPayload,
       "description",
     );
 
   const rawStatus =
     readString(
-      payload,
+      transactionPayload,
       "status",
     );
 
@@ -746,7 +814,7 @@ function parseTransaction(
 
     callbackUrl:
       readString(
-        payload,
+        transactionPayload,
         "callback_url",
       ),
 
@@ -759,156 +827,156 @@ function parseTransaction(
 
     customerId:
       readNumber(
-        payload,
+        transactionPayload,
         "customer_id",
       ),
 
     currencyId:
       readNumber(
-        payload,
+        transactionPayload,
         "currency_id",
       ),
 
     mode:
       readString(
-        payload,
+        transactionPayload,
         "mode",
       ),
 
     metadata:
       readObject(
-        payload,
+        transactionPayload,
         "metadata",
       ),
 
     commission:
       readNumber(
-        payload,
+        transactionPayload,
         "commission",
       ),
 
     fees:
       readNumber(
-        payload,
+        transactionPayload,
         "fees",
       ),
 
     fixedCommission:
       readNumber(
-        payload,
+        transactionPayload,
         "fixed_commission",
       ),
 
     amountTransferred:
       readNumber(
-        payload,
+        transactionPayload,
         "amount_transferred",
       ),
 
     amountDebited:
       readNumber(
-        payload,
+        transactionPayload,
         "amount_debited",
       ),
 
     receiptUrl:
       readString(
-        payload,
+        transactionPayload,
         "receipt_url",
       ),
 
     paymentMethodId:
       readNumber(
-        payload,
+        transactionPayload,
         "payment_method_id",
       ),
 
     transactionKey:
       readString(
-        payload,
+        transactionPayload,
         "transaction_key",
       ),
 
     merchantReference:
       readString(
-        payload,
+        transactionPayload,
         "merchant_reference",
       ),
 
     accountId:
       readNumber(
-        payload,
+        transactionPayload,
         "account_id",
       ),
 
     balanceId:
       readNumber(
-        payload,
+        transactionPayload,
         "balance_id",
       ),
 
     createdAt:
       readString(
-        payload,
+        transactionPayload,
         "created_at",
       ),
 
     updatedAt:
       readString(
-        payload,
+        transactionPayload,
         "updated_at",
       ),
 
     approvedAt:
       readString(
-        payload,
+        transactionPayload,
         "approved_at",
       ),
 
     canceledAt:
       readString(
-        payload,
+        transactionPayload,
         "canceled_at",
       ),
 
     declinedAt:
       readString(
-        payload,
+        transactionPayload,
         "declined_at",
       ),
 
     refundedAt:
       readString(
-        payload,
+        transactionPayload,
         "refunded_at",
       ),
 
     transferredAt:
       readString(
-        payload,
+        transactionPayload,
         "transferred_at",
       ),
 
     deletedAt:
       readString(
-        payload,
+        transactionPayload,
         "deleted_at",
       ),
 
     lastErrorCode:
       readString(
-        payload,
+        transactionPayload,
         "last_error_code",
       ),
 
     customMetadata:
       readObject(
-        payload,
+        transactionPayload,
         "custom_metadata",
       ),
 
     raw:
-      payload,
+      transactionPayload,
   };
 }
 
@@ -916,10 +984,13 @@ function parsePaymentLink(
   payload:
     unknown,
 ): FedaPayPaymentLink {
-  if (
-    !isRecord(
+  const paymentLinkPayload =
+    getPaymentLinkPayload(
       payload,
-    )
+    );
+
+  if (
+    !paymentLinkPayload
   ) {
     throw new PaymentProviderError({
       code:
@@ -938,13 +1009,13 @@ function parsePaymentLink(
 
   const token =
     readString(
-      payload,
+      paymentLinkPayload,
       "token",
     );
 
   const rawUrl =
     readString(
-      payload,
+      paymentLinkPayload,
       "url",
     );
 
@@ -1084,30 +1155,75 @@ async function readResponsePayload(
     ) ??
     "";
 
+  const responseText =
+    await response
+      .text()
+      .catch(
+        () =>
+          "",
+      );
+
   if (
+    !responseText
+  ) {
+    return null;
+  }
+
+  const normalizedText =
+    responseText.trim();
+
+  const shouldTryJson =
     contentType.includes(
       "application/json",
-    )
+    ) ||
+    contentType.includes(
+      "+json",
+    ) ||
+    normalizedText.startsWith(
+      "{",
+    ) ||
+    normalizedText.startsWith(
+      "[",
+    );
+
+  if (
+    shouldTryJson
   ) {
     try {
-      return await response.json();
+      return JSON.parse(
+        normalizedText,
+      ) as unknown;
     } catch {
-      return null;
+      /*
+       * Certaines réponses FedaPay peuvent annoncer un type non JSON
+       * ou contenir une chaîne JSON. On tente un second décodage.
+       */
+      try {
+        const firstPass =
+          JSON.parse(
+            JSON.stringify(
+              normalizedText,
+            ),
+          );
+
+        if (
+          typeof firstPass ===
+            "string"
+        ) {
+          return JSON.parse(
+            firstPass,
+          ) as unknown;
+        }
+      } catch {
+        // La réponse restera disponible comme texte limité.
+      }
     }
   }
 
-  try {
-    const text =
-      await response.text();
-
-    return text
-      .slice(
-        0,
-        MAX_ERROR_BODY_LENGTH,
-      );
-  } catch {
-    return null;
-  }
+  return normalizedText.slice(
+    0,
+    MAX_ERROR_BODY_LENGTH,
+  );
 }
 
 function createProviderErrorFromResponse({
@@ -1318,6 +1434,36 @@ async function requestFedaPay<T>({
       );
 
     if (
+      process.env.NODE_ENV !==
+      "production"
+    ) {
+      console.info(
+        "[FEDAPAY_RAW_RESPONSE]",
+        {
+          environment:
+            config.environment,
+
+          apiBaseUrl:
+            config.apiBaseUrl,
+
+          method:
+            options.method ??
+            "GET",
+
+          path,
+
+          status:
+            response.status,
+
+          statusText:
+            response.statusText,
+
+          payload,
+        },
+      );
+    }
+
+    if (
       !response.ok
     ) {
       throw createProviderErrorFromResponse({
@@ -1522,11 +1668,97 @@ export async function createFedaPayTransaction(
   });
 }
 
+function waitForRetry(
+  delayMs:
+    number,
+  signal?:
+    AbortSignal,
+): Promise<void> {
+  return new Promise(
+    (
+      resolve,
+      reject,
+    ) => {
+      if (
+        signal?.aborted
+      ) {
+        reject(
+          new DOMException(
+            "La requête a été annulée.",
+            "AbortError",
+          ),
+        );
+
+        return;
+      }
+
+      let timeout:
+        ReturnType<
+          typeof setTimeout
+        >;
+
+      const handleAbort =
+        () => {
+          clearTimeout(
+            timeout,
+          );
+
+          signal?.removeEventListener(
+            "abort",
+            handleAbort,
+          );
+
+          reject(
+            new DOMException(
+              "La requête a été annulée.",
+              "AbortError",
+            ),
+          );
+        };
+
+      timeout =
+        setTimeout(
+          () => {
+            signal?.removeEventListener(
+              "abort",
+              handleAbort,
+            );
+
+            resolve();
+          },
+          delayMs,
+        );
+
+      signal?.addEventListener(
+        "abort",
+        handleAbort,
+        {
+          once:
+            true,
+        },
+      );
+    },
+  );
+}
+
+function isFedaPayTransactionNotFoundError(
+  error:
+    unknown,
+): boolean {
+  return (
+    error instanceof
+      PaymentProviderError &&
+    error.code ===
+      "PAYMENT_PROVIDER_TRANSACTION_NOT_FOUND"
+  );
+}
+
 export async function createFedaPayPaymentLink(
   transactionId:
     number,
   options?: {
     signal?: AbortSignal;
+    retryDelaysMs?: readonly number[];
   },
 ): Promise<FedaPayPaymentLink> {
   const config =
@@ -1537,22 +1769,108 @@ export async function createFedaPayPaymentLink(
       transactionId,
     );
 
-  return requestFedaPay({
-    config,
+  const retryDelaysMs =
+    options?.retryDelaysMs ??
+    PAYMENT_LINK_RETRY_DELAYS_MS;
 
-    path:
-      `/transactions/${normalizedTransactionId}/token`,
+  let lastError:
+    unknown = null;
 
-    options: {
-      method:
-        "POST",
+  for (
+    let attemptIndex =
+      0;
+    attemptIndex <
+    retryDelaysMs.length;
+    attemptIndex +=
+      1
+  ) {
+    const delayMs =
+      retryDelaysMs[
+        attemptIndex
+      ] ??
+      0;
 
-      signal:
+    if (
+      delayMs >
+      0
+    ) {
+      await waitForRetry(
+        delayMs,
         options?.signal,
-    },
+      );
+    }
 
-    parser:
-      parsePaymentLink,
+    try {
+      return await requestFedaPay({
+        config,
+
+        path:
+          `/transactions/${normalizedTransactionId}/token`,
+
+        options: {
+          method:
+            "POST",
+
+          signal:
+            options?.signal,
+        },
+
+        parser:
+          parsePaymentLink,
+
+        providerReference:
+          String(
+            normalizedTransactionId,
+          ),
+      });
+    } catch (
+      error
+    ) {
+      lastError =
+        error;
+
+      const hasAnotherAttempt =
+        attemptIndex <
+        retryDelaysMs.length -
+          1;
+
+      if (
+        !hasAnotherAttempt ||
+        !isFedaPayTransactionNotFoundError(
+          error,
+        )
+      ) {
+        throw error;
+      }
+    }
+  }
+
+  if (
+    lastError
+  ) {
+    throw lastError;
+  }
+
+  throw new PaymentProviderError({
+    code:
+      "PAYMENT_PROVIDER_REQUEST_FAILED",
+
+    message:
+      "Impossible de générer le lien de paiement FedaPay.",
+
+    status:
+      502,
+
+    retryable:
+      true,
+
+    provider:
+      "FEDAPAY",
+
+    providerReference:
+      String(
+        normalizedTransactionId,
+      ),
   });
 }
 

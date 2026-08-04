@@ -23,21 +23,19 @@ import {
 } from "@/lib/payments/payment-errors";
 import { prisma } from "@/lib/prisma";
 
-const QR_VERSION =
-  1;
+const QR_VERSION = 1;
 
 const QR_ERROR_CORRECTION_LEVEL =
   "M" as const;
 
-const QR_IMAGE_WIDTH =
-  640;
+const QR_IMAGE_WIDTH = 640;
 
-const MAX_TICKET_CODE_ATTEMPTS =
-  10;
+const MAX_TICKET_CREATION_ATTEMPTS = 10;
+
+const MAX_TRANSACTION_ATTEMPTS = 3;
 
 type DatabaseClient =
-  Prisma.TransactionClient |
-  typeof prisma;
+  Prisma.TransactionClient;
 
 export type TicketQrPayload = {
   version: number;
@@ -138,11 +136,92 @@ export type GenerateOrderTicketsOptions = {
 
 export type VerifiedTicketQrPayload = {
   valid: true;
+
   payload: Omit<
     TicketQrPayload,
     "signature"
   >;
 };
+
+type LoadedOrder = Prisma.OrderGetPayload<{
+  select: {
+    id: true;
+    reference: true;
+    status: true;
+    currency: true;
+    customerId: true;
+    customerName: true;
+    customerEmail: true;
+    customerPhone: true;
+    ticketsIssuedAt: true;
+
+    payment: {
+      select: {
+        id: true;
+        status: true;
+        amount: true;
+        currency: true;
+      };
+    };
+
+    event: {
+      select: {
+        id: true;
+        title: true;
+        slug: true;
+        venueName: true;
+        city: true;
+        country: true;
+        startsAt: true;
+        endsAt: true;
+      };
+    };
+
+    items: {
+      orderBy: {
+        id: "asc";
+      };
+
+      select: {
+        id: true;
+        ticketTypeId: true;
+        quantity: true;
+        unitPrice: true;
+        platformFee: true;
+        total: true;
+
+        ticketType: {
+          select: {
+            id: true;
+            name: true;
+            description: true;
+          };
+        };
+
+        tickets: {
+          orderBy: {
+            createdAt: "asc";
+          };
+
+          select: {
+            id: true;
+            code: true;
+            qrCodeValue: true;
+            qrTokenHash: true;
+            qrVersion: true;
+            issuedAt: true;
+            holderName: true;
+            holderEmail: true;
+            holderPhone: true;
+          };
+        };
+      };
+    };
+  };
+}>;
+
+type LoadedOrderItem =
+  LoadedOrder["items"][number];
 
 function normalizeText(
   value:
@@ -157,9 +236,7 @@ function normalizeOrderId(
   value: string,
 ): string {
   const orderId =
-    normalizeText(
-      value,
-    );
+    normalizeText(value);
 
   if (!orderId) {
     throw new PaymentValidationError({
@@ -169,8 +246,7 @@ function normalizeOrderId(
       message:
         "L’identifiant de la commande est obligatoire.",
 
-      status:
-        400,
+      status: 400,
     });
   }
 
@@ -180,14 +256,10 @@ function normalizeOrderId(
 function getTicketQrSecret(): string {
   const secret =
     normalizeText(
-      process.env
-        .TICKET_QR_SECRET,
+      process.env.TICKET_QR_SECRET,
     );
 
-  if (
-    secret.length <
-    32
-  ) {
+  if (secret.length < 32) {
     throw new PaymentError({
       code:
         "PAYMENT_CONFIGURATION_ERROR",
@@ -195,14 +267,11 @@ function getTicketQrSecret(): string {
       message:
         "La configuration de sécurité des QR codes est incomplète.",
 
-      status:
-        500,
+      status: 500,
 
-      retryable:
-        false,
+      retryable: false,
 
-      exposeMessage:
-        false,
+      exposeMessage: false,
     });
   }
 
@@ -212,42 +281,27 @@ function getTicketQrSecret(): string {
 function base64UrlEncode(
   value: string,
 ): string {
-  return Buffer
-    .from(
-      value,
-      "utf8",
-    )
-    .toString(
-      "base64url",
-    );
+  return Buffer.from(
+    value,
+    "utf8",
+  ).toString("base64url");
 }
 
 function base64UrlDecode(
   value: string,
 ): string {
-  return Buffer
-    .from(
-      value,
-      "base64url",
-    )
-    .toString(
-      "utf8",
-    );
+  return Buffer.from(
+    value,
+    "base64url",
+  ).toString("utf8");
 }
 
 function hashValue(
   value: string,
 ): string {
-  return createHash(
-    "sha256",
-  )
-    .update(
-      value,
-      "utf8",
-    )
-    .digest(
-      "hex",
-    );
+  return createHash("sha256")
+    .update(value, "utf8")
+    .digest("hex");
 }
 
 function createSignature(
@@ -261,9 +315,7 @@ function createSignature(
       encodedPayload,
       "utf8",
     )
-    .digest(
-      "base64url",
-    );
+    .digest("base64url");
 }
 
 function safeEquals(
@@ -271,16 +323,10 @@ function safeEquals(
   right: string,
 ): boolean {
   const leftBuffer =
-    Buffer.from(
-      left,
-      "utf8",
-    );
+    Buffer.from(left, "utf8");
 
   const rightBuffer =
-    Buffer.from(
-      right,
-      "utf8",
-    );
+    Buffer.from(right, "utf8");
 
   if (
     leftBuffer.length !==
@@ -296,89 +342,26 @@ function safeEquals(
 }
 
 function createTicketCode(): string {
-  const date =
-    new Date();
+  const date = new Date();
 
-  const datePart =
-    [
-      date.getUTCFullYear(),
-      String(
-        date.getUTCMonth() +
-          1,
-      ).padStart(
-        2,
-        "0",
-      ),
-      String(
-        date.getUTCDate(),
-      ).padStart(
-        2,
-        "0",
-      ),
-    ].join(
-      "",
-    );
+  const datePart = [
+    date.getUTCFullYear(),
+
+    String(
+      date.getUTCMonth() + 1,
+    ).padStart(2, "0"),
+
+    String(
+      date.getUTCDate(),
+    ).padStart(2, "0"),
+  ].join("");
 
   const randomPart =
-    randomBytes(
-      7,
-    )
-      .toString(
-        "hex",
-      )
+    randomBytes(7)
+      .toString("hex")
       .toUpperCase();
 
   return `TKM-${datePart}-${randomPart}`;
-}
-
-async function createUniqueTicketCode(
-  database: DatabaseClient,
-): Promise<string> {
-  for (
-    let attempt = 0;
-    attempt <
-    MAX_TICKET_CODE_ATTEMPTS;
-    attempt +=
-      1
-  ) {
-    const code =
-      createTicketCode();
-
-    const existing =
-      await database
-        .ticket
-        .findUnique({
-          where: {
-            code,
-          },
-
-          select: {
-            id:
-              true,
-          },
-        });
-
-    if (!existing) {
-      return code;
-    }
-  }
-
-  throw new PaymentError({
-    code:
-      "PAYMENT_TICKET_ISSUANCE_FAILED",
-
-    message:
-      "Impossible de générer un code de billet unique.",
-
-    status:
-      500,
-
-    retryable:
-      true,
-
-    exposeMessage:
-      false,
-  });
 }
 
 function decimalToFixed(
@@ -387,12 +370,9 @@ function decimalToFixed(
   return value
     .toDecimalPlaces(
       2,
-      Prisma.Decimal
-        .ROUND_HALF_UP,
+      Prisma.Decimal.ROUND_HALF_UP,
     )
-    .toFixed(
-      2,
-    );
+    .toFixed(2);
 }
 
 function divideAmount({
@@ -403,25 +383,29 @@ function divideAmount({
   quantity: number;
 }): Prisma.Decimal {
   if (
-    !Number.isInteger(
-      quantity,
-    ) ||
-    quantity <=
-      0
+    !Number.isInteger(quantity) ||
+    quantity <= 0
   ) {
-    return new Prisma.Decimal(
-      0,
-    );
+    throw new PaymentError({
+      code:
+        "PAYMENT_TICKET_ISSUANCE_FAILED",
+
+      message:
+        "La quantité de billets est invalide.",
+
+      status: 500,
+
+      retryable: false,
+
+      exposeMessage: false,
+    });
   }
 
   return amount
-    .div(
-      quantity,
-    )
+    .div(quantity)
     .toDecimalPlaces(
       2,
-      Prisma.Decimal
-        .ROUND_HALF_UP,
+      Prisma.Decimal.ROUND_HALF_UP,
     );
 }
 
@@ -451,41 +435,38 @@ function createSignedQrValue({
   payload: TicketQrPayload;
 } {
   const nonce =
-    randomBytes(
-      24,
-    ).toString(
+    randomBytes(24).toString(
       "base64url",
     );
 
-  const unsignedPayload =
-    {
-      version:
-        QR_VERSION,
+  const unsignedPayload = {
+    version:
+      QR_VERSION,
 
-      issuer:
-        "TIKEMIA" as const,
+    issuer:
+      "TIKEMIA" as const,
 
-      ticketCode,
+    ticketCode,
 
-      orderReference,
+    orderReference,
 
-      eventId,
+    eventId,
 
-      eventTitle,
+    eventTitle,
 
-      ticketTypeId,
+    ticketTypeId,
 
-      ticketCategory,
+    ticketCategory,
 
-      unitPrice,
+    unitPrice,
 
-      currency,
+    currency,
 
-      issuedAt:
-        issuedAt.toISOString(),
+    issuedAt:
+      issuedAt.toISOString(),
 
-      nonce,
-    };
+    nonce,
+  };
 
   const encodedPayload =
     base64UrlEncode(
@@ -506,9 +487,7 @@ function createSignedQrValue({
     value,
 
     tokenHash:
-      hashValue(
-        nonce,
-      ),
+      hashValue(nonce),
 
     payload: {
       ...unsignedPayload,
@@ -529,8 +508,7 @@ async function generateQrImage(
       await QRCode.toDataURL(
         qrValue,
         {
-          type:
-            "image/png",
+          type: "image/png",
 
           errorCorrectionLevel:
             QR_ERROR_CORRECTION_LEVEL,
@@ -538,30 +516,38 @@ async function generateQrImage(
           width:
             QR_IMAGE_WIDTH,
 
-          margin:
-            3,
+          margin: 3,
 
           color: {
-            dark:
-              "#000000",
-
-            light:
-              "#FFFFFF",
+            dark: "#000000",
+            light: "#FFFFFF",
           },
         },
       );
 
     const base64 =
-      imageDataUrl.split(
-        ",",
-      )[1] ??
+      imageDataUrl.split(",")[1] ??
       "";
+
+    if (!base64) {
+      throw new Error(
+        "Le contenu PNG du QR code est vide.",
+      );
+    }
 
     const imageBuffer =
       Buffer.from(
         base64,
         "base64",
       );
+
+    if (
+      imageBuffer.byteLength === 0
+    ) {
+      throw new Error(
+        "L’image PNG du QR code est vide.",
+      );
+    }
 
     return {
       imageDataUrl,
@@ -570,19 +556,11 @@ async function generateQrImage(
         imageBuffer.byteLength,
 
       imageChecksum:
-        createHash(
-          "sha256",
-        )
-          .update(
-            imageBuffer,
-          )
-          .digest(
-            "hex",
-          ),
+        createHash("sha256")
+          .update(imageBuffer)
+          .digest("hex"),
     };
-  } catch (
-    error
-  ) {
+  } catch (error) {
     throw new PaymentError({
       code:
         "PAYMENT_TICKET_ISSUANCE_FAILED",
@@ -590,39 +568,49 @@ async function generateQrImage(
       message:
         "Impossible de générer le QR code du billet.",
 
-      status:
-        500,
+      status: 500,
 
-      retryable:
-        true,
+      retryable: true,
 
-      exposeMessage:
-        false,
+      exposeMessage: false,
 
-      cause:
-        error,
+      cause: error,
     });
   }
+}
+
+function isPrismaErrorCode(
+  error: unknown,
+  code: string,
+): boolean {
+  return (
+    error instanceof
+      Prisma.PrismaClientKnownRequestError &&
+    error.code === code
+  );
+}
+
+function isRetryableTransactionError(
+  error: unknown,
+): boolean {
+  return isPrismaErrorCode(
+    error,
+    "P2034",
+  );
 }
 
 export function verifyTicketQrValue(
   qrValue: string,
 ): VerifiedTicketQrPayload {
   const normalized =
-    normalizeText(
-      qrValue,
-    );
+    normalizeText(qrValue);
 
   const parts =
-    normalized.split(
-      ".",
-    );
+    normalized.split(".");
 
   if (
-    parts.length !==
-      3 ||
-    parts[0] !==
-      "TIKEMIA"
+    parts.length !== 3 ||
+    parts[0] !== "TIKEMIA"
   ) {
     throw new PaymentValidationError({
       code:
@@ -631,18 +619,30 @@ export function verifyTicketQrValue(
       message:
         "Le QR code du billet est invalide.",
 
-      status:
-        400,
+      status: 400,
     });
   }
 
   const encodedPayload =
-    parts[1] ??
-    "";
+    parts[1] ?? "";
 
   const receivedSignature =
-    parts[2] ??
-    "";
+    parts[2] ?? "";
+
+  if (
+    !encodedPayload ||
+    !receivedSignature
+  ) {
+    throw new PaymentValidationError({
+      code:
+        "PAYMENT_INVALID_REQUEST",
+
+      message:
+        "Le QR code du billet est incomplet.",
+
+      status: 400,
+    });
+  }
 
   const expectedSignature =
     createSignature(
@@ -662,13 +662,11 @@ export function verifyTicketQrValue(
       message:
         "La signature du QR code est invalide.",
 
-      status:
-        403,
+      status: 403,
     });
   }
 
-  let parsed:
-    unknown;
+  let parsed: unknown;
 
   try {
     parsed =
@@ -676,7 +674,7 @@ export function verifyTicketQrValue(
         base64UrlDecode(
           encodedPayload,
         ),
-      );
+      ) as unknown;
   } catch {
     throw new PaymentValidationError({
       code:
@@ -685,18 +683,14 @@ export function verifyTicketQrValue(
       message:
         "Le contenu du QR code est invalide.",
 
-      status:
-        400,
+      status: 400,
     });
   }
 
   if (
     !parsed ||
-    typeof parsed !==
-      "object" ||
-    Array.isArray(
-      parsed,
-    )
+    typeof parsed !== "object" ||
+    Array.isArray(parsed)
   ) {
     throw new PaymentValidationError({
       code:
@@ -705,8 +699,7 @@ export function verifyTicketQrValue(
       message:
         "Le contenu du QR code est invalide.",
 
-      status:
-        400,
+      status: 400,
     });
   }
 
@@ -717,10 +710,8 @@ export function verifyTicketQrValue(
     >;
 
   if (
-    payload.version !==
-      QR_VERSION ||
-    payload.issuer !==
-      "TIKEMIA" ||
+    payload.version !== QR_VERSION ||
+    payload.issuer !== "TIKEMIA" ||
     !normalizeText(
       payload.ticketCode,
     ) ||
@@ -729,6 +720,9 @@ export function verifyTicketQrValue(
     ) ||
     !normalizeText(
       payload.eventId,
+    ) ||
+    !normalizeText(
+      payload.eventTitle,
     ) ||
     !normalizeText(
       payload.ticketTypeId,
@@ -743,6 +737,9 @@ export function verifyTicketQrValue(
       payload.currency,
     ) ||
     !normalizeText(
+      payload.issuedAt,
+    ) ||
+    !normalizeText(
       payload.nonce,
     )
   ) {
@@ -753,15 +750,28 @@ export function verifyTicketQrValue(
       message:
         "Les informations du QR code sont incomplètes.",
 
-      status:
-        400,
+      status: 400,
+    });
+  }
+
+  if (
+    Number.isNaN(
+      Date.parse(payload.issuedAt),
+    )
+  ) {
+    throw new PaymentValidationError({
+      code:
+        "PAYMENT_INVALID_REQUEST",
+
+      message:
+        "La date du QR code est invalide.",
+
+      status: 400,
     });
   }
 
   return {
-    valid:
-      true,
-
+    valid: true,
     payload,
   };
 }
@@ -777,287 +787,176 @@ async function createTicketDocumentRecord({
   ticketCode: string;
   qr: GeneratedOrderTicket["qr"];
 }): Promise<void> {
-  await database
-    .ticketDocument
-    .upsert({
-      where: {
-        ticketId_type: {
-          ticketId,
-
-          type:
-            TicketDocumentType
-              .QR_IMAGE,
-        },
-      },
-
-      create: {
+  await database.ticketDocument.upsert({
+    where: {
+      ticketId_type: {
         ticketId,
 
         type:
-          TicketDocumentType
-            .QR_IMAGE,
-
-        status:
-          TicketDocumentStatus
-            .PENDING,
-
-        generationKey:
-          `ticket:${ticketId}:qr:v${QR_VERSION}`,
-
-        fileName:
-          qr.imageFileName,
-
-        mimeType:
-          qr.imageMimeType,
-
-        fileSize:
-          qr.imageFileSize,
-
-        checksum:
-          qr.imageChecksum,
-
-        metadata: {
-          qrVersion:
-            qr.version,
-
-          ticketCode,
-
-          generatedInMemory:
-            true,
-        },
+          TicketDocumentType.QR_IMAGE,
       },
+    },
 
-      update: {
-        status:
-          TicketDocumentStatus
-            .PENDING,
+    create: {
+      ticketId,
 
-        generationKey:
-          `ticket:${ticketId}:qr:v${QR_VERSION}`,
+      type:
+        TicketDocumentType.QR_IMAGE,
 
-        fileName:
-          qr.imageFileName,
+      status:
+        TicketDocumentStatus.PENDING,
 
-        mimeType:
-          qr.imageMimeType,
+      generationKey:
+        `ticket:${ticketId}:qr:v${QR_VERSION}`,
 
-        fileSize:
-          qr.imageFileSize,
+      fileName:
+        qr.imageFileName,
 
-        checksum:
-          qr.imageChecksum,
+      mimeType:
+        qr.imageMimeType,
 
-        failureReason:
-          null,
+      fileSize:
+        qr.imageFileSize,
 
-        metadata: {
-          qrVersion:
-            qr.version,
+      checksum:
+        qr.imageChecksum,
 
-          ticketCode,
+      metadata: {
+        qrVersion:
+          qr.version,
 
-          generatedInMemory:
-            true,
-        },
+        ticketCode,
+
+        generatedInMemory:
+          true,
       },
-    });
+    },
+
+    update: {
+      status:
+        TicketDocumentStatus.PENDING,
+
+      generationKey:
+        `ticket:${ticketId}:qr:v${QR_VERSION}`,
+
+      fileName:
+        qr.imageFileName,
+
+      mimeType:
+        qr.imageMimeType,
+
+      fileSize:
+        qr.imageFileSize,
+
+      checksum:
+        qr.imageChecksum,
+
+      failureReason: null,
+
+      metadata: {
+        qrVersion:
+          qr.version,
+
+        ticketCode,
+
+        generatedInMemory:
+          true,
+      },
+    },
+  });
 }
 
-export async function generateOrderTickets({
-  orderId: rawOrderId,
-  transaction,
-  issuedAt = new Date(),
-  createQrDocumentRecord = true,
-}: GenerateOrderTicketsOptions): Promise<
-  GenerateOrderTicketsResult
-> {
-  const orderId =
-    normalizeOrderId(
-      rawOrderId,
-    );
+async function loadOrder(
+  database: DatabaseClient,
+  orderId: string,
+): Promise<LoadedOrder | null> {
+  return database.order.findUnique({
+    where: {
+      id: orderId,
+    },
 
-  const database:
-    DatabaseClient =
-    transaction ??
-    prisma;
+    select: {
+      id: true,
+      reference: true,
+      status: true,
+      currency: true,
+      customerId: true,
+      customerName: true,
+      customerEmail: true,
+      customerPhone: true,
+      ticketsIssuedAt: true,
 
-  const order =
-    await database
-      .order
-      .findUnique({
-        where: {
-          id:
-            orderId,
+      payment: {
+        select: {
+          id: true,
+          status: true,
+          amount: true,
+          currency: true,
+        },
+      },
+
+      event: {
+        select: {
+          id: true,
+          title: true,
+          slug: true,
+          venueName: true,
+          city: true,
+          country: true,
+          startsAt: true,
+          endsAt: true,
+        },
+      },
+
+      items: {
+        orderBy: {
+          id: "asc",
         },
 
         select: {
-          id:
-            true,
+          id: true,
+          ticketTypeId: true,
+          quantity: true,
+          unitPrice: true,
+          platformFee: true,
+          total: true,
 
-          reference:
-            true,
-
-          status:
-            true,
-
-          currency:
-            true,
-
-          customerId:
-            true,
-
-          customerName:
-            true,
-
-          customerEmail:
-            true,
-
-          customerPhone:
-            true,
-
-          ticketsIssuedAt:
-            true,
-
-          payment: {
+          ticketType: {
             select: {
-              id:
-                true,
-
-              status:
-                true,
-
-              amount:
-                true,
-
-              currency:
-                true,
+              id: true,
+              name: true,
+              description: true,
             },
           },
 
-          event: {
-            select: {
-              id:
-                true,
-
-              title:
-                true,
-
-              slug:
-                true,
-
-              venueName:
-                true,
-
-              city:
-                true,
-
-              country:
-                true,
-
-              startsAt:
-                true,
-
-              endsAt:
-                true,
-            },
-          },
-
-          items: {
+          tickets: {
             orderBy: {
-              id:
-                "asc",
+              createdAt: "asc",
             },
 
             select: {
-              id:
-                true,
-
-              ticketTypeId:
-                true,
-
-              quantity:
-                true,
-
-              unitPrice:
-                true,
-
-              platformFee:
-                true,
-
-              total:
-                true,
-
-              ticketType: {
-                select: {
-                  id:
-                    true,
-
-                  name:
-                    true,
-
-                  description:
-                    true,
-                },
-              },
-
-              tickets: {
-                orderBy: {
-                  createdAt:
-                    "asc",
-                },
-
-                select: {
-                  id:
-                    true,
-
-                  code:
-                    true,
-
-                  qrCodeValue:
-                    true,
-
-                  qrTokenHash:
-                    true,
-
-                  qrVersion:
-                    true,
-
-                  issuedAt:
-                    true,
-
-                  holderName:
-                    true,
-
-                  holderEmail:
-                    true,
-
-                  holderPhone:
-                    true,
-                },
-              },
+              id: true,
+              code: true,
+              qrCodeValue: true,
+              qrTokenHash: true,
+              qrVersion: true,
+              issuedAt: true,
+              holderName: true,
+              holderEmail: true,
+              holderPhone: true,
             },
           },
         },
-      });
+      },
+    },
+  });
+}
 
-  if (!order) {
-    throw new PaymentValidationError({
-      code:
-        "PAYMENT_ORDER_NOT_FOUND",
-
-      message:
-        "La commande est introuvable.",
-
-      status:
-        404,
-
-      orderId,
-    });
-  }
-
+function validatePaidOrder(
+  order: LoadedOrder,
+): number {
   if (
-    order.status !==
-      OrderStatus.PAID ||
+    order.status !== OrderStatus.PAID ||
     order.payment?.status !==
       PaymentStatus.SUCCESS
   ) {
@@ -1068,8 +967,7 @@ export async function generateOrderTickets({
       message:
         "Les billets ne peuvent être générés qu’après confirmation du paiement.",
 
-      status:
-        409,
+      status: 409,
 
       orderId:
         order.id,
@@ -1085,23 +983,113 @@ export async function generateOrderTickets({
     });
   }
 
+  if (
+    order.payment.currency
+      .trim()
+      .toUpperCase() !==
+    order.currency
+      .trim()
+      .toUpperCase()
+  ) {
+    throw new PaymentError({
+      code:
+        "PAYMENT_TICKET_ISSUANCE_FAILED",
+
+      message:
+        "La devise du paiement ne correspond pas à la commande.",
+
+      status: 500,
+
+      retryable: false,
+
+      exposeMessage: false,
+
+      orderId:
+        order.id,
+    });
+  }
+
+  if (order.items.length === 0) {
+    throw new PaymentError({
+      code:
+        "PAYMENT_TICKET_ISSUANCE_FAILED",
+
+      message:
+        "La commande ne contient aucune catégorie de billet.",
+
+      status: 500,
+
+      retryable: false,
+
+      exposeMessage: false,
+
+      orderId:
+        order.id,
+    });
+  }
+
   const expectedTickets =
     order.items.reduce(
-      (
-        total,
-        item,
-      ) =>
-        total +
-        item.quantity,
+      (total, item) => {
+        if (
+          !Number.isInteger(
+            item.quantity,
+          ) ||
+          item.quantity <= 0
+        ) {
+          throw new PaymentError({
+            code:
+              "PAYMENT_TICKET_ISSUANCE_FAILED",
+
+            message:
+              "Une quantité de billet de la commande est invalide.",
+
+            status: 500,
+
+            retryable: false,
+
+            exposeMessage: false,
+
+            orderId:
+              order.id,
+
+            details: {
+              orderItemId:
+                item.id,
+
+              quantity:
+                item.quantity,
+            },
+          });
+        }
+
+        return total + item.quantity;
+      },
       0,
     );
 
+  if (expectedTickets <= 0) {
+    throw new PaymentError({
+      code:
+        "PAYMENT_TICKET_ISSUANCE_FAILED",
+
+      message:
+        "La commande ne contient aucun billet à générer.",
+
+      status: 500,
+
+      retryable: false,
+
+      exposeMessage: false,
+
+      orderId:
+        order.id,
+    });
+  }
+
   const existingTickets =
     order.items.reduce(
-      (
-        total,
-        item,
-      ) =>
+      (total, item) =>
         total +
         item.tickets.length,
       0,
@@ -1118,34 +1106,504 @@ export async function generateOrderTickets({
       message:
         "Le nombre de billets existants dépasse la quantité commandée.",
 
-      status:
-        500,
+      status: 500,
 
-      retryable:
-        false,
+      retryable: false,
 
-      exposeMessage:
-        false,
+      exposeMessage: false,
 
       orderId:
         order.id,
     });
   }
 
-  const generatedTickets:
-    GeneratedOrderTicket[] =
-    [];
+  return expectedTickets;
+}
 
-  let createdCount =
-    0;
+function buildTicketResultBase({
+  order,
+  item,
+  id,
+  code,
+  holderName,
+  holderEmail,
+  holderPhone,
+  issuedAt,
+  qrVersion,
+  qrValue,
+  qrTokenHash,
+  qrImage,
+  alreadyExisted,
+}: {
+  order: LoadedOrder;
+  item: LoadedOrderItem;
+  id: string;
+  code: string;
+  holderName: string;
+  holderEmail: string;
+  holderPhone: string | null;
+  issuedAt: Date;
+  qrVersion: number;
+  qrValue: string;
+  qrTokenHash: string;
+  qrImage: {
+    imageDataUrl: string;
+    imageFileSize: number;
+    imageChecksum: string;
+  };
+  alreadyExisted: boolean;
+}): GeneratedOrderTicket {
+  const feePerTicket =
+    divideAmount({
+      amount:
+        item.platformFee,
 
-  let existingCount =
-    0;
+      quantity:
+        item.quantity,
+    });
 
-  for (
-    const item of
-    order.items
+  const totalPerTicket =
+    divideAmount({
+      amount:
+        item.total,
+
+      quantity:
+        item.quantity,
+    });
+
+  const verified =
+    verifyTicketQrValue(
+      qrValue,
+    );
+
+  return {
+    id,
+    code,
+
+    event: {
+      id:
+        order.event.id,
+
+      title:
+        order.event.title,
+
+      slug:
+        order.event.slug,
+
+      venueName:
+        order.event.venueName,
+
+      city:
+        order.event.city,
+
+      country:
+        order.event.country,
+
+      startsAt:
+        order.event.startsAt
+          .toISOString(),
+
+      endsAt:
+        order.event.endsAt
+          ?.toISOString() ??
+        null,
+    },
+
+    category: {
+      id:
+        item.ticketType.id,
+
+      name:
+        item.ticketType.name,
+
+      description:
+        item.ticketType.description,
+    },
+
+    holder: {
+      name:
+        holderName,
+
+      email:
+        holderEmail,
+
+      phone:
+        holderPhone,
+    },
+
+    pricing: {
+      unitPrice:
+        verified.payload.unitPrice,
+
+      platformFeePerTicket:
+        decimalToFixed(
+          feePerTicket,
+        ),
+
+      totalPerTicket:
+        decimalToFixed(
+          totalPerTicket,
+        ),
+
+      currency:
+        order.currency,
+    },
+
+    qr: {
+      version:
+        qrVersion,
+
+      value:
+        qrValue,
+
+      tokenHash:
+        qrTokenHash,
+
+      imageDataUrl:
+        qrImage.imageDataUrl,
+
+      imageMimeType:
+        "image/png",
+
+      imageFileName:
+        `${code}-qr.png`,
+
+      imageFileSize:
+        qrImage.imageFileSize,
+
+      imageChecksum:
+        qrImage.imageChecksum,
+    },
+
+    issuedAt:
+      issuedAt.toISOString(),
+
+    alreadyExisted,
+  };
+}
+
+async function restoreExistingTicketQrData({
+  database,
+  ticket,
+}: {
+  database: DatabaseClient;
+
+  ticket: {
+    id: string;
+    qrCodeValue: string;
+    qrTokenHash: string | null;
+    qrVersion: number;
+  };
+}): Promise<string> {
+  const verified =
+    verifyTicketQrValue(
+      ticket.qrCodeValue,
+    );
+
+  const expectedTokenHash =
+    hashValue(
+      verified.payload.nonce,
+    );
+
+  if (
+    ticket.qrVersion !==
+    verified.payload.version
   ) {
+    throw new PaymentError({
+      code:
+        "PAYMENT_TICKET_ISSUANCE_FAILED",
+
+      message:
+        "La version du QR code du billet est incohérente.",
+
+      status: 500,
+
+      retryable: false,
+
+      exposeMessage: false,
+
+      details: {
+        ticketId:
+          ticket.id,
+
+        storedVersion:
+          ticket.qrVersion,
+
+        payloadVersion:
+          verified.payload.version,
+      },
+    });
+  }
+
+  if (
+    ticket.qrTokenHash &&
+    !safeEquals(
+      ticket.qrTokenHash,
+      expectedTokenHash,
+    )
+  ) {
+    throw new PaymentError({
+      code:
+        "PAYMENT_TICKET_ISSUANCE_FAILED",
+
+      message:
+        "Le token sécurisé du billet est incohérent.",
+
+      status: 500,
+
+      retryable: false,
+
+      exposeMessage: false,
+
+      details: {
+        ticketId:
+          ticket.id,
+      },
+    });
+  }
+
+  if (!ticket.qrTokenHash) {
+    await database.ticket.update({
+      where: {
+        id:
+          ticket.id,
+      },
+
+      data: {
+        qrTokenHash:
+          expectedTokenHash,
+
+        qrGeneratedAt:
+          new Date(),
+      },
+    });
+  }
+
+  return expectedTokenHash;
+}
+
+async function createMissingTicket({
+  database,
+  order,
+  item,
+  issuedAt,
+}: {
+  database: DatabaseClient;
+  order: LoadedOrder;
+  item: LoadedOrderItem;
+  issuedAt: Date;
+}): Promise<GeneratedOrderTicket> {
+  for (
+    let attempt = 1;
+    attempt <=
+    MAX_TICKET_CREATION_ATTEMPTS;
+    attempt += 1
+  ) {
+    const code =
+      createTicketCode();
+
+    const signedQr =
+      createSignedQrValue({
+        ticketCode:
+          code,
+
+        orderReference:
+          order.reference,
+
+        eventId:
+          order.event.id,
+
+        eventTitle:
+          order.event.title,
+
+        ticketTypeId:
+          item.ticketType.id,
+
+        ticketCategory:
+          item.ticketType.name,
+
+        unitPrice:
+          decimalToFixed(
+            item.unitPrice,
+          ),
+
+        currency:
+          order.currency,
+
+        issuedAt,
+      });
+
+    const qrImage =
+      await generateQrImage(
+        signedQr.value,
+      );
+
+    try {
+      const ticket =
+        await database.ticket.create({
+          data: {
+            code,
+
+            qrCodeValue:
+              signedQr.value,
+
+            qrTokenHash:
+              signedQr.tokenHash,
+
+            qrVersion:
+              QR_VERSION,
+
+            eventId:
+              order.event.id,
+
+            orderId:
+              order.id,
+
+            orderItemId:
+              item.id,
+
+            ticketTypeId:
+              item.ticketType.id,
+
+            ownerId:
+              order.customerId,
+
+            holderName:
+              order.customerName,
+
+            holderEmail:
+              order.customerEmail,
+
+            holderPhone:
+              order.customerPhone,
+
+            status:
+              TicketStatus.VALID,
+
+            issuedAt,
+
+            qrGeneratedAt:
+              issuedAt,
+          },
+
+          select: {
+            id: true,
+            code: true,
+            issuedAt: true,
+          },
+        });
+
+      return buildTicketResultBase({
+        order,
+        item,
+
+        id:
+          ticket.id,
+
+        code:
+          ticket.code,
+
+        holderName:
+          order.customerName,
+
+        holderEmail:
+          order.customerEmail,
+
+        holderPhone:
+          order.customerPhone,
+
+        issuedAt:
+          ticket.issuedAt,
+
+        qrVersion:
+          QR_VERSION,
+
+        qrValue:
+          signedQr.value,
+
+        qrTokenHash:
+          signedQr.tokenHash,
+
+        qrImage,
+
+        alreadyExisted:
+          false,
+      });
+    } catch (error) {
+      if (
+        isPrismaErrorCode(
+          error,
+          "P2002",
+        ) &&
+        attempt <
+          MAX_TICKET_CREATION_ATTEMPTS
+      ) {
+        continue;
+      }
+
+      throw error;
+    }
+  }
+
+  throw new PaymentError({
+    code:
+      "PAYMENT_TICKET_ISSUANCE_FAILED",
+
+    message:
+      "Impossible de générer un billet avec des identifiants uniques.",
+
+    status: 500,
+
+    retryable: true,
+
+    exposeMessage: false,
+
+    orderId:
+      order.id,
+  });
+}
+
+async function generateOrderTicketsInTransaction({
+  orderId,
+  transaction,
+  issuedAt,
+  createQrDocumentRecord,
+}: {
+  orderId: string;
+  transaction: Prisma.TransactionClient;
+  issuedAt: Date;
+  createQrDocumentRecord: boolean;
+}): Promise<GenerateOrderTicketsResult> {
+  const order =
+    await loadOrder(
+      transaction,
+      orderId,
+    );
+
+  if (!order) {
+    throw new PaymentValidationError({
+      code:
+        "PAYMENT_ORDER_NOT_FOUND",
+
+      message:
+        "La commande est introuvable.",
+
+      status: 404,
+
+      orderId,
+    });
+  }
+
+  const expectedTickets =
+    validatePaidOrder(order);
+
+  const generatedTickets:
+    GeneratedOrderTicket[] = [];
+
+  let createdCount = 0;
+  let existingCount = 0;
+
+  for (const item of order.items) {
     if (
       item.tickets.length >
       item.quantity
@@ -1157,14 +1615,11 @@ export async function generateOrderTickets({
         message:
           "Une catégorie contient plus de billets que la quantité commandée.",
 
-        status:
-          500,
+        status: 500,
 
-        retryable:
-          false,
+        retryable: false,
 
-        exposeMessage:
-          false,
+        exposeMessage: false,
 
         orderId:
           order.id,
@@ -1182,171 +1637,66 @@ export async function generateOrderTickets({
       });
     }
 
-    const feePerTicket =
-      divideAmount({
-        amount:
-          item.platformFee,
-
-        quantity:
-          item.quantity,
-      });
-
-    const totalPerTicket =
-      divideAmount({
-        amount:
-          item.total,
-
-        quantity:
-          item.quantity,
-      });
-
     for (
       const existingTicket of
       item.tickets
     ) {
-      const verified =
-        verifyTicketQrValue(
-          existingTicket
-            .qrCodeValue,
-        );
+      const tokenHash =
+        await restoreExistingTicketQrData({
+          database:
+            transaction,
+
+          ticket:
+            existingTicket,
+        });
 
       const qrImage =
         await generateQrImage(
-          existingTicket
-            .qrCodeValue,
+          existingTicket.qrCodeValue,
         );
 
-      const ticketResult:
-        GeneratedOrderTicket = {
+      const ticketResult =
+        buildTicketResultBase({
+          order,
+          item,
+
           id:
             existingTicket.id,
 
           code:
             existingTicket.code,
 
-          event: {
-            id:
-              order.event.id,
+          holderName:
+            existingTicket.holderName,
 
-            title:
-              order.event.title,
+          holderEmail:
+            existingTicket.holderEmail,
 
-            slug:
-              order.event.slug,
-
-            venueName:
-              order.event
-                .venueName,
-
-            city:
-              order.event.city,
-
-            country:
-              order.event.country,
-
-            startsAt:
-              order.event
-                .startsAt
-                .toISOString(),
-
-            endsAt:
-              order.event.endsAt
-                ?.toISOString() ??
-              null,
-          },
-
-          category: {
-            id:
-              item.ticketType.id,
-
-            name:
-              item.ticketType.name,
-
-            description:
-              item.ticketType
-                .description,
-          },
-
-          holder: {
-            name:
-              existingTicket
-                .holderName,
-
-            email:
-              existingTicket
-                .holderEmail,
-
-            phone:
-              existingTicket
-                .holderPhone,
-          },
-
-          pricing: {
-            unitPrice:
-              verified.payload
-                .unitPrice,
-
-            platformFeePerTicket:
-              decimalToFixed(
-                feePerTicket,
-              ),
-
-            totalPerTicket:
-              decimalToFixed(
-                totalPerTicket,
-              ),
-
-            currency:
-              order.currency,
-          },
-
-          qr: {
-            version:
-              existingTicket
-                .qrVersion,
-
-            value:
-              existingTicket
-                .qrCodeValue,
-
-            tokenHash:
-              existingTicket
-                .qrTokenHash ??
-              hashValue(
-                verified.payload
-                  .nonce,
-              ),
-
-            imageDataUrl:
-              qrImage.imageDataUrl,
-
-            imageMimeType:
-              "image/png",
-
-            imageFileName:
-              `${existingTicket.code}-qr.png`,
-
-            imageFileSize:
-              qrImage.imageFileSize,
-
-            imageChecksum:
-              qrImage.imageChecksum,
-          },
+          holderPhone:
+            existingTicket.holderPhone,
 
           issuedAt:
-            existingTicket
-              .issuedAt
-              .toISOString(),
+            existingTicket.issuedAt,
+
+          qrVersion:
+            existingTicket.qrVersion,
+
+          qrValue:
+            existingTicket.qrCodeValue,
+
+          qrTokenHash:
+            tokenHash,
+
+          qrImage,
 
           alreadyExisted:
             true,
-        };
+        });
 
-      if (
-        createQrDocumentRecord
-      ) {
+      if (createQrDocumentRecord) {
         await createTicketDocumentRecord({
-          database,
+          database:
+            transaction,
 
           ticketId:
             ticketResult.id,
@@ -1363,8 +1713,7 @@ export async function generateOrderTickets({
         ticketResult,
       );
 
-      existingCount +=
-        1;
+      existingCount += 1;
     }
 
     const missingTickets =
@@ -1373,236 +1722,23 @@ export async function generateOrderTickets({
 
     for (
       let index = 0;
-      index <
-      missingTickets;
-      index +=
-        1
+      index < missingTickets;
+      index += 1
     ) {
-      const code =
-        await createUniqueTicketCode(
-          database,
-        );
+      const ticketResult =
+        await createMissingTicket({
+          database:
+            transaction,
 
-      const signedQr =
-        createSignedQrValue({
-          ticketCode:
-            code,
-
-          orderReference:
-            order.reference,
-
-          eventId:
-            order.event.id,
-
-          eventTitle:
-            order.event.title,
-
-          ticketTypeId:
-            item.ticketType.id,
-
-          ticketCategory:
-            item.ticketType.name,
-
-          unitPrice:
-            decimalToFixed(
-              item.unitPrice,
-            ),
-
-          currency:
-            order.currency,
-
+          order,
+          item,
           issuedAt,
         });
 
-      const qrImage =
-        await generateQrImage(
-          signedQr.value,
-        );
-
-      const ticket =
-        await database
-          .ticket
-          .create({
-            data: {
-              code,
-
-              qrCodeValue:
-                signedQr.value,
-
-              qrTokenHash:
-                signedQr
-                  .tokenHash,
-
-              qrVersion:
-                QR_VERSION,
-
-              eventId:
-                order.event.id,
-
-              orderId:
-                order.id,
-
-              orderItemId:
-                item.id,
-
-              ticketTypeId:
-                item.ticketType.id,
-
-              ownerId:
-                order.customerId,
-
-              holderName:
-                order.customerName,
-
-              holderEmail:
-                order.customerEmail,
-
-              holderPhone:
-                order.customerPhone,
-
-              status:
-                TicketStatus.VALID,
-
-              issuedAt,
-
-              qrGeneratedAt:
-                issuedAt,
-            },
-
-            select: {
-              id:
-                true,
-
-              code:
-                true,
-
-              issuedAt:
-                true,
-            },
-          });
-
-      const ticketResult:
-        GeneratedOrderTicket = {
-          id:
-            ticket.id,
-
-          code:
-            ticket.code,
-
-          event: {
-            id:
-              order.event.id,
-
-            title:
-              order.event.title,
-
-            slug:
-              order.event.slug,
-
-            venueName:
-              order.event
-                .venueName,
-
-            city:
-              order.event.city,
-
-            country:
-              order.event.country,
-
-            startsAt:
-              order.event
-                .startsAt
-                .toISOString(),
-
-            endsAt:
-              order.event.endsAt
-                ?.toISOString() ??
-              null,
-          },
-
-          category: {
-            id:
-              item.ticketType.id,
-
-            name:
-              item.ticketType.name,
-
-            description:
-              item.ticketType
-                .description,
-          },
-
-          holder: {
-            name:
-              order.customerName,
-
-            email:
-              order.customerEmail,
-
-            phone:
-              order.customerPhone,
-          },
-
-          pricing: {
-            unitPrice:
-              decimalToFixed(
-                item.unitPrice,
-              ),
-
-            platformFeePerTicket:
-              decimalToFixed(
-                feePerTicket,
-              ),
-
-            totalPerTicket:
-              decimalToFixed(
-                totalPerTicket,
-              ),
-
-            currency:
-              order.currency,
-          },
-
-          qr: {
-            version:
-              QR_VERSION,
-
-            value:
-              signedQr.value,
-
-            tokenHash:
-              signedQr
-                .tokenHash,
-
-            imageDataUrl:
-              qrImage.imageDataUrl,
-
-            imageMimeType:
-              "image/png",
-
-            imageFileName:
-              `${ticket.code}-qr.png`,
-
-            imageFileSize:
-              qrImage.imageFileSize,
-
-            imageChecksum:
-              qrImage.imageChecksum,
-          },
-
-          issuedAt:
-            ticket.issuedAt
-              .toISOString(),
-
-          alreadyExisted:
-            false,
-        };
-
-      if (
-        createQrDocumentRecord
-      ) {
+      if (createQrDocumentRecord) {
         await createTicketDocumentRecord({
-          database,
+          database:
+            transaction,
 
           ticketId:
             ticketResult.id,
@@ -1619,8 +1755,7 @@ export async function generateOrderTickets({
         ticketResult,
       );
 
-      createdCount +=
-        1;
+      createdCount += 1;
     }
   }
 
@@ -1635,14 +1770,11 @@ export async function generateOrderTickets({
       message:
         "Le nombre final de billets ne correspond pas à la commande.",
 
-      status:
-        500,
+      status: 500,
 
-      retryable:
-        true,
+      retryable: true,
 
-      exposeMessage:
-        false,
+      exposeMessage: false,
 
       orderId:
         order.id,
@@ -1656,26 +1788,59 @@ export async function generateOrderTickets({
     });
   }
 
+  const persistedTicketsCount =
+    await transaction.ticket.count({
+      where: {
+        orderId:
+          order.id,
+      },
+    });
+
   if (
-    !order.ticketsIssuedAt
+    persistedTicketsCount !==
+    expectedTickets
   ) {
-    await database
-      .order
-      .update({
-        where: {
-          id:
-            order.id,
-        },
+    throw new PaymentError({
+      code:
+        "PAYMENT_TICKET_ISSUANCE_FAILED",
 
-        data: {
-          ticketsIssuedAt:
-            issuedAt,
+      message:
+        "Le nombre de billets enregistrés ne correspond pas à la commande.",
 
-          finalizedAt:
-            issuedAt,
-        },
-      });
+      status: 500,
+
+      retryable: true,
+
+      exposeMessage: false,
+
+      orderId:
+        order.id,
+
+      details: {
+        expectedTickets,
+
+        persistedTickets:
+          persistedTicketsCount,
+      },
+    });
   }
+
+  await transaction.order.update({
+    where: {
+      id:
+        order.id,
+    },
+
+    data: {
+      ticketsIssuedAt:
+        order.ticketsIssuedAt ??
+        issuedAt,
+
+      finalizedAt:
+        order.ticketsIssuedAt ??
+        issuedAt,
+    },
+  });
 
   return {
     order: {
@@ -1704,4 +1869,112 @@ export async function generateOrderTickets({
 
     existingCount,
   };
+}
+
+export async function generateOrderTickets({
+  orderId: rawOrderId,
+  transaction,
+  issuedAt = new Date(),
+  createQrDocumentRecord = true,
+}: GenerateOrderTicketsOptions): Promise<
+  GenerateOrderTicketsResult
+> {
+  const orderId =
+    normalizeOrderId(
+      rawOrderId,
+    );
+
+  if (
+    Number.isNaN(
+      issuedAt.getTime(),
+    )
+  ) {
+    throw new PaymentValidationError({
+      code:
+        "PAYMENT_INVALID_REQUEST",
+
+      message:
+        "La date d’émission des billets est invalide.",
+
+      status: 400,
+
+      orderId,
+    });
+  }
+
+  if (transaction) {
+    return generateOrderTicketsInTransaction({
+      orderId,
+
+      transaction,
+
+      issuedAt,
+
+      createQrDocumentRecord,
+    });
+  }
+
+  for (
+    let attempt = 1;
+    attempt <=
+    MAX_TRANSACTION_ATTEMPTS;
+    attempt += 1
+  ) {
+    try {
+      return await prisma.$transaction(
+        async (database) =>
+          generateOrderTicketsInTransaction({
+            orderId,
+
+            transaction:
+              database,
+
+            issuedAt,
+
+            createQrDocumentRecord,
+          }),
+
+        {
+          isolationLevel:
+            Prisma
+              .TransactionIsolationLevel
+              .Serializable,
+
+          maxWait:
+            10_000,
+
+          timeout:
+            60_000,
+        },
+      );
+    } catch (error) {
+      if (
+        isRetryableTransactionError(
+          error,
+        ) &&
+        attempt <
+          MAX_TRANSACTION_ATTEMPTS
+      ) {
+        continue;
+      }
+
+      throw error;
+    }
+  }
+
+  throw new PaymentError({
+    code:
+      "PAYMENT_TICKET_ISSUANCE_FAILED",
+
+    message:
+      "Impossible de finaliser la génération des billets.",
+
+    status: 500,
+
+    retryable: true,
+
+    exposeMessage: false,
+
+    orderId,
+  });
 }

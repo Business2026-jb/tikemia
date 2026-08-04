@@ -1,14 +1,8 @@
 import "server-only";
 
-import {
-  createHash,
-} from "node:crypto";
-import {
-  readFile,
-} from "node:fs/promises";
-import {
-  join,
-} from "node:path";
+import { createHash } from "node:crypto";
+import { readFile } from "node:fs/promises";
+import { extname, join } from "node:path";
 
 import {
   OrderStatus,
@@ -23,6 +17,7 @@ import {
   type PDFFont,
   type PDFImage,
   type PDFPage,
+  type RGB,
 } from "pdf-lib";
 import * as QRCode from "qrcode";
 
@@ -31,6 +26,9 @@ import {
   PaymentValidationError,
 } from "@/lib/payments/payment-errors";
 import { prisma } from "@/lib/prisma";
+import {
+  verifyTicketQrValue,
+} from "@/lib/tickets/generate-order-tickets";
 
 type DatabaseClient =
   | Prisma.TransactionClient
@@ -38,11 +36,8 @@ type DatabaseClient =
 
 export type GenerateTicketPdfOptions = {
   ticketId: string;
-
   transaction?: Prisma.TransactionClient;
-
   logoPath?: string;
-
   generatedAt?: Date;
 };
 
@@ -84,11 +79,8 @@ export type GeneratedTicketPdf = {
 
 export type GenerateOrderTicketPdfsOptions = {
   orderId: string;
-
   transaction?: Prisma.TransactionClient;
-
   logoPath?: string;
-
   generatedAt?: Date;
 };
 
@@ -97,7 +89,6 @@ export type GeneratedOrderTicketPdfs = {
   orderReference: string;
 
   tickets: GeneratedTicketPdf[];
-
   generatedCount: number;
 };
 
@@ -160,93 +151,74 @@ type TicketPdfData = {
   };
 };
 
-const A4_WIDTH =
-  595.28;
+const A4_WIDTH = 595.28;
+const A4_HEIGHT = 841.89;
 
-const A4_HEIGHT =
-  841.89;
+const PAGE_MARGIN = 36;
+const QR_SIZE = 180;
 
-const PAGE_MARGIN =
-  36;
+const BRAND_GREEN = rgb(
+  0.2,
+  0.78,
+  0.45,
+);
 
-const QR_SIZE =
-  180;
+const BRAND_LIME = rgb(
+  0.64,
+  0.9,
+  0.2,
+);
 
-const BRAND_GREEN =
-  rgb(
-    0.20,
-    0.78,
-    0.45,
-  );
+const BRAND_ORANGE = rgb(
+  0.98,
+  0.55,
+  0.12,
+);
 
-const BRAND_LIME =
-  rgb(
-    0.64,
-    0.90,
-    0.20,
-  );
+const COLOR_DARK = rgb(
+  0.02,
+  0.04,
+  0.05,
+);
 
-const BRAND_ORANGE =
-  rgb(
-    0.98,
-    0.55,
-    0.12,
-  );
+const COLOR_PANEL = rgb(
+  0.04,
+  0.08,
+  0.1,
+);
 
-const COLOR_DARK =
-  rgb(
-    0.02,
-    0.04,
-    0.05,
-  );
+const COLOR_PANEL_ALT = rgb(
+  0.07,
+  0.11,
+  0.13,
+);
 
-const COLOR_PANEL =
-  rgb(
-    0.04,
-    0.08,
-    0.10,
-  );
+const COLOR_WHITE = rgb(
+  1,
+  1,
+  1,
+);
 
-const COLOR_PANEL_ALT =
-  rgb(
-    0.07,
-    0.11,
-    0.13,
-  );
+const COLOR_MUTED = rgb(
+  0.68,
+  0.72,
+  0.74,
+);
 
-const COLOR_WHITE =
-  rgb(
-    1,
-    1,
-    1,
-  );
-
-const COLOR_MUTED =
-  rgb(
-    0.68,
-    0.72,
-    0.74,
-  );
-
-const COLOR_LINE =
-  rgb(
-    0.16,
-    0.21,
-    0.23,
-  );
+const COLOR_LINE = rgb(
+  0.16,
+  0.21,
+  0.23,
+);
 
 function normalizeText(
-  value:
-    | string
-    | null
-    | undefined,
+  value: string | null | undefined,
 ): string {
-  return value
-    ?.replace(
-      /\s+/g,
-      " ",
-    )
-    .trim() ?? "";
+  return (
+    value
+      ?.replace(/\s+/g, " ")
+      .trim() ?? ""
+  );
 }
 
 function normalizeIdentifier({
@@ -257,9 +229,7 @@ function normalizeIdentifier({
   field: string;
 }): string {
   const normalized =
-    normalizeText(
-      value,
-    );
+    normalizeText(value);
 
   if (!normalized) {
     throw new PaymentValidationError({
@@ -269,8 +239,7 @@ function normalizeIdentifier({
       message:
         `${field} est obligatoire.`,
 
-      status:
-        400,
+      status: 400,
 
       details: {
         field,
@@ -281,47 +250,80 @@ function normalizeIdentifier({
   return normalized;
 }
 
+function validateGeneratedAt(
+  value: Date,
+): Date {
+  if (
+    !(value instanceof Date) ||
+    Number.isNaN(value.getTime())
+  ) {
+    throw new PaymentValidationError({
+      code:
+        "PAYMENT_INVALID_REQUEST",
+
+      message:
+        "La date de génération du PDF est invalide.",
+
+      status: 400,
+    });
+  }
+
+  return value;
+}
+
 function decimalToFixed(
   value: Prisma.Decimal,
 ): string {
   return value
     .toDecimalPlaces(
       2,
-      Prisma.Decimal
-        .ROUND_HALF_UP,
+      Prisma.Decimal.ROUND_HALF_UP,
     )
-    .toFixed(
-      2,
-    );
+    .toFixed(2);
 }
 
 function divideAmount({
   amount,
   quantity,
+  orderId,
+  orderItemId,
 }: {
   amount: Prisma.Decimal;
   quantity: number;
+  orderId: string;
+  orderItemId: string;
 }): Prisma.Decimal {
   if (
-    !Number.isInteger(
-      quantity,
-    ) ||
-    quantity <=
-      0
+    !Number.isInteger(quantity) ||
+    quantity <= 0
   ) {
-    return new Prisma.Decimal(
-      0,
-    );
+    throw new PaymentError({
+      code:
+        "PAYMENT_TICKET_ISSUANCE_FAILED",
+
+      message:
+        "La quantité de billets est invalide.",
+
+      status: 500,
+
+      retryable: false,
+
+      exposeMessage: false,
+
+      orderId,
+
+      details: {
+        orderItemId,
+        quantity,
+      },
+    });
   }
 
   return amount
-    .div(
-      quantity,
-    )
+    .div(quantity)
     .toDecimalPlaces(
       2,
-      Prisma.Decimal
-        .ROUND_HALF_UP,
+      Prisma.Decimal.ROUND_HALF_UP,
     );
 }
 
@@ -333,29 +335,28 @@ function formatMoney({
   currency: string;
 }): string {
   const numericAmount =
-    Number.parseFloat(
-      amount,
-    );
+    Number.parseFloat(amount);
 
   const normalizedCurrency =
-    normalizeText(
-      currency,
-    ).toUpperCase() ||
-    "XOF";
+    normalizeText(currency)
+      .toUpperCase() || "XOF";
 
   try {
     return new Intl.NumberFormat(
       "fr-FR",
       {
-        style:
-          "currency",
+        style: "currency",
 
         currency:
           normalizedCurrency,
 
+        minimumFractionDigits:
+          normalizedCurrency === "XOF"
+            ? 0
+            : 2,
+
         maximumFractionDigits:
-          normalizedCurrency ===
-          "XOF"
+          normalizedCurrency === "XOF"
             ? 0
             : 2,
       },
@@ -374,48 +375,58 @@ function formatMoney({
 function formatDateTime(
   value: Date,
 ): string {
+  if (
+    Number.isNaN(value.getTime())
+  ) {
+    return "Date indisponible";
+  }
+
   return new Intl.DateTimeFormat(
     "fr-FR",
     {
-      weekday:
-        "long",
-
-      day:
-        "2-digit",
-
-      month:
-        "long",
-
-      year:
-        "numeric",
-
-      hour:
-        "2-digit",
-
-      minute:
-        "2-digit",
+      weekday: "long",
+      day: "2-digit",
+      month: "long",
+      year: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
     },
-  ).format(
-    value,
-  );
+  ).format(value);
 }
 
+/**
+ * Les polices standard PDF utilisent un encodage limité.
+ * Cette normalisation empêche les erreurs d'encodage avec certains
+ * caractères copiés depuis un formulaire ou une source externe.
+ */
 function sanitizePdfText(
-  value:
-    | string
-    | null
-    | undefined,
+  value: string | null | undefined,
 ): string {
-  return normalizeText(
-    value,
-  )
+  return normalizeText(value)
+    .normalize("NFC")
     .replace(
       /[\u2010-\u2015]/g,
       "-",
     )
     .replace(
+      /[\u2018\u2019]/g,
+      "'",
+    )
+    .replace(
+      /[\u201C\u201D]/g,
+      '"',
+    )
+    .replace(
+      /\u2026/g,
+      "...",
+    )
+    .replace(
       /\u00A0/g,
       " ",
+    )
+    .replace(
+      /[^\u0020-\u007E\u00A0-\u00FF]/g,
+      "",
     );
 }
 
@@ -431,43 +442,82 @@ function truncateText({
   maxWidth: number;
 }): string {
   const normalized =
-    sanitizePdfText(
-      text,
-    );
+    sanitizePdfText(text);
 
   if (
     font.widthOfTextAtSize(
       normalized,
       size,
-    ) <=
-    maxWidth
+    ) <= maxWidth
   ) {
     return normalized;
   }
 
-  const suffix =
-    "...";
+  const suffix = "...";
 
   let candidate =
     normalized;
 
   while (
-    candidate.length >
-      0 &&
+    candidate.length > 0 &&
     font.widthOfTextAtSize(
       `${candidate}${suffix}`,
       size,
-    ) >
-      maxWidth
+    ) > maxWidth
   ) {
     candidate =
-      candidate.slice(
-        0,
-        -1,
-      );
+      candidate.slice(0, -1);
   }
 
   return `${candidate}${suffix}`;
+}
+
+function splitLongWord({
+  word,
+  font,
+  size,
+  maxWidth,
+}: {
+  word: string;
+  font: PDFFont;
+  size: number;
+  maxWidth: number;
+}): string[] {
+  if (
+    font.widthOfTextAtSize(
+      word,
+      size,
+    ) <= maxWidth
+  ) {
+    return [word];
+  }
+
+  const segments: string[] = [];
+  let current = "";
+
+  for (const character of word) {
+    const candidate =
+      `${current}${character}`;
+
+    if (
+      current &&
+      font.widthOfTextAtSize(
+        candidate,
+        size,
+      ) > maxWidth
+    ) {
+      segments.push(current);
+      current = character;
+    } else {
+      current = candidate;
+    }
+  }
+
+  if (current) {
+    segments.push(current);
+  }
+
+  return segments;
 }
 
 function wrapText({
@@ -481,37 +531,29 @@ function wrapText({
   size: number;
   maxWidth: number;
 }): string[] {
-  const words =
-    sanitizePdfText(
-      text,
-    )
-      .split(
-        " ",
-      )
-      .filter(
-        Boolean,
-      );
+  const rawWords =
+    sanitizePdfText(text)
+      .split(" ")
+      .filter(Boolean);
 
-  if (
-    words.length ===
-      0
-  ) {
-    return [
-      "",
-    ];
+  if (rawWords.length === 0) {
+    return [""];
   }
 
-  const lines:
-    string[] =
-    [];
+  const words =
+    rawWords.flatMap((word) =>
+      splitLongWord({
+        word,
+        font,
+        size,
+        maxWidth,
+      }),
+    );
 
-  let currentLine =
-    "";
+  const lines: string[] = [];
+  let currentLine = "";
 
-  for (
-    const word of
-    words
-  ) {
+  for (const word of words) {
     const candidate =
       currentLine
         ? `${currentLine} ${word}`
@@ -521,33 +563,21 @@ function wrapText({
       font.widthOfTextAtSize(
         candidate,
         size,
-      ) <=
-      maxWidth
+      ) <= maxWidth
     ) {
-      currentLine =
-        candidate;
-
+      currentLine = candidate;
       continue;
     }
 
-    if (
-      currentLine
-    ) {
-      lines.push(
-        currentLine,
-      );
+    if (currentLine) {
+      lines.push(currentLine);
     }
 
-    currentLine =
-      word;
+    currentLine = word;
   }
 
-  if (
-    currentLine
-  ) {
-    lines.push(
-      currentLine,
-    );
+  if (currentLine) {
+    lines.push(currentLine);
   }
 
   return lines;
@@ -573,9 +603,7 @@ function drawWrappedText({
   y: number;
   maxWidth: number;
   lineHeight: number;
-  color?: ReturnType<
-    typeof rgb
-  >;
+  color?: RGB;
   maxLines?: number;
 }): number {
   const allLines =
@@ -586,33 +614,27 @@ function drawWrappedText({
       maxWidth,
     });
 
-  const lines =
-    maxLines
-      ? allLines.slice(
+  const visibleLines =
+    maxLines === undefined
+      ? allLines
+      : allLines.slice(
           0,
           maxLines,
-        )
-      : allLines;
+        );
 
-  lines.forEach(
-    (
-      line,
-      index,
-    ) => {
-      const isLastVisibleLine =
-        maxLines !==
-          undefined &&
+  visibleLines.forEach(
+    (line, index) => {
+      const mustTruncate =
+        maxLines !== undefined &&
         index ===
-          lines.length -
-            1 &&
+          visibleLines.length - 1 &&
         allLines.length >
-          lines.length;
+          visibleLines.length;
 
       page.drawText(
-        isLastVisibleLine
+        mustTruncate
           ? truncateText({
-              text:
-                line,
+              text: line,
               font,
               size,
               maxWidth,
@@ -620,6 +642,7 @@ function drawWrappedText({
           : line,
         {
           x,
+
           y:
             y -
             index *
@@ -635,7 +658,7 @@ function drawWrappedText({
 
   return (
     y -
-    lines.length *
+    visibleLines.length *
       lineHeight
   );
 }
@@ -666,46 +689,29 @@ function drawLabelValue({
     {
       x,
       y,
-
-      size:
-        7.5,
-
-      font:
-        boldFont,
-
-      color:
-        COLOR_MUTED,
+      size: 7.5,
+      font: boldFont,
+      color: COLOR_MUTED,
     },
   );
 
   page.drawText(
     truncateText({
       text:
-        value,
+        value || "Non renseigné",
 
       font:
         regularFont,
 
-      size:
-        10.5,
-
-      maxWidth:
-        width,
+      size: 10.5,
+      maxWidth: width,
     }),
     {
       x,
-      y:
-        y -
-        15,
-
-      size:
-        10.5,
-
-      font:
-        regularFont,
-
-      color:
-        COLOR_WHITE,
+      y: y - 15,
+      size: 10.5,
+      font: regularFont,
+      color: COLOR_WHITE,
     },
   );
 }
@@ -713,34 +719,55 @@ function drawLabelValue({
 async function generateQrPng(
   qrValue: string,
 ): Promise<Buffer> {
+  const normalizedQrValue =
+    normalizeText(qrValue);
+
+  if (!normalizedQrValue) {
+    throw new PaymentError({
+      code:
+        "PAYMENT_TICKET_ISSUANCE_FAILED",
+
+      message:
+        "Le QR code du billet est vide.",
+
+      status: 500,
+
+      retryable: false,
+
+      exposeMessage: false,
+    });
+  }
+
   try {
-    return await QRCode.toBuffer(
-      qrValue,
-      {
-        type:
-          "png",
+    const qrBuffer =
+      await QRCode.toBuffer(
+        normalizedQrValue,
+        {
+          type: "png",
+          width: 720,
+          margin: 3,
 
-        width:
-          720,
+          errorCorrectionLevel:
+            "M",
 
-        margin:
-          3,
-
-        errorCorrectionLevel:
-          "M",
-
-        color: {
-          dark:
-            "#000000",
-
-          light:
-            "#FFFFFF",
+          color: {
+            dark: "#000000",
+            light: "#FFFFFF",
+          },
         },
-      },
-    );
-  } catch (
-    error
-  ) {
+      );
+
+    if (
+      !qrBuffer ||
+      qrBuffer.byteLength === 0
+    ) {
+      throw new Error(
+        "Le fichier QR généré est vide.",
+      );
+    }
+
+    return qrBuffer;
+  } catch (error) {
     throw new PaymentError({
       code:
         "PAYMENT_TICKET_ISSUANCE_FAILED",
@@ -748,31 +775,23 @@ async function generateQrPng(
       message:
         "Impossible de générer l’image QR du billet.",
 
-      status:
-        500,
+      status: 500,
 
-      retryable:
-        true,
+      retryable: true,
 
-      exposeMessage:
-        false,
+      exposeMessage: false,
 
-      cause:
-        error,
+      cause: error,
     });
   }
 }
 
 async function loadOptionalLogo(
-  pdfDocument:
-    PDFDocument,
-  logoPath:
-    string | undefined,
+  pdfDocument: PDFDocument,
+  logoPath: string | undefined,
 ): Promise<PDFImage | null> {
   const candidatePath =
-    normalizeText(
-      logoPath,
-    ) ||
+    normalizeText(logoPath) ||
     join(
       process.cwd(),
       "public",
@@ -781,46 +800,44 @@ async function loadOptionalLogo(
 
   try {
     const file =
-      await readFile(
-        candidatePath,
-      );
+      await readFile(candidatePath);
 
-    if (
-      candidatePath
-        .toLowerCase()
-        .endsWith(
-          ".jpg",
-        ) ||
-      candidatePath
-        .toLowerCase()
-        .endsWith(
-          ".jpeg",
-        )
-    ) {
-      return await pdfDocument
-        .embedJpg(
-          file,
-        );
+    if (file.byteLength === 0) {
+      return null;
     }
 
-    return await pdfDocument
-      .embedPng(
+    const extension =
+      extname(candidatePath)
+        .toLowerCase();
+
+    if (
+      extension === ".jpg" ||
+      extension === ".jpeg"
+    ) {
+      return await pdfDocument.embedJpg(
         file,
       );
+    }
+
+    if (extension === ".png") {
+      return await pdfDocument.embedPng(
+        file,
+      );
+    }
+
+    return null;
   } catch {
     return null;
   }
 }
 
 function assertTicketCanBeRendered(
-  ticket:
-    TicketPdfData,
+  ticket: TicketPdfData,
 ): void {
   if (
     ticket.order.status !==
       OrderStatus.PAID ||
-    ticket.order.payment
-      ?.status !==
+    ticket.order.payment?.status !==
       PaymentStatus.SUCCESS
   ) {
     throw new PaymentValidationError({
@@ -830,8 +847,7 @@ function assertTicketCanBeRendered(
       message:
         "Le PDF du billet ne peut être généré qu’après confirmation du paiement.",
 
-      status:
-        409,
+      status: 409,
 
       orderId:
         ticket.order.id,
@@ -853,8 +869,7 @@ function assertTicketCanBeRendered(
       message:
         "Ce billet ne peut plus être généré.",
 
-      status:
-        409,
+      status: 409,
 
       orderId:
         ticket.order.id,
@@ -881,17 +896,120 @@ function assertTicketCanBeRendered(
       message:
         "Le billet ne possède pas de QR code.",
 
-      status:
-        500,
+      status: 500,
 
-      retryable:
-        false,
+      retryable: false,
 
-      exposeMessage:
-        false,
+      exposeMessage: false,
 
       orderId:
         ticket.order.id,
+    });
+  }
+
+  const verifiedQr =
+    verifyTicketQrValue(
+      ticket.qrCodeValue,
+    );
+
+  if (
+    verifiedQr.payload.ticketCode !==
+      ticket.code ||
+    verifiedQr.payload.orderReference !==
+      ticket.order.reference ||
+    verifiedQr.payload.eventId !==
+      ticket.event.id ||
+    verifiedQr.payload.ticketTypeId !==
+      ticket.ticketType.id
+  ) {
+    throw new PaymentError({
+      code:
+        "PAYMENT_TICKET_ISSUANCE_FAILED",
+
+      message:
+        "Les informations du QR code ne correspondent pas au billet.",
+
+      status: 500,
+
+      retryable: false,
+
+      exposeMessage: false,
+
+      orderId:
+        ticket.order.id,
+
+      details: {
+        ticketId:
+          ticket.id,
+      },
+    });
+  }
+
+  if (
+    ticket.qrVersion !==
+    verifiedQr.payload.version
+  ) {
+    throw new PaymentError({
+      code:
+        "PAYMENT_TICKET_ISSUANCE_FAILED",
+
+      message:
+        "La version du QR code ne correspond pas au billet.",
+
+      status: 500,
+
+      retryable: false,
+
+      exposeMessage: false,
+
+      orderId:
+        ticket.order.id,
+
+      details: {
+        ticketId:
+          ticket.id,
+
+        storedQrVersion:
+          ticket.qrVersion,
+
+        payloadQrVersion:
+          verifiedQr.payload.version,
+      },
+    });
+  }
+
+  if (
+    !Number.isInteger(
+      ticket.orderItem.quantity,
+    ) ||
+    ticket.orderItem.quantity <= 0
+  ) {
+    throw new PaymentError({
+      code:
+        "PAYMENT_TICKET_ISSUANCE_FAILED",
+
+      message:
+        "La quantité liée au billet est invalide.",
+
+      status: 500,
+
+      retryable: false,
+
+      exposeMessage: false,
+
+      orderId:
+        ticket.order.id,
+
+      details: {
+        ticketId:
+          ticket.id,
+
+        orderItemId:
+          ticket.orderItem.id,
+
+        quantity:
+          ticket.orderItem.quantity,
+      },
     });
   }
 }
@@ -904,139 +1022,74 @@ async function getTicketPdfData({
   ticketId: string;
 }): Promise<TicketPdfData> {
   const ticket =
-    await database
-      .ticket
-      .findUnique({
-        where: {
-          id:
-            ticketId,
-        },
+    await database.ticket.findUnique({
+      where: {
+        id: ticketId,
+      },
 
-        select: {
-          id:
-            true,
+      select: {
+        id: true,
+        code: true,
+        qrCodeValue: true,
+        qrVersion: true,
+        status: true,
+        holderName: true,
+        holderEmail: true,
+        holderPhone: true,
+        issuedAt: true,
 
-          code:
-            true,
+        order: {
+          select: {
+            id: true,
+            reference: true,
+            status: true,
+            currency: true,
+            customerName: true,
+            customerEmail: true,
 
-          qrCodeValue:
-            true,
-
-          qrVersion:
-            true,
-
-          status:
-            true,
-
-          holderName:
-            true,
-
-          holderEmail:
-            true,
-
-          holderPhone:
-            true,
-
-          issuedAt:
-            true,
-
-          order: {
-            select: {
-              id:
-                true,
-
-              reference:
-                true,
-
-              status:
-                true,
-
-              currency:
-                true,
-
-              customerName:
-                true,
-
-              customerEmail:
-                true,
-
-              payment: {
-                select: {
-                  status:
-                    true,
-                },
+            payment: {
+              select: {
+                status: true,
               },
             },
           },
+        },
 
-          event: {
-            select: {
-              id:
-                true,
-
-              title:
-                true,
-
-              slug:
-                true,
-
-              venueName:
-                true,
-
-              address:
-                true,
-
-              city:
-                true,
-
-              country:
-                true,
-
-              startsAt:
-                true,
-
-              endsAt:
-                true,
-            },
-          },
-
-          ticketType: {
-            select: {
-              id:
-                true,
-
-              name:
-                true,
-
-              description:
-                true,
-            },
-          },
-
-          orderItem: {
-            select: {
-              id:
-                true,
-
-              quantity:
-                true,
-
-              unitPrice:
-                true,
-
-              platformFee:
-                true,
-
-              total:
-                true,
-            },
+        event: {
+          select: {
+            id: true,
+            title: true,
+            slug: true,
+            venueName: true,
+            address: true,
+            city: true,
+            country: true,
+            startsAt: true,
+            endsAt: true,
           },
         },
-      });
 
-  if (
-    !ticket
-  ) {
+        ticketType: {
+          select: {
+            id: true,
+            name: true,
+            description: true,
+          },
+        },
+
+        orderItem: {
+          select: {
+            id: true,
+            quantity: true,
+            unitPrice: true,
+            platformFee: true,
+            total: true,
+          },
+        },
+      },
+    });
+
+  if (!ticket) {
     throw new PaymentValidationError({
       code:
         "PAYMENT_ORDER_NOT_FOUND",
@@ -1044,8 +1097,7 @@ async function getTicketPdfData({
       message:
         "Le billet est introuvable.",
 
-      status:
-        404,
+      status: 404,
 
       details: {
         ticketId,
@@ -1073,7 +1125,9 @@ async function buildTicketPdf({
     await PDFDocument.create();
 
   pdfDocument.setTitle(
-    `Billet Tikemia - ${ticket.code}`,
+    sanitizePdfText(
+      `Billet Tikemia - ${ticket.code}`,
+    ),
   );
 
   pdfDocument.setAuthor(
@@ -1081,16 +1135,24 @@ async function buildTicketPdf({
   );
 
   pdfDocument.setSubject(
-    `${ticket.event.title} - ${ticket.ticketType.name}`,
+    sanitizePdfText(
+      `${ticket.event.title} - ${ticket.ticketType.name}`,
+    ),
   );
 
   pdfDocument.setKeywords([
     "Tikemia",
     "billet",
     "ticket",
-    ticket.event.title,
-    ticket.ticketType.name,
-    ticket.code,
+    sanitizePdfText(
+      ticket.event.title,
+    ),
+    sanitizePdfText(
+      ticket.ticketType.name,
+    ),
+    sanitizePdfText(
+      ticket.code,
+    ),
   ]);
 
   pdfDocument.setCreator(
@@ -1142,101 +1204,52 @@ async function buildTicketPdf({
     ]);
 
   page.drawRectangle({
-    x:
-      0,
+    x: 0,
+    y: 0,
+    width: A4_WIDTH,
+    height: A4_HEIGHT,
+    color: COLOR_DARK,
+  });
 
-    y:
-      0,
+  page.drawRectangle({
+    x: 0,
+    y: A4_HEIGHT - 12,
+    width: A4_WIDTH / 3,
+    height: 12,
+    color: BRAND_GREEN,
+  });
 
-    width:
-      A4_WIDTH,
-
-    height:
-      A4_HEIGHT,
-
-    color:
-      COLOR_DARK,
+  page.drawRectangle({
+    x: A4_WIDTH / 3,
+    y: A4_HEIGHT - 12,
+    width: A4_WIDTH / 3,
+    height: 12,
+    color: BRAND_LIME,
   });
 
   page.drawRectangle({
     x:
-      0,
+      (A4_WIDTH / 3) * 2,
 
     y:
-      A4_HEIGHT -
-      12,
+      A4_HEIGHT - 12,
 
     width:
-      A4_WIDTH /
-      3,
+      A4_WIDTH / 3,
 
-    height:
-      12,
-
-    color:
-      BRAND_GREEN,
-  });
-
-  page.drawRectangle({
-    x:
-      A4_WIDTH /
-      3,
-
-    y:
-      A4_HEIGHT -
-      12,
-
-    width:
-      A4_WIDTH /
-      3,
-
-    height:
-      12,
-
-    color:
-      BRAND_LIME,
-  });
-
-  page.drawRectangle({
-    x:
-      (
-        A4_WIDTH /
-        3
-      ) *
-      2,
-
-    y:
-      A4_HEIGHT -
-      12,
-
-    width:
-      A4_WIDTH /
-      3,
-
-    height:
-      12,
-
-    color:
-      BRAND_ORANGE,
+    height: 12,
+    color: BRAND_ORANGE,
   });
 
   const headerTop =
-    A4_HEIGHT -
-    42;
+    A4_HEIGHT - 42;
 
-  if (
-    logo
-  ) {
+  if (logo) {
     const dimensions =
-      logo.scale(
-        1,
-      );
+      logo.scale(1);
 
-    const maxWidth =
-      125;
-
-    const maxHeight =
-      42;
+    const maxWidth = 125;
+    const maxHeight = 42;
 
     const scale =
       Math.min(
@@ -1247,45 +1260,31 @@ async function buildTicketPdf({
           dimensions.height,
       );
 
-    page.drawImage(
-      logo,
-      {
-        x:
-          PAGE_MARGIN,
+    page.drawImage(logo, {
+      x: PAGE_MARGIN,
 
-        y:
-          headerTop -
-          dimensions.height *
+      y:
+        headerTop -
+        dimensions.height *
           scale,
 
-        width:
-          dimensions.width *
-          scale,
+      width:
+        dimensions.width *
+        scale,
 
-        height:
-          dimensions.height *
-          scale,
-      },
-    );
+      height:
+        dimensions.height *
+        scale,
+    });
   } else {
     page.drawText(
       "TIKEMIA",
       {
-        x:
-          PAGE_MARGIN,
-
-        y:
-          headerTop -
-          23,
-
-        size:
-          24,
-
-        font:
-          boldFont,
-
-        color:
-          BRAND_LIME,
+        x: PAGE_MARGIN,
+        y: headerTop - 23,
+        size: 24,
+        font: boldFont,
+        color: BRAND_LIME,
       },
     );
   }
@@ -1299,22 +1298,26 @@ async function buildTicketPdf({
         118,
 
       y:
-        headerTop -
-        10,
+        headerTop - 10,
 
-      size:
-        8,
-
-      font:
-        boldFont,
-
-      color:
-        COLOR_MUTED,
+      size: 8,
+      font: boldFont,
+      color: COLOR_MUTED,
     },
   );
 
   page.drawText(
-    ticket.code,
+    truncateText({
+      text:
+        ticket.code,
+
+      font:
+        boldFont,
+
+      size: 13,
+
+      maxWidth: 190,
+    }),
     {
       x:
         A4_WIDTH -
@@ -1322,343 +1325,229 @@ async function buildTicketPdf({
         190,
 
       y:
-        headerTop -
-        30,
+        headerTop - 30,
 
-      size:
-        13,
-
-      font:
-        boldFont,
-
-      color:
-        COLOR_WHITE,
+      size: 13,
+      font: boldFont,
+      color: COLOR_WHITE,
     },
   );
 
-  const eventPanelY =
-    560;
+  const eventPanelY = 560;
 
   page.drawRectangle({
-    x:
-      PAGE_MARGIN,
-
-    y:
-      eventPanelY,
+    x: PAGE_MARGIN,
+    y: eventPanelY,
 
     width:
       A4_WIDTH -
-      PAGE_MARGIN *
-      2,
+      PAGE_MARGIN * 2,
 
-    height:
-      190,
-
-    color:
-      COLOR_PANEL,
-
-    borderColor:
-      COLOR_LINE,
-
-    borderWidth:
-      1,
+    height: 190,
+    color: COLOR_PANEL,
+    borderColor: COLOR_LINE,
+    borderWidth: 1,
   });
 
   page.drawText(
     "EVENEMENT",
     {
       x:
-        PAGE_MARGIN +
-        20,
+        PAGE_MARGIN + 20,
 
       y:
-        eventPanelY +
-        160,
+        eventPanelY + 160,
 
-      size:
-        8,
-
-      font:
-        boldFont,
-
-      color:
-        BRAND_LIME,
+      size: 8,
+      font: boldFont,
+      color: BRAND_LIME,
     },
   );
 
   drawWrappedText({
     page,
-
-    text:
-      ticket.event.title,
-
-    font:
-      boldFont,
-
-    size:
-      22,
+    text: ticket.event.title,
+    font: boldFont,
+    size: 22,
 
     x:
-      PAGE_MARGIN +
-      20,
+      PAGE_MARGIN + 20,
 
     y:
-      eventPanelY +
-      135,
+      eventPanelY + 135,
 
     maxWidth:
       A4_WIDTH -
-      PAGE_MARGIN *
-      2 -
+      PAGE_MARGIN * 2 -
       40,
 
-    lineHeight:
-      25,
-
-    maxLines:
-      2,
+    lineHeight: 25,
+    maxLines: 2,
   });
 
   drawLabelValue({
     page,
-
-    label:
-      "Date",
+    label: "Date",
 
     value:
       formatDateTime(
-        ticket.event
-          .startsAt,
+        ticket.event.startsAt,
       ),
 
     x:
-      PAGE_MARGIN +
-      20,
+      PAGE_MARGIN + 20,
 
     y:
-      eventPanelY +
-      75,
+      eventPanelY + 75,
 
-    width:
-      235,
-
+    width: 235,
     regularFont,
-
     boldFont,
   });
 
   drawLabelValue({
     page,
+    label: "Lieu",
 
-    label:
-      "Lieu",
-
-    value:
-      [
-        ticket.event
-          .venueName,
-        ticket.event.city,
-        ticket.event.country,
-      ]
-        .filter(
-          Boolean,
-        )
-        .join(
-          ", ",
-        ),
+    value: [
+      ticket.event.venueName,
+      ticket.event.city,
+      ticket.event.country,
+    ]
+      .filter(Boolean)
+      .join(", "),
 
     x:
-      PAGE_MARGIN +
-      290,
+      PAGE_MARGIN + 290,
 
     y:
-      eventPanelY +
-      75,
+      eventPanelY + 75,
 
-    width:
-      220,
-
+    width: 220,
     regularFont,
-
     boldFont,
   });
 
   drawLabelValue({
     page,
-
-    label:
-      "Adresse",
+    label: "Adresse",
 
     value:
       ticket.event.address,
 
     x:
-      PAGE_MARGIN +
-      20,
+      PAGE_MARGIN + 20,
 
     y:
-      eventPanelY +
-      30,
+      eventPanelY + 30,
 
     width:
       A4_WIDTH -
-      PAGE_MARGIN *
-      2 -
+      PAGE_MARGIN * 2 -
       40,
 
     regularFont,
-
     boldFont,
   });
 
-  const detailsPanelY =
-    330;
+  const detailsPanelY = 330;
 
   page.drawRectangle({
-    x:
-      PAGE_MARGIN,
-
-    y:
-      detailsPanelY,
+    x: PAGE_MARGIN,
+    y: detailsPanelY,
 
     width:
       A4_WIDTH -
-      PAGE_MARGIN *
-      2,
+      PAGE_MARGIN * 2,
 
-    height:
-      205,
-
-    color:
-      COLOR_PANEL_ALT,
-
-    borderColor:
-      COLOR_LINE,
-
-    borderWidth:
-      1,
+    height: 205,
+    color: COLOR_PANEL_ALT,
+    borderColor: COLOR_LINE,
+    borderWidth: 1,
   });
 
   const leftColumnX =
-    PAGE_MARGIN +
-    20;
+    PAGE_MARGIN + 20;
 
   const rightColumnX =
-    PAGE_MARGIN +
-    300;
+    PAGE_MARGIN + 300;
 
   page.drawText(
     "INFORMATIONS DU BILLET",
     {
-      x:
-        leftColumnX,
+      x: leftColumnX,
 
       y:
-        detailsPanelY +
-        175,
+        detailsPanelY + 175,
 
-      size:
-        8,
-
-      font:
-        boldFont,
-
-      color:
-        BRAND_LIME,
+      size: 8,
+      font: boldFont,
+      color: BRAND_LIME,
     },
   );
 
   drawLabelValue({
     page,
-
-    label:
-      "Categorie",
+    label: "Categorie",
 
     value:
-      ticket.ticketType
-        .name,
+      ticket.ticketType.name,
 
-    x:
-      leftColumnX,
+    x: leftColumnX,
 
     y:
-      detailsPanelY +
-      145,
+      detailsPanelY + 145,
 
-    width:
-      245,
-
+    width: 245,
     regularFont,
-
     boldFont,
   });
 
   drawLabelValue({
     page,
-
-    label:
-      "Titulaire",
+    label: "Titulaire",
 
     value:
       ticket.holderName,
 
-    x:
-      leftColumnX,
+    x: leftColumnX,
 
     y:
-      detailsPanelY +
-      100,
+      detailsPanelY + 100,
 
-    width:
-      245,
-
+    width: 245,
     regularFont,
-
     boldFont,
   });
 
   drawLabelValue({
     page,
-
-    label:
-      "Email",
+    label: "Email",
 
     value:
       ticket.holderEmail,
 
-    x:
-      leftColumnX,
+    x: leftColumnX,
 
     y:
-      detailsPanelY +
-      55,
+      detailsPanelY + 55,
 
-    width:
-      245,
-
+    width: 245,
     regularFont,
-
     boldFont,
   });
 
   page.drawText(
     "TARIFICATION",
     {
-      x:
-        rightColumnX,
+      x: rightColumnX,
 
       y:
-        detailsPanelY +
-        175,
+        detailsPanelY + 175,
 
-      size:
-        8,
-
-      font:
-        boldFont,
-
-      color:
-        BRAND_ORANGE,
+      size: 8,
+      font: boldFont,
+      color: BRAND_ORANGE,
     },
   );
 
@@ -1671,23 +1560,32 @@ async function buildTicketPdf({
       quantity:
         ticket.orderItem
           .quantity,
+
+      orderId:
+        ticket.order.id,
+
+      orderItemId:
+        ticket.orderItem.id,
     });
 
   const totalPerTicket =
     divideAmount({
       amount:
-        ticket.orderItem
-          .total,
+        ticket.orderItem.total,
 
       quantity:
-        ticket.orderItem
-          .quantity,
+        ticket.orderItem.quantity,
+
+      orderId:
+        ticket.order.id,
+
+      orderItemId:
+        ticket.orderItem.id,
     });
 
   const unitPrice =
     decimalToFixed(
-      ticket.orderItem
-        .unitPrice,
+      ticket.orderItem.unitPrice,
     );
 
   const fee =
@@ -1702,161 +1600,109 @@ async function buildTicketPdf({
 
   drawLabelValue({
     page,
-
-    label:
-      "Prix du billet",
+    label: "Prix du billet",
 
     value:
       formatMoney({
-        amount:
-          unitPrice,
+        amount: unitPrice,
 
         currency:
-          ticket.order
-            .currency,
+          ticket.order.currency,
       }),
 
-    x:
-      rightColumnX,
+    x: rightColumnX,
 
     y:
-      detailsPanelY +
-      145,
+      detailsPanelY + 145,
 
-    width:
-      220,
-
+    width: 220,
     regularFont,
-
     boldFont,
   });
 
   drawLabelValue({
     page,
-
-    label:
-      "Frais par billet",
+    label: "Frais par billet",
 
     value:
       formatMoney({
-        amount:
-          fee,
+        amount: fee,
 
         currency:
-          ticket.order
-            .currency,
+          ticket.order.currency,
       }),
 
-    x:
-      rightColumnX,
+    x: rightColumnX,
 
     y:
-      detailsPanelY +
-      100,
+      detailsPanelY + 100,
 
-    width:
-      220,
-
+    width: 220,
     regularFont,
-
     boldFont,
   });
 
   page.drawText(
     "TOTAL",
     {
-      x:
-        rightColumnX,
+      x: rightColumnX,
 
       y:
-        detailsPanelY +
-        50,
+        detailsPanelY + 50,
 
-      size:
-        8,
-
-      font:
-        boldFont,
-
-      color:
-        COLOR_MUTED,
+      size: 8,
+      font: boldFont,
+      color: COLOR_MUTED,
     },
   );
 
   page.drawText(
-    formatMoney({
-      amount:
-        total,
+    sanitizePdfText(
+      formatMoney({
+        amount: total,
 
-      currency:
-        ticket.order
-          .currency,
-    }),
+        currency:
+          ticket.order.currency,
+      }),
+    ),
     {
-      x:
-        rightColumnX,
+      x: rightColumnX,
 
       y:
-        detailsPanelY +
-        22,
+        detailsPanelY + 22,
 
-      size:
-        18,
-
-      font:
-        boldFont,
-
-      color:
-        BRAND_LIME,
+      size: 18,
+      font: boldFont,
+      color: BRAND_LIME,
     },
   );
 
-  const qrPanelY =
-    70;
+  const qrPanelY = 70;
 
   page.drawRectangle({
-    x:
-      PAGE_MARGIN,
-
-    y:
-      qrPanelY,
+    x: PAGE_MARGIN,
+    y: qrPanelY,
 
     width:
       A4_WIDTH -
-      PAGE_MARGIN *
-      2,
+      PAGE_MARGIN * 2,
 
-    height:
-      230,
-
-    color:
-      COLOR_PANEL,
-
-    borderColor:
-      COLOR_LINE,
-
-    borderWidth:
-      1,
+    height: 230,
+    color: COLOR_PANEL,
+    borderColor: COLOR_LINE,
+    borderWidth: 1,
   });
 
-  page.drawImage(
-    qrImage,
-    {
-      x:
-        PAGE_MARGIN +
-        22,
+  page.drawImage(qrImage, {
+    x:
+      PAGE_MARGIN + 22,
 
-      y:
-        qrPanelY +
-        24,
+    y:
+      qrPanelY + 24,
 
-      width:
-        QR_SIZE,
-
-      height:
-        QR_SIZE,
-    },
-  );
+    width: QR_SIZE,
+    height: QR_SIZE,
+  });
 
   const qrTextX =
     PAGE_MARGIN +
@@ -1866,21 +1712,14 @@ async function buildTicketPdf({
   page.drawText(
     "CONTROLE D'ACCES",
     {
-      x:
-        qrTextX,
+      x: qrTextX,
 
       y:
-        qrPanelY +
-        190,
+        qrPanelY + 190,
 
-      size:
-        8,
-
-      font:
-        boldFont,
-
-      color:
-        BRAND_LIME,
+      size: 8,
+      font: boldFont,
+      color: BRAND_LIME,
     },
   );
 
@@ -1888,32 +1727,19 @@ async function buildTicketPdf({
     page,
 
     text:
-      "Présentez ce QR code à l'entrée. Il contient une signature Tikemia vérifiable et les références du billet, de l'événement, de la catégorie et du prix.",
+      "Presentez ce QR code a l'entree. Il contient une signature Tikemia verifiable et les references du billet, de l'evenement et de la categorie.",
 
-    font:
-      regularFont,
-
-    size:
-      10,
-
-    x:
-      qrTextX,
+    font: regularFont,
+    size: 10,
+    x: qrTextX,
 
     y:
-      qrPanelY +
-      165,
+      qrPanelY + 165,
 
-    maxWidth:
-      295,
-
-    lineHeight:
-      14,
-
-    color:
-      COLOR_MUTED,
-
-    maxLines:
-      5,
+    maxWidth: 295,
+    lineHeight: 14,
+    color: COLOR_MUTED,
+    maxLines: 5,
   });
 
   drawLabelValue({
@@ -1923,97 +1749,108 @@ async function buildTicketPdf({
       "Reference de commande",
 
     value:
-      ticket.order
-        .reference,
+      ticket.order.reference,
 
-    x:
-      qrTextX,
+    x: qrTextX,
 
     y:
-      qrPanelY +
-      86,
+      qrPanelY + 86,
 
-    width:
-      295,
-
+    width: 295,
     regularFont,
-
     boldFont,
   });
 
   drawLabelValue({
     page,
-
-    label:
-      "Version QR",
+    label: "Version QR",
 
     value:
       String(
         ticket.qrVersion,
       ),
 
-    x:
-      qrTextX,
+    x: qrTextX,
 
     y:
-      qrPanelY +
-      42,
+      qrPanelY + 42,
 
-    width:
-      295,
-
+    width: 295,
     regularFont,
-
     boldFont,
   });
 
   page.drawText(
-    "Ce billet est personnel. Toute duplication ou modification peut entraîner son refus au contrôle.",
+    sanitizePdfText(
+      "Ce billet est personnel. Toute duplication ou modification peut entrainer son refus au controle.",
+    ),
     {
-      x:
-        PAGE_MARGIN,
-
-      y:
-        40,
-
-      size:
-        7.5,
-
-      font:
-        regularFont,
-
-      color:
-        COLOR_MUTED,
+      x: PAGE_MARGIN,
+      y: 40,
+      size: 7.5,
+      font: regularFont,
+      color: COLOR_MUTED,
     },
   );
 
-  const bytes =
-    await pdfDocument.save({
-      useObjectStreams:
-        true,
+  let bytes: Uint8Array;
 
-      addDefaultPage:
-        false,
+  try {
+    bytes =
+      await pdfDocument.save({
+        useObjectStreams: true,
+        addDefaultPage: false,
+        objectsPerTick: 50,
+      });
+  } catch (error) {
+    throw new PaymentError({
+      code:
+        "PAYMENT_TICKET_ISSUANCE_FAILED",
 
-      objectsPerTick:
-        50,
+      message:
+        "Impossible de produire le fichier PDF du billet.",
+
+      status: 500,
+
+      retryable: true,
+
+      exposeMessage: false,
+
+      orderId:
+        ticket.order.id,
+
+      cause: error,
     });
+  }
 
   const buffer =
-    Buffer.from(
-      bytes,
-    );
+    Buffer.from(bytes);
+
+  if (
+    buffer.byteLength === 0
+  ) {
+    throw new PaymentError({
+      code:
+        "PAYMENT_TICKET_ISSUANCE_FAILED",
+
+      message:
+        "Le fichier PDF généré est vide.",
+
+      status: 500,
+
+      retryable: true,
+
+      exposeMessage: false,
+
+      orderId:
+        ticket.order.id,
+    });
+  }
 
   const checksum =
-    createHash(
-      "sha256",
-    )
-      .update(
-        buffer,
-      )
-      .digest(
-        "hex",
-      );
+    createHash("sha256")
+      .update(buffer)
+      .digest("hex");
 
   return {
     ticketId:
@@ -2029,7 +1866,6 @@ async function buildTicketPdf({
       "application/pdf",
 
     bytes,
-
     buffer,
 
     fileSize:
@@ -2042,8 +1878,7 @@ async function buildTicketPdf({
         ticket.order.id,
 
       orderReference:
-        ticket.order
-          .reference,
+        ticket.order.reference,
 
       eventId:
         ticket.event.id,
@@ -2055,8 +1890,7 @@ async function buildTicketPdf({
         ticket.ticketType.id,
 
       ticketCategory:
-        ticket.ticketType
-          .name,
+        ticket.ticketType.name,
 
       unitPrice,
 
@@ -2094,17 +1928,17 @@ export async function generateTicketPdf({
 > {
   const ticketId =
     normalizeIdentifier({
-      value:
-        rawTicketId,
-
-      field:
-        "ticketId",
+      value: rawTicketId,
+      field: "ticketId",
     });
 
-  const database:
-    DatabaseClient =
-    transaction ??
-    prisma;
+  const validGeneratedAt =
+    validateGeneratedAt(
+      generatedAt,
+    );
+
+  const database: DatabaseClient =
+    transaction ?? prisma;
 
   const ticket =
     await getTicketPdfData({
@@ -2115,7 +1949,9 @@ export async function generateTicketPdf({
   return buildTicketPdf({
     ticket,
     logoPath,
-    generatedAt,
+
+    generatedAt:
+      validGeneratedAt,
   });
 }
 
@@ -2129,63 +1965,59 @@ export async function generateOrderTicketPdfs({
 > {
   const orderId =
     normalizeIdentifier({
-      value:
-        rawOrderId,
-
-      field:
-        "orderId",
+      value: rawOrderId,
+      field: "orderId",
     });
 
-  const database:
-    DatabaseClient =
-    transaction ??
-    prisma;
+  const validGeneratedAt =
+    validateGeneratedAt(
+      generatedAt,
+    );
+
+  const database: DatabaseClient =
+    transaction ?? prisma;
 
   const order =
-    await database
-      .order
-      .findUnique({
-        where: {
-          id:
-            orderId,
+    await database.order.findUnique({
+      where: {
+        id: orderId,
+      },
+
+      select: {
+        id: true,
+        reference: true,
+        status: true,
+
+        payment: {
+          select: {
+            status: true,
+          },
         },
 
-        select: {
-          id:
-            true,
-
-          reference:
-            true,
-
-          status:
-            true,
-
-          payment: {
-            select: {
-              status:
-                true,
-            },
+        items: {
+          orderBy: {
+            id: "asc",
           },
 
-          items: {
-            select: {
-              quantity:
-                true,
+          select: {
+            id: true,
+            quantity: true,
 
-              tickets: {
-                select: {
-                  id:
-                    true,
-                },
+            tickets: {
+              orderBy: {
+                createdAt: "asc",
+              },
+
+              select: {
+                id: true,
               },
             },
           },
         },
-      });
+      },
+    });
 
-  if (
-    !order
-  ) {
+  if (!order) {
     throw new PaymentValidationError({
       code:
         "PAYMENT_ORDER_NOT_FOUND",
@@ -2193,8 +2025,7 @@ export async function generateOrderTicketPdfs({
       message:
         "La commande est introuvable.",
 
-      status:
-        404,
+      status: 404,
 
       orderId,
     });
@@ -2213,8 +2044,28 @@ export async function generateOrderTicketPdfs({
       message:
         "Les PDF ne peuvent être générés qu’après confirmation du paiement.",
 
-      status:
-        409,
+      status: 409,
+
+      orderId:
+        order.id,
+    });
+  }
+
+  if (
+    order.items.length === 0
+  ) {
+    throw new PaymentError({
+      code:
+        "PAYMENT_TICKET_ISSUANCE_FAILED",
+
+      message:
+        "La commande ne contient aucun billet.",
+
+      status: 500,
+
+      retryable: false,
+
+      exposeMessage: false,
 
       orderId:
         order.id,
@@ -2223,24 +2074,85 @@ export async function generateOrderTicketPdfs({
 
   const expectedTickets =
     order.items.reduce(
-      (
-        total,
-        item,
-      ) =>
-        total +
-        item.quantity,
+      (total, item) => {
+        if (
+          !Number.isInteger(
+            item.quantity,
+          ) ||
+          item.quantity <= 0
+        ) {
+          throw new PaymentError({
+            code:
+              "PAYMENT_TICKET_ISSUANCE_FAILED",
+
+            message:
+              "Une quantité de billet est invalide.",
+
+            status: 500,
+
+            retryable: false,
+
+            exposeMessage: false,
+
+            orderId:
+              order.id,
+
+            details: {
+              orderItemId:
+                item.id,
+
+              quantity:
+                item.quantity,
+            },
+          });
+        }
+
+        if (
+          item.tickets.length >
+          item.quantity
+        ) {
+          throw new PaymentError({
+            code:
+              "PAYMENT_TICKET_ISSUANCE_FAILED",
+
+            message:
+              "Le nombre de billets dépasse la quantité commandée.",
+
+            status: 500,
+
+            retryable: false,
+
+            exposeMessage: false,
+
+            orderId:
+              order.id,
+
+            details: {
+              orderItemId:
+                item.id,
+
+              expected:
+                item.quantity,
+
+              available:
+                item.tickets.length,
+            },
+          });
+        }
+
+        return (
+          total +
+          item.quantity
+        );
+      },
       0,
     );
 
   const ticketIds =
     order.items.flatMap(
-      (
-        item,
-      ) =>
+      (item) =>
         item.tickets.map(
-          (
-            ticket,
-          ) =>
+          (ticket) =>
             ticket.id,
         ),
     );
@@ -2256,14 +2168,11 @@ export async function generateOrderTicketPdfs({
       message:
         "Tous les billets de la commande ne sont pas encore disponibles.",
 
-      status:
-        409,
+      status: 409,
 
-      retryable:
-        true,
+      retryable: true,
 
-      exposeMessage:
-        false,
+      exposeMessage: false,
 
       orderId:
         order.id,
@@ -2277,25 +2186,76 @@ export async function generateOrderTicketPdfs({
     });
   }
 
+  const uniqueTicketIds =
+    new Set(ticketIds);
+
+  if (
+    uniqueTicketIds.size !==
+    ticketIds.length
+  ) {
+    throw new PaymentError({
+      code:
+        "PAYMENT_TICKET_ISSUANCE_FAILED",
+
+      message:
+        "La commande contient des références de billets en double.",
+
+      status: 500,
+
+      retryable: false,
+
+      exposeMessage: false,
+
+      orderId:
+        order.id,
+    });
+  }
+
   const tickets:
-    GeneratedTicketPdf[] =
-    [];
+    GeneratedTicketPdf[] = [];
 
   for (
-    const ticketId of
-    ticketIds
+    const ticketId of ticketIds
   ) {
     tickets.push(
       await generateTicketPdf({
         ticketId,
-
         transaction,
-
         logoPath,
 
-        generatedAt,
+        generatedAt:
+          validGeneratedAt,
       }),
     );
+  }
+
+  if (
+    tickets.length !==
+    expectedTickets
+  ) {
+    throw new PaymentError({
+      code:
+        "PAYMENT_TICKET_ISSUANCE_FAILED",
+
+      message:
+        "Le nombre de PDF générés ne correspond pas à la commande.",
+
+      status: 500,
+
+      retryable: true,
+
+      exposeMessage: false,
+
+      orderId:
+        order.id,
+
+      details: {
+        expectedTickets,
+
+        generatedPdfs:
+          tickets.length,
+      },
+    });
   }
 
   return {

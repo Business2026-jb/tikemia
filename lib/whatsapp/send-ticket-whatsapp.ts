@@ -1,8 +1,6 @@
 import "server-only";
 
-import {
-  createHash,
-} from "node:crypto";
+import { createHash } from "node:crypto";
 
 import {
   DeliveryChannel,
@@ -17,11 +15,11 @@ import {
   PaymentError,
   PaymentValidationError,
 } from "@/lib/payments/payment-errors";
+import { prisma } from "@/lib/prisma";
 import {
   generateOrderTicketPdfs,
   type GeneratedTicketPdf,
 } from "@/lib/tickets/generate-ticket-pdf";
-import { prisma } from "@/lib/prisma";
 
 type DatabaseClient =
   | Prisma.TransactionClient
@@ -29,14 +27,11 @@ type DatabaseClient =
 
 export type SendTicketWhatsAppOptions = {
   orderId: string;
-
   transaction?: Prisma.TransactionClient;
-
   forceResend?: boolean;
-
   logoPath?: string;
-
   generatedAt?: Date;
+  signal?: AbortSignal;
 };
 
 export type SendTicketWhatsAppResult = {
@@ -50,7 +45,6 @@ export type SendTicketWhatsAppResult = {
   providerMessageIds: string[];
 
   sentMessages: number;
-
   sentDocuments: number;
 
   deliveryLogIds: string[];
@@ -64,8 +58,9 @@ type OrderWhatsAppData = {
   status: OrderStatus;
   currency: string;
 
+  customerId: string | null;
   customerName: string;
-  customerPhone: string;
+  customerPhone: string | null;
 
   payment: {
     status: PaymentStatus;
@@ -106,6 +101,14 @@ type OrderWhatsAppData = {
   }>;
 };
 
+type MetaWhatsAppError = {
+  message?: string;
+  type?: string;
+  code?: number;
+  error_subcode?: number;
+  fbtrace_id?: string;
+};
+
 type MetaWhatsAppSendResponse = {
   messaging_product?: string;
 
@@ -119,55 +122,49 @@ type MetaWhatsAppSendResponse = {
     message_status?: string;
   }>;
 
-  error?: {
-    message?: string;
-    type?: string;
-    code?: number;
-    error_subcode?: number;
-    fbtrace_id?: string;
-  };
+  error?: MetaWhatsAppError;
 };
 
 type MetaWhatsAppUploadResponse = {
   id?: string;
-
-  error?: {
-    message?: string;
-    type?: string;
-    code?: number;
-    error_subcode?: number;
-    fbtrace_id?: string;
-  };
+  error?: MetaWhatsAppError;
 };
 
-const PROVIDER =
-  "META_WHATSAPP";
+type WhatsAppConfiguration = Readonly<{
+  accessToken: string;
+  phoneNumberId: string;
+  apiVersion: string;
+  businessAccountId: string | null;
+  requestTimeoutMs: number;
+}>;
 
-const MAX_DOCUMENT_BYTES =
-  100 * 1024 * 1024;
+type TicketDeliveryTarget = Readonly<{
+  ticketId: string;
+  ticketCode: string;
+}>;
+
+const PROVIDER = "META_WHATSAPP" as const;
+
+const DEFAULT_API_VERSION = "v23.0";
+const DEFAULT_REQUEST_TIMEOUT_MS = 30_000;
+
+const MAX_REQUEST_TIMEOUT_MS = 120_000;
+const MAX_DOCUMENT_BYTES = 100 * 1024 * 1024;
+const MAX_CAPTION_LENGTH = 1_024;
+const MAX_TEXT_LENGTH = 4_096;
 
 let cachedWhatsAppConfig:
-  | {
-      accessToken: string;
-      phoneNumberId: string;
-      apiVersion: string;
-      businessAccountId: string | null;
-    }
-  | null =
-  null;
+  | WhatsAppConfiguration
+  | null = null;
 
 function normalizeText(
-  value:
-    | string
-    | null
-    | undefined,
+  value: string | null | undefined,
 ): string {
-  return value
-    ?.replace(
-      /\s+/g,
-      " ",
-    )
-    .trim() ?? "";
+  return (
+    value
+      ?.replace(/\s+/g, " ")
+      .trim() ?? ""
+  );
 }
 
 function normalizeIdentifier({
@@ -178,20 +175,16 @@ function normalizeIdentifier({
   field: string;
 }): string {
   const normalized =
-    normalizeText(
-      value,
-    );
+    normalizeText(value);
 
   if (!normalized) {
     throw new PaymentValidationError({
-      code:
-        "PAYMENT_INVALID_REQUEST",
+      code: "PAYMENT_INVALID_REQUEST",
 
       message:
         `${field} est obligatoire.`,
 
-      status:
-        400,
+      status: 400,
 
       details: {
         field,
@@ -202,36 +195,51 @@ function normalizeIdentifier({
   return normalized;
 }
 
-function normalizePhoneNumber(
-  value: string,
-): string {
-  const normalized =
-    value.replace(
-      /[^\d+]/g,
-      "",
-    );
+function normalizeGeneratedAt(
+  value: Date,
+): Date {
+  if (
+    !(value instanceof Date) ||
+    Number.isNaN(value.getTime())
+  ) {
+    throw new PaymentValidationError({
+      code: "PAYMENT_INVALID_REQUEST",
 
+      message:
+        "La date de génération des billets est invalide.",
+
+      status: 400,
+    });
+  }
+
+  return value;
+}
+
+function normalizePhoneNumber(
+  value: string | null | undefined,
+): string {
   const digitsOnly =
-    normalized.replace(
+    normalizeText(value).replace(
       /\D/g,
       "",
     );
 
   if (
-    digitsOnly.length <
-      8 ||
-    digitsOnly.length >
-      15
+    digitsOnly.length < 8 ||
+    digitsOnly.length > 15
   ) {
     throw new PaymentValidationError({
-      code:
-        "PAYMENT_INVALID_REQUEST",
+      code: "PAYMENT_INVALID_REQUEST",
 
       message:
         "Le numéro WhatsApp du client est invalide.",
 
-      status:
-        409,
+      status: 409,
+
+      details: {
+        phoneLength:
+          digitsOnly.length,
+      },
     });
   }
 
@@ -244,41 +252,53 @@ function decimalToFixed(
   return value
     .toDecimalPlaces(
       2,
-      Prisma.Decimal
-        .ROUND_HALF_UP,
+      Prisma.Decimal.ROUND_HALF_UP,
     )
-    .toFixed(
-      2,
-    );
+    .toFixed(2);
 }
 
 function divideAmount({
   amount,
   quantity,
+  orderId,
+  orderItemId,
 }: {
   amount: Prisma.Decimal;
   quantity: number;
+  orderId: string;
+  orderItemId: string;
 }): Prisma.Decimal {
   if (
-    !Number.isInteger(
-      quantity,
-    ) ||
-    quantity <=
-      0
+    !Number.isInteger(quantity) ||
+    quantity <= 0
   ) {
-    return new Prisma.Decimal(
-      0,
-    );
+    throw new PaymentError({
+      code:
+        "PAYMENT_TICKET_ISSUANCE_FAILED",
+
+      message:
+        "Une quantité de billets est invalide.",
+
+      status: 500,
+
+      retryable: false,
+
+      exposeMessage: false,
+
+      orderId,
+
+      details: {
+        orderItemId,
+        quantity,
+      },
+    });
   }
 
   return amount
-    .div(
-      quantity,
-    )
+    .div(quantity)
     .toDecimalPlaces(
       2,
-      Prisma.Decimal
-        .ROUND_HALF_UP,
+      Prisma.Decimal.ROUND_HALF_UP,
     );
 }
 
@@ -290,36 +310,33 @@ function formatMoney({
   currency: string;
 }): string {
   const numericAmount =
-    Number.parseFloat(
-      amount,
-    );
+    Number.parseFloat(amount);
 
   const normalizedCurrency =
-    normalizeText(
-      currency,
-    ).toUpperCase() ||
-    "XOF";
+    normalizeText(currency)
+      .toUpperCase() || "XOF";
 
   try {
     return new Intl.NumberFormat(
       "fr-FR",
       {
-        style:
-          "currency",
+        style: "currency",
 
         currency:
           normalizedCurrency,
 
+        minimumFractionDigits:
+          normalizedCurrency === "XOF"
+            ? 0
+            : 2,
+
         maximumFractionDigits:
-          normalizedCurrency ===
-          "XOF"
+          normalizedCurrency === "XOF"
             ? 0
             : 2,
       },
     ).format(
-      Number.isFinite(
-        numericAmount,
-      )
+      Number.isFinite(numericAmount)
         ? numericAmount
         : 0,
     );
@@ -331,41 +348,55 @@ function formatMoney({
 function formatDateTime(
   value: Date,
 ): string {
+  if (
+    !(value instanceof Date) ||
+    Number.isNaN(value.getTime())
+  ) {
+    return "Date indisponible";
+  }
+
   return new Intl.DateTimeFormat(
     "fr-FR",
     {
-      weekday:
-        "long",
-
-      day:
-        "2-digit",
-
-      month:
-        "long",
-
-      year:
-        "numeric",
-
-      hour:
-        "2-digit",
-
-      minute:
-        "2-digit",
+      weekday: "long",
+      day: "2-digit",
+      month: "long",
+      year: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
     },
-  ).format(
-    value,
-  );
+  ).format(value);
+}
+
+function truncateMessage(
+  value: string,
+  maximumLength: number,
+): string {
+  const normalized = value.trim();
+
+  if (
+    normalized.length <=
+    maximumLength
+  ) {
+    return normalized;
+  }
+
+  return `${normalized.slice(
+    0,
+    Math.max(
+      0,
+      maximumLength - 3,
+    ),
+  )}...`;
 }
 
 function getApplicationUrl(): string {
   const value =
     normalizeText(
-      process.env
-        .NEXT_PUBLIC_APP_URL,
+      process.env.NEXT_PUBLIC_APP_URL,
     ) ||
     normalizeText(
-      process.env
-        .APP_URL,
+      process.env.APP_URL,
     );
 
   if (!value) {
@@ -376,26 +407,18 @@ function getApplicationUrl(): string {
       message:
         "L’URL publique de Tikemia est absente.",
 
-      status:
-        500,
+      status: 500,
 
-      retryable:
-        false,
+      retryable: false,
 
-      exposeMessage:
-        false,
+      exposeMessage: false,
     });
   }
 
+  let url: URL;
+
   try {
-    return new URL(
-      value,
-    )
-      .toString()
-      .replace(
-        /\/$/,
-        "",
-      );
+    url = new URL(value);
   } catch {
     throw new PaymentError({
       code:
@@ -404,27 +427,80 @@ function getApplicationUrl(): string {
       message:
         "L’URL publique de Tikemia est invalide.",
 
-      status:
-        500,
+      status: 500,
 
-      retryable:
-        false,
+      retryable: false,
 
-      exposeMessage:
-        false,
+      exposeMessage: false,
     });
   }
+
+  if (
+    process.env.NODE_ENV ===
+      "production" &&
+    url.protocol !== "https:"
+  ) {
+    throw new PaymentError({
+      code:
+        "PAYMENT_CONFIGURATION_ERROR",
+
+      message:
+        "L’URL publique de Tikemia doit utiliser HTTPS en production.",
+
+      status: 500,
+
+      retryable: false,
+
+      exposeMessage: false,
+    });
+  }
+
+  return url
+    .toString()
+    .replace(/\/$/, "");
 }
 
-function getWhatsAppConfiguration(): {
-  accessToken: string;
-  phoneNumberId: string;
-  apiVersion: string;
-  businessAccountId: string | null;
-} {
+function readRequestTimeoutMs(): number {
+  const rawValue =
+    normalizeText(
+      process.env
+        .WHATSAPP_REQUEST_TIMEOUT_MS,
+    );
+
+  if (!rawValue) {
+    return DEFAULT_REQUEST_TIMEOUT_MS;
+  }
+
+  const parsedValue =
+    Number(rawValue);
+
   if (
-    cachedWhatsAppConfig
+    !Number.isInteger(parsedValue) ||
+    parsedValue < 1_000 ||
+    parsedValue >
+      MAX_REQUEST_TIMEOUT_MS
   ) {
+    throw new PaymentError({
+      code:
+        "PAYMENT_CONFIGURATION_ERROR",
+
+      message:
+        "WHATSAPP_REQUEST_TIMEOUT_MS doit être compris entre 1000 et 120000.",
+
+      status: 500,
+
+      retryable: false,
+
+      exposeMessage: false,
+    });
+  }
+
+  return parsedValue;
+}
+
+function getWhatsAppConfiguration():
+  WhatsAppConfiguration {
+  if (cachedWhatsAppConfig) {
     return cachedWhatsAppConfig;
   }
 
@@ -445,14 +521,13 @@ function getWhatsAppConfiguration(): {
       process.env
         .WHATSAPP_API_VERSION,
     ) ||
-    "v23.0";
+    DEFAULT_API_VERSION;
 
   const businessAccountId =
     normalizeText(
       process.env
         .WHATSAPP_BUSINESS_ACCOUNT_ID,
-    ) ||
-    null;
+    ) || null;
 
   if (
     !accessToken ||
@@ -465,39 +540,69 @@ function getWhatsAppConfiguration(): {
       message:
         "La configuration WhatsApp est incomplète.",
 
-      status:
-        500,
+      status: 500,
 
-      retryable:
-        false,
+      retryable: false,
 
-      exposeMessage:
-        false,
+      exposeMessage: false,
     });
   }
 
-  cachedWhatsAppConfig = {
-    accessToken,
-    phoneNumberId,
-    apiVersion,
-    businessAccountId,
-  };
+  if (
+    !/^v\d+\.\d+$/.test(
+      apiVersion,
+    )
+  ) {
+    throw new PaymentError({
+      code:
+        "PAYMENT_CONFIGURATION_ERROR",
+
+      message:
+        "WHATSAPP_API_VERSION est invalide.",
+
+      status: 500,
+
+      retryable: false,
+
+      exposeMessage: false,
+    });
+  }
+
+  cachedWhatsAppConfig =
+    Object.freeze({
+      accessToken,
+      phoneNumberId,
+      apiVersion,
+      businessAccountId,
+      requestTimeoutMs:
+        readRequestTimeoutMs(),
+    });
 
   return cachedWhatsAppConfig;
 }
 
-function getWhatsAppMessagesUrl(): string {
-  const config =
-    getWhatsAppConfiguration();
-
-  return `https://graph.facebook.com/${config.apiVersion}/${config.phoneNumberId}/messages`;
+function getWhatsAppMessagesUrl(
+  config: WhatsAppConfiguration,
+): string {
+  return (
+    `https://graph.facebook.com/` +
+    `${config.apiVersion}/` +
+    `${encodeURIComponent(
+      config.phoneNumberId,
+    )}/messages`
+  );
 }
 
-function getWhatsAppMediaUrl(): string {
-  const config =
-    getWhatsAppConfiguration();
-
-  return `https://graph.facebook.com/${config.apiVersion}/${config.phoneNumberId}/media`;
+function getWhatsAppMediaUrl(
+  config: WhatsAppConfiguration,
+): string {
+  return (
+    `https://graph.facebook.com/` +
+    `${config.apiVersion}/` +
+    `${encodeURIComponent(
+      config.phoneNumberId,
+    )}/media`
+  );
 }
 
 function getWhatsAppIdempotencyKey({
@@ -507,93 +612,335 @@ function getWhatsAppIdempotencyKey({
   orderId: string;
   recipient: string;
 }): string {
-  return createHash(
-    "sha256",
-  )
+  return createHash("sha256")
     .update(
       `tikemia:ticket-whatsapp:${orderId}:${recipient}`,
       "utf8",
     )
-    .digest(
-      "hex",
-    );
+    .digest("hex");
+}
+
+function createRequestSignal({
+  timeoutMs,
+  externalSignal,
+}: {
+  timeoutMs: number;
+  externalSignal?: AbortSignal;
+}): {
+  signal: AbortSignal;
+  cleanup: () => void;
+  didTimeout: () => boolean;
+} {
+  const controller =
+    new AbortController();
+
+  let timedOut = false;
+
+  const timeout = setTimeout(
+    () => {
+      timedOut = true;
+      controller.abort();
+    },
+    timeoutMs,
+  );
+
+  const abortFromExternal =
+    () => {
+      controller.abort(
+        externalSignal?.reason,
+      );
+    };
+
+  if (externalSignal) {
+    if (externalSignal.aborted) {
+      controller.abort(
+        externalSignal.reason,
+      );
+    } else {
+      externalSignal.addEventListener(
+        "abort",
+        abortFromExternal,
+        {
+          once: true,
+        },
+      );
+    }
+  }
+
+  return {
+    signal:
+      controller.signal,
+
+    cleanup: () => {
+      clearTimeout(timeout);
+
+      externalSignal
+        ?.removeEventListener(
+          "abort",
+          abortFromExternal,
+        );
+    },
+
+    didTimeout: () =>
+      timedOut,
+  };
+}
+
+function isRecord(
+  value: unknown,
+): value is Record<string, unknown> {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    !Array.isArray(value)
+  );
+}
+
+function extractMetaError(
+  value: unknown,
+): MetaWhatsAppError | null {
+  if (!isRecord(value)) {
+    return null;
+  }
+
+  const error =
+    value.error;
+
+  if (!isRecord(error)) {
+    return null;
+  }
+
+  return {
+    message:
+      typeof error.message ===
+      "string"
+        ? error.message
+        : undefined,
+
+    type:
+      typeof error.type ===
+      "string"
+        ? error.type
+        : undefined,
+
+    code:
+      typeof error.code ===
+      "number"
+        ? error.code
+        : undefined,
+
+    error_subcode:
+      typeof error.error_subcode ===
+      "number"
+        ? error.error_subcode
+        : undefined,
+
+    fbtrace_id:
+      typeof error.fbtrace_id ===
+      "string"
+        ? error.fbtrace_id
+        : undefined,
+  };
 }
 
 async function parseMetaResponse<T>(
   response: Response,
 ): Promise<T> {
-  let payload:
-    unknown;
+  const rawBody =
+    await response.text();
 
-  try {
-    payload =
-      await response.json();
-  } catch {
-    throw new PaymentError({
-      code:
-        "PAYMENT_TICKET_ISSUANCE_FAILED",
+  let payload: unknown = null;
 
-      message:
-        "WhatsApp a retourné une réponse invalide.",
+  if (rawBody.trim()) {
+    try {
+      payload =
+        JSON.parse(rawBody) as unknown;
+    } catch {
+      throw new PaymentError({
+        code:
+          "PAYMENT_TICKET_ISSUANCE_FAILED",
 
-      status:
-        502,
+        message:
+          "WhatsApp a retourné une réponse invalide.",
 
-      retryable:
-        true,
+        status: 502,
 
-      exposeMessage:
-        false,
-    });
+        retryable: true,
+
+        exposeMessage: false,
+
+        details: {
+          provider:
+            PROVIDER,
+
+          httpStatus:
+            response.status,
+        },
+      });
+    }
   }
 
-  if (
-    !response.ok
-  ) {
+  if (!response.ok) {
     const metaError =
-      payload as {
-        error?: {
-          message?: string;
-          type?: string;
-          code?: number;
-          error_subcode?: number;
-          fbtrace_id?: string;
-        };
-      };
+      extractMetaError(payload);
 
     throw new PaymentError({
       code:
         "PAYMENT_TICKET_ISSUANCE_FAILED",
 
       message:
-        metaError.error
-          ?.message ||
+        metaError?.message ||
         "WhatsApp a refusé l’envoi du billet.",
 
       status:
-        response.status,
+        response.status >= 400 &&
+        response.status <= 599
+          ? response.status
+          : 502,
 
       retryable:
-        response.status >=
-          500 ||
-        response.status ===
-          429,
+        response.status === 408 ||
+        response.status === 429 ||
+        response.status >= 500,
 
-      exposeMessage:
-        false,
+      exposeMessage: false,
 
       details: {
         provider:
           PROVIDER,
 
+        httpStatus:
+          response.status,
+
         providerError:
-          metaError.error ??
-          null,
+          metaError,
+      },
+    });
+  }
+
+  if (!isRecord(payload)) {
+    throw new PaymentError({
+      code:
+        "PAYMENT_TICKET_ISSUANCE_FAILED",
+
+      message:
+        "WhatsApp n’a retourné aucune donnée valide.",
+
+      status: 502,
+
+      retryable: true,
+
+      exposeMessage: false,
+
+      details: {
+        provider:
+          PROVIDER,
       },
     });
   }
 
   return payload as T;
+}
+
+async function executeMetaRequest<T>({
+  url,
+  init,
+  signal,
+}: {
+  url: string;
+  init: RequestInit;
+  signal?: AbortSignal;
+}): Promise<T> {
+  const config =
+    getWhatsAppConfiguration();
+
+  const requestContext =
+    createRequestSignal({
+      timeoutMs:
+        config.requestTimeoutMs,
+
+      externalSignal:
+        signal,
+    });
+
+  try {
+    const response =
+      await fetch(url, {
+        ...init,
+
+        cache: "no-store",
+
+        signal:
+          requestContext.signal,
+      });
+
+    return await parseMetaResponse<T>(
+      response,
+    );
+  } catch (error) {
+    if (
+      error instanceof PaymentError ||
+      error instanceof
+        PaymentValidationError
+    ) {
+      throw error;
+    }
+
+    if (
+      error instanceof DOMException &&
+      error.name === "AbortError"
+    ) {
+      throw new PaymentError({
+        code:
+          "PAYMENT_TICKET_ISSUANCE_FAILED",
+
+        message:
+          requestContext.didTimeout()
+            ? "La requête WhatsApp a dépassé le délai autorisé."
+            : "La requête WhatsApp a été annulée.",
+
+        status:
+          requestContext.didTimeout()
+            ? 504
+            : 499,
+
+        retryable:
+          requestContext.didTimeout(),
+
+        exposeMessage: false,
+
+        cause: error,
+
+        details: {
+          provider:
+            PROVIDER,
+        },
+      });
+    }
+
+    throw new PaymentError({
+      code:
+        "PAYMENT_TICKET_ISSUANCE_FAILED",
+
+      message:
+        "Impossible de communiquer avec WhatsApp.",
+
+      status: 502,
+
+      retryable: true,
+
+      exposeMessage: false,
+
+      cause: error,
+
+      details: {
+        provider:
+          PROVIDER,
+      },
+    });
+  } finally {
+    requestContext.cleanup();
+  }
 }
 
 async function getOrderWhatsAppData({
@@ -604,124 +951,75 @@ async function getOrderWhatsAppData({
   orderId: string;
 }): Promise<OrderWhatsAppData> {
   const order =
-    await database
-      .order
-      .findUnique({
-        where: {
-          id:
-            orderId,
+    await database.order.findUnique({
+      where: {
+        id: orderId,
+      },
+
+      select: {
+        id: true,
+        reference: true,
+        status: true,
+        currency: true,
+
+        customerId: true,
+        customerName: true,
+        customerPhone: true,
+
+        payment: {
+          select: {
+            status: true,
+          },
         },
 
-        select: {
-          id:
-            true,
+        event: {
+          select: {
+            id: true,
+            title: true,
+            slug: true,
+            venueName: true,
+            address: true,
+            city: true,
+            country: true,
+            startsAt: true,
+            endsAt: true,
+          },
+        },
 
-          reference:
-            true,
-
-          status:
-            true,
-
-          currency:
-            true,
-
-          customerName:
-            true,
-
-          customerPhone:
-            true,
-
-          payment: {
-            select: {
-              status:
-                true,
-            },
+        items: {
+          orderBy: {
+            id: "asc",
           },
 
-          event: {
-            select: {
-              id:
-                true,
+          select: {
+            id: true,
+            quantity: true,
+            unitPrice: true,
+            platformFee: true,
+            total: true,
 
-              title:
-                true,
-
-              slug:
-                true,
-
-              venueName:
-                true,
-
-              address:
-                true,
-
-              city:
-                true,
-
-              country:
-                true,
-
-              startsAt:
-                true,
-
-              endsAt:
-                true,
-            },
-          },
-
-          items: {
-            orderBy: {
-              id:
-                "asc",
+            ticketType: {
+              select: {
+                id: true,
+                name: true,
+                description: true,
+              },
             },
 
-            select: {
-              id:
-                true,
-
-              quantity:
-                true,
-
-              unitPrice:
-                true,
-
-              platformFee:
-                true,
-
-              total:
-                true,
-
-              ticketType: {
-                select: {
-                  id:
-                    true,
-
-                  name:
-                    true,
-
-                  description:
-                    true,
-                },
+            tickets: {
+              orderBy: {
+                createdAt: "asc",
               },
 
-              tickets: {
-                orderBy: {
-                  createdAt:
-                    "asc",
-                },
-
-                select: {
-                  id:
-                    true,
-
-                  code:
-                    true,
-                },
+              select: {
+                id: true,
+                code: true,
               },
             },
           },
         },
-      });
+      },
+    });
 
   if (!order) {
     throw new PaymentValidationError({
@@ -731,8 +1029,7 @@ async function getOrderWhatsAppData({
       message:
         "La commande est introuvable.",
 
-      status:
-        404,
+      status: 404,
 
       orderId,
     });
@@ -751,8 +1048,26 @@ async function getOrderWhatsAppData({
       message:
         "Les billets ne peuvent être envoyés qu’après confirmation du paiement.",
 
-      status:
-        409,
+      status: 409,
+
+      orderId:
+        order.id,
+    });
+  }
+
+  if (order.items.length === 0) {
+    throw new PaymentError({
+      code:
+        "PAYMENT_TICKET_ISSUANCE_FAILED",
+
+      message:
+        "La commande ne contient aucun billet.",
+
+      status: 500,
+
+      retryable: false,
+
+      exposeMessage: false,
 
       orderId:
         order.id,
@@ -761,29 +1076,90 @@ async function getOrderWhatsAppData({
 
   const expectedTickets =
     order.items.reduce(
-      (
-        total,
-        item,
-      ) =>
-        total +
-        item.quantity,
+      (total, item) => {
+        if (
+          !Number.isInteger(
+            item.quantity,
+          ) ||
+          item.quantity <= 0
+        ) {
+          throw new PaymentError({
+            code:
+              "PAYMENT_TICKET_ISSUANCE_FAILED",
+
+            message:
+              "Une quantité de billets de la commande est invalide.",
+
+            status: 500,
+
+            retryable: false,
+
+            exposeMessage: false,
+
+            orderId:
+              order.id,
+
+            details: {
+              orderItemId:
+                item.id,
+
+              quantity:
+                item.quantity,
+            },
+          });
+        }
+
+        if (
+          item.tickets.length >
+          item.quantity
+        ) {
+          throw new PaymentError({
+            code:
+              "PAYMENT_TICKET_ISSUANCE_FAILED",
+
+            message:
+              "Le nombre de billets dépasse la quantité commandée.",
+
+            status: 500,
+
+            retryable: false,
+
+            exposeMessage: false,
+
+            orderId:
+              order.id,
+
+            details: {
+              orderItemId:
+                item.id,
+
+              expected:
+                item.quantity,
+
+              available:
+                item.tickets.length,
+            },
+          });
+        }
+
+        return (
+          total +
+          item.quantity
+        );
+      },
       0,
     );
 
   const availableTickets =
     order.items.reduce(
-      (
-        total,
-        item,
-      ) =>
+      (total, item) =>
         total +
         item.tickets.length,
       0,
     );
 
   if (
-    expectedTickets <=
-      0 ||
+    expectedTickets <= 0 ||
     expectedTickets !==
       availableTickets
   ) {
@@ -794,14 +1170,11 @@ async function getOrderWhatsAppData({
       message:
         "Tous les billets de la commande ne sont pas encore disponibles.",
 
-      status:
-        409,
+      status: 409,
 
-      retryable:
-        true,
+      retryable: true,
 
-      exposeMessage:
-        false,
+      exposeMessage: false,
 
       orderId:
         order.id,
@@ -813,25 +1186,9 @@ async function getOrderWhatsAppData({
     });
   }
 
-  if (
-    !normalizeText(
-      order.customerPhone,
-    )
-  ) {
-    throw new PaymentValidationError({
-      code:
-        "PAYMENT_INVALID_REQUEST",
-
-      message:
-        "Le numéro WhatsApp du client est absent.",
-
-      status:
-        409,
-
-      orderId:
-        order.id,
-    });
-  }
+  normalizePhoneNumber(
+    order.customerPhone,
+  );
 
   return order;
 }
@@ -849,48 +1206,37 @@ function buildWhatsAppSummary({
 
   const totalTickets =
     order.items.reduce(
-      (
-        total,
-        item,
-      ) =>
+      (total, item) =>
         total +
         item.quantity,
       0,
     );
 
-  const lines =
-    [
-      "🎟️ *TIKEMIA — Billets confirmés*",
-      "",
-      `Bonjour *${order.customerName}*,`,
-      "",
-      `Votre paiement pour la commande *${order.reference}* est confirmé.`,
-      "",
-      `*Événement*`,
-      order.event.title,
-      "",
-      `📅 ${formatDateTime(
-        order.event.startsAt,
-      )}`,
-      `📍 ${[
-        order.event.venueName,
-        order.event.city,
-        order.event.country,
-      ]
-        .filter(
-          Boolean,
-        )
-        .join(
-          ", ",
-        )}`,
-      "",
-      `*Billets : ${totalTickets}*`,
-    ];
+  const lines = [
+    "🎟️ *TIKEMIA — Billets confirmés*",
+    "",
+    `Bonjour *${order.customerName}*,`,
+    "",
+    `Votre paiement pour la commande *${order.reference}* est confirmé.`,
+    "",
+    "*Événement*",
+    order.event.title,
+    "",
+    `📅 ${formatDateTime(
+      order.event.startsAt,
+    )}`,
+    `📍 ${[
+      order.event.venueName,
+      order.event.city,
+      order.event.country,
+    ]
+      .filter(Boolean)
+      .join(", ")}`,
+    "",
+    `*Billets : ${totalTickets}*`,
+  ];
 
-  for (
-    const item of
-    order.items
-  ) {
+  for (const item of order.items) {
     const feePerTicket =
       divideAmount({
         amount:
@@ -898,6 +1244,12 @@ function buildWhatsAppSummary({
 
         quantity:
           item.quantity,
+
+        orderId:
+          order.id,
+
+        orderItemId:
+          item.id,
       });
 
     const totalPerTicket =
@@ -907,59 +1259,69 @@ function buildWhatsAppSummary({
 
         quantity:
           item.quantity,
+
+        orderId:
+          order.id,
+
+        orderItemId:
+          item.id,
       });
 
     lines.push(
       "",
       `• *${item.ticketType.name}*`,
       `  Quantité : ${item.quantity}`,
+
       `  Prix : ${formatMoney({
         amount:
           decimalToFixed(
             item.unitPrice,
           ),
+
         currency:
           order.currency,
       })}`,
+
       `  Frais par billet : ${formatMoney({
         amount:
           decimalToFixed(
             feePerTicket,
           ),
+
         currency:
           order.currency,
       })}`,
+
       `  Total par billet : ${formatMoney({
         amount:
           decimalToFixed(
             totalPerTicket,
           ),
+
         currency:
           order.currency,
       })}`,
+
       `  Codes : ${item.tickets
         .map(
-          (
-            ticket,
-          ) =>
+          (ticket) =>
             ticket.code,
         )
-        .join(
-          ", ",
-        )}`,
+        .join(", ")}`,
     );
   }
 
   lines.push(
     "",
-    "Chaque PDF contient un QR code unique, réel et signé par Tikemia.",
+    "Chaque PDF contient un QR code unique et signé par Tikemia.",
     "Présentez le PDF ou le QR code à l’entrée.",
     "",
     `Mes billets : ${ticketsUrl}`,
   );
 
-  return lines.join(
-    "\n",
+  return truncateMessage(
+    lines.join("\n"),
+    MAX_TEXT_LENGTH,
   );
 }
 
@@ -970,43 +1332,126 @@ function buildDocumentCaption({
   order: OrderWhatsAppData;
   pdf: GeneratedTicketPdf;
 }): string {
-  return [
-    `🎫 *${pdf.metadata.ticketCategory}*`,
-    `Code : ${pdf.ticketCode}`,
-    `Prix : ${formatMoney({
-      amount:
-        pdf.metadata.unitPrice,
-      currency:
-        pdf.metadata.currency,
-    })}`,
-    `Total : ${formatMoney({
-      amount:
-        pdf.metadata.totalPerTicket,
-      currency:
-        pdf.metadata.currency,
-    })}`,
-    `Événement : ${order.event.title}`,
-  ].join(
-    "\n",
+  return truncateMessage(
+    [
+      `🎫 *${pdf.metadata.ticketCategory}*`,
+      `Code : ${pdf.ticketCode}`,
+
+      `Prix : ${formatMoney({
+        amount:
+          pdf.metadata.unitPrice,
+
+        currency:
+          pdf.metadata.currency,
+      })}`,
+
+      `Total : ${formatMoney({
+        amount:
+          pdf.metadata.totalPerTicket,
+
+        currency:
+          pdf.metadata.currency,
+      })}`,
+
+      `Événement : ${order.event.title}`,
+    ].join("\n"),
+
+    MAX_CAPTION_LENGTH,
   );
+}
+
+function validateGeneratedPdf(
+  pdf: GeneratedTicketPdf,
+): void {
+  if (
+    !pdf.buffer ||
+    pdf.fileSize <= 0 ||
+    pdf.buffer.byteLength !==
+      pdf.fileSize
+  ) {
+    throw new PaymentError({
+      code:
+        "PAYMENT_TICKET_ISSUANCE_FAILED",
+
+      message:
+        "Le billet PDF à envoyer sur WhatsApp est invalide.",
+
+      status: 500,
+
+      retryable: true,
+
+      exposeMessage: false,
+
+      details: {
+        ticketId:
+          pdf.ticketId,
+
+        fileSize:
+          pdf.fileSize,
+
+        bufferSize:
+          pdf.buffer?.byteLength ??
+          0,
+      },
+    });
+  }
+
+  if (
+    pdf.fileSize >
+    MAX_DOCUMENT_BYTES
+  ) {
+    throw new PaymentError({
+      code:
+        "PAYMENT_TICKET_ISSUANCE_FAILED",
+
+      message:
+        "Le billet PDF dépasse la taille maximale autorisée par WhatsApp.",
+
+      status: 413,
+
+      retryable: false,
+
+      exposeMessage: false,
+
+      details: {
+        ticketId:
+          pdf.ticketId,
+
+        fileSize:
+          pdf.fileSize,
+
+        maximumSize:
+          MAX_DOCUMENT_BYTES,
+      },
+    });
+  }
 }
 
 async function sendWhatsAppText({
   recipient,
   text,
+  signal,
 }: {
   recipient: string;
   text: string;
+  signal?: AbortSignal;
 }): Promise<string> {
   const config =
     getWhatsAppConfiguration();
 
-  const response =
-    await fetch(
-      getWhatsAppMessagesUrl(),
-      {
-        method:
-          "POST",
+  const payload =
+    await executeMetaRequest<
+      MetaWhatsAppSendResponse
+    >({
+      url:
+        getWhatsAppMessagesUrl(
+          config,
+        ),
+
+      signal,
+
+      init: {
+        method: "POST",
 
         headers: {
           Authorization:
@@ -1031,30 +1476,23 @@ async function sendWhatsAppText({
               "text",
 
             text: {
-              preview_url:
-                false,
-
+              preview_url: false,
               body:
-                text,
+                truncateMessage(
+                  text,
+                  MAX_TEXT_LENGTH,
+                ),
             },
           }),
       },
-    );
-
-  const payload =
-    await parseMetaResponse<
-      MetaWhatsAppSendResponse
-    >(
-      response,
-    );
+    });
 
   const messageId =
-    payload.messages?.[0]
-      ?.id;
+    normalizeText(
+      payload.messages?.[0]?.id,
+    );
 
-  if (
-    !messageId
-  ) {
+  if (!messageId) {
     throw new PaymentError({
       code:
         "PAYMENT_TICKET_ISSUANCE_FAILED",
@@ -1062,14 +1500,16 @@ async function sendWhatsAppText({
       message:
         "WhatsApp n’a retourné aucun identifiant de message.",
 
-      status:
-        502,
+      status: 502,
 
-      retryable:
-        true,
+      retryable: true,
 
-      exposeMessage:
-        false,
+      exposeMessage: false,
+
+      details: {
+        provider:
+          PROVIDER,
+      },
     });
   }
 
@@ -1078,38 +1518,12 @@ async function sendWhatsAppText({
 
 async function uploadWhatsAppDocument({
   pdf,
+  signal,
 }: {
   pdf: GeneratedTicketPdf;
+  signal?: AbortSignal;
 }): Promise<string> {
-  if (
-    pdf.fileSize >
-    MAX_DOCUMENT_BYTES
-  ) {
-    throw new PaymentError({
-      code:
-        "PAYMENT_TICKET_ISSUANCE_FAILED",
-
-      message:
-        "Le billet PDF dépasse la taille maximale autorisée par WhatsApp.",
-
-      status:
-        413,
-
-      retryable:
-        false,
-
-      exposeMessage:
-        false,
-
-      details: {
-        ticketId:
-          pdf.ticketId,
-
-        fileSize:
-          pdf.fileSize,
-      },
-    });
-  }
+  validateGeneratedPdf(pdf);
 
   const config =
     getWhatsAppConfiguration();
@@ -1134,24 +1548,31 @@ async function uploadWhatsAppDocument({
 
   formData.append(
     "file",
+
     new Blob(
-      [
-        pdfBytes.buffer,
-      ],
+      [pdfBytes],
       {
         type:
           pdf.mimeType,
       },
     ),
+
     pdf.fileName,
   );
 
-  const response =
-    await fetch(
-      getWhatsAppMediaUrl(),
-      {
-        method:
-          "POST",
+  const payload =
+    await executeMetaRequest<
+      MetaWhatsAppUploadResponse
+    >({
+      url:
+        getWhatsAppMediaUrl(
+          config,
+        ),
+
+      signal,
+
+      init: {
+        method: "POST",
 
         headers: {
           Authorization:
@@ -1161,18 +1582,12 @@ async function uploadWhatsAppDocument({
         body:
           formData,
       },
-    );
+    });
 
-  const payload =
-    await parseMetaResponse<
-      MetaWhatsAppUploadResponse
-    >(
-      response,
-    );
+  const mediaId =
+    normalizeText(payload.id);
 
-  if (
-    !payload.id
-  ) {
+  if (!mediaId) {
     throw new PaymentError({
       code:
         "PAYMENT_TICKET_ISSUANCE_FAILED",
@@ -1180,18 +1595,23 @@ async function uploadWhatsAppDocument({
       message:
         "WhatsApp n’a retourné aucun identifiant de média.",
 
-      status:
-        502,
+      status: 502,
 
-      retryable:
-        true,
+      retryable: true,
 
-      exposeMessage:
-        false,
+      exposeMessage: false,
+
+      details: {
+        provider:
+          PROVIDER,
+
+        ticketId:
+          pdf.ticketId,
+      },
     });
   }
 
-  return payload.id;
+  return mediaId;
 }
 
 async function sendWhatsAppDocument({
@@ -1199,21 +1619,30 @@ async function sendWhatsAppDocument({
   mediaId,
   fileName,
   caption,
+  signal,
 }: {
   recipient: string;
   mediaId: string;
   fileName: string;
   caption: string;
+  signal?: AbortSignal;
 }): Promise<string> {
   const config =
     getWhatsAppConfiguration();
 
-  const response =
-    await fetch(
-      getWhatsAppMessagesUrl(),
-      {
-        method:
-          "POST",
+  const payload =
+    await executeMetaRequest<
+      MetaWhatsAppSendResponse
+    >({
+      url:
+        getWhatsAppMessagesUrl(
+          config,
+        ),
+
+      signal,
+
+      init: {
+        method: "POST",
 
         headers: {
           Authorization:
@@ -1244,26 +1673,22 @@ async function sendWhatsAppDocument({
               filename:
                 fileName,
 
-              caption,
+              caption:
+                truncateMessage(
+                  caption,
+                  MAX_CAPTION_LENGTH,
+                ),
             },
           }),
       },
-    );
-
-  const payload =
-    await parseMetaResponse<
-      MetaWhatsAppSendResponse
-    >(
-      response,
-    );
+    });
 
   const messageId =
-    payload.messages?.[0]
-      ?.id;
+    normalizeText(
+      payload.messages?.[0]?.id,
+    );
 
-  if (
-    !messageId
-  ) {
+  if (!messageId) {
     throw new PaymentError({
       code:
         "PAYMENT_TICKET_ISSUANCE_FAILED",
@@ -1271,18 +1696,39 @@ async function sendWhatsAppDocument({
       message:
         "WhatsApp n’a retourné aucun identifiant de message document.",
 
-      status:
-        502,
+      status: 502,
 
-      retryable:
-        true,
+      retryable: true,
 
-      exposeMessage:
-        false,
+      exposeMessage: false,
+
+      details: {
+        provider:
+          PROVIDER,
+
+        mediaId,
+      },
     });
   }
 
   return messageId;
+}
+
+function getTicketDeliveryTargets(
+  order: OrderWhatsAppData,
+): TicketDeliveryTarget[] {
+  return order.items.flatMap(
+    (item) =>
+      item.tickets.map(
+        (ticket) => ({
+          ticketId:
+            ticket.id,
+
+          ticketCode:
+            ticket.code,
+        }),
+      ),
+  );
 }
 
 async function findExistingSuccessfulDelivery({
@@ -1294,11 +1740,56 @@ async function findExistingSuccessfulDelivery({
   orderId: string;
   recipient: string;
 }) {
-  return database
-    .deliveryLog
-    .findFirst({
+  return database.deliveryLog.findMany({
+    where: {
+      orderId,
+
+      channel:
+        DeliveryChannel.WHATSAPP,
+
+      type:
+        DeliveryType.TICKET_PDF,
+
+      status:
+        DeliveryStatus.SENT,
+
+      recipient,
+
+      providerMessageId: {
+        not: null,
+      },
+    },
+
+    orderBy: {
+      sentAt: "desc",
+    },
+
+    select: {
+      id: true,
+      ticketId: true,
+      providerMessageId: true,
+      sentAt: true,
+    },
+  });
+}
+
+async function ensurePendingDeliveryLogs({
+  database,
+  order,
+  recipient,
+}: {
+  database: DatabaseClient;
+  order: OrderWhatsAppData;
+  recipient: string;
+}): Promise<string[]> {
+  const targets =
+    getTicketDeliveryTargets(order);
+
+  const existingLogs =
+    await database.deliveryLog.findMany({
       where: {
-        orderId,
+        orderId:
+          order.id,
 
         channel:
           DeliveryChannel.WHATSAPP,
@@ -1306,28 +1797,263 @@ async function findExistingSuccessfulDelivery({
         type:
           DeliveryType.TICKET_PDF,
 
-        status:
-          DeliveryStatus.SENT,
-
         recipient,
-      },
 
-      orderBy: {
-        sentAt:
-          "desc",
+        ticketId: {
+          in:
+            targets.map(
+              (target) =>
+                target.ticketId,
+            ),
+        },
       },
 
       select: {
-        id:
-          true,
-
-        providerMessageId:
-          true,
-
-        sentAt:
-          true,
+        id: true,
+        ticketId: true,
       },
     });
+
+  const existingByTicketId =
+    new Map(
+      existingLogs.map(
+        (log) => [
+          log.ticketId,
+          log.id,
+        ],
+      ),
+    );
+
+  const deliveryLogIds: string[] = [];
+
+  for (const target of targets) {
+    const existingId =
+      existingByTicketId.get(
+        target.ticketId,
+      );
+
+    if (existingId) {
+      deliveryLogIds.push(
+        existingId,
+      );
+
+      continue;
+    }
+
+    const created =
+      await database.deliveryLog.create({
+        data: {
+          userId:
+            order.customerId,
+
+          orderId:
+            order.id,
+
+          ticketId:
+            target.ticketId,
+
+          channel:
+            DeliveryChannel.WHATSAPP,
+
+          type:
+            DeliveryType.TICKET_PDF,
+
+          status:
+            DeliveryStatus.PENDING,
+
+          recipient,
+
+          subject:
+            `Votre billet ${target.ticketCode}`,
+
+          scheduledAt:
+            new Date(),
+
+          metadata: {
+            orderReference:
+              order.reference,
+
+            ticketCode:
+              target.ticketCode,
+
+            eventTitle:
+              order.event.title,
+          },
+        },
+
+        select: {
+          id: true,
+        },
+      });
+
+    deliveryLogIds.push(
+      created.id,
+    );
+  }
+
+  return deliveryLogIds;
+}
+
+async function markDeliveriesProcessing({
+  database,
+  deliveryLogIds,
+  attemptedAt,
+}: {
+  database: DatabaseClient;
+  deliveryLogIds: string[];
+  attemptedAt: Date;
+}): Promise<void> {
+  if (
+    deliveryLogIds.length === 0
+  ) {
+    return;
+  }
+
+  await database.deliveryLog.updateMany({
+    where: {
+      id: {
+        in: deliveryLogIds,
+      },
+
+      status: {
+        in: [
+          DeliveryStatus.PENDING,
+          DeliveryStatus.PROCESSING,
+          DeliveryStatus.FAILED,
+        ],
+      },
+    },
+
+    data: {
+      status:
+        DeliveryStatus.PROCESSING,
+
+      provider:
+        PROVIDER,
+
+      failedAt:
+        null,
+
+      errorCode:
+        null,
+
+      errorMessage:
+        null,
+
+      lastAttemptAt:
+        attemptedAt,
+    },
+  });
+}
+
+async function markDeliveriesFailed({
+  database,
+  deliveryLogIds,
+  failedAt,
+  error,
+}: {
+  database: DatabaseClient;
+  deliveryLogIds: string[];
+  failedAt: Date;
+  error: unknown;
+}): Promise<void> {
+  if (
+    deliveryLogIds.length === 0
+  ) {
+    return;
+  }
+
+  const errorCode =
+    error instanceof PaymentError
+      ? error.code
+      : "WHATSAPP_SEND_FAILED";
+
+  const errorMessage =
+    error instanceof Error
+      ? error.message
+      : "Impossible d’envoyer les billets par WhatsApp.";
+
+  await database.deliveryLog
+    .updateMany({
+      where: {
+        id: {
+          in: deliveryLogIds,
+        },
+      },
+
+      data: {
+        status:
+          DeliveryStatus.FAILED,
+
+        provider:
+          PROVIDER,
+
+        failedAt,
+
+        errorCode,
+
+        errorMessage:
+          errorMessage.slice(
+            0,
+            2_000,
+          ),
+      },
+    })
+    .catch(() => undefined);
+}
+
+async function markDeliveriesSent({
+  database,
+  deliveryLogIds,
+  providerMessageIds,
+  sentAt,
+}: {
+  database: DatabaseClient;
+  deliveryLogIds: string[];
+  providerMessageIds: string[];
+  sentAt: Date;
+}): Promise<void> {
+  if (
+    deliveryLogIds.length === 0
+  ) {
+    return;
+  }
+
+  await database.deliveryLog.updateMany({
+    where: {
+      id: {
+        in: deliveryLogIds,
+      },
+    },
+
+    data: {
+      status:
+        DeliveryStatus.SENT,
+
+      provider:
+        PROVIDER,
+
+      providerMessageId:
+        providerMessageIds.join(","),
+
+      sentAt,
+
+      deliveredAt:
+        null,
+
+      failedAt:
+        null,
+
+      errorCode:
+        null,
+
+      errorMessage:
+        null,
+
+      lastAttemptAt:
+        sentAt,
+    },
+  });
 }
 
 export async function sendTicketWhatsApp({
@@ -1336,6 +2062,7 @@ export async function sendTicketWhatsApp({
   forceResend = false,
   logoPath,
   generatedAt = new Date(),
+  signal,
 }: SendTicketWhatsAppOptions): Promise<
   SendTicketWhatsAppResult
 > {
@@ -1348,10 +2075,13 @@ export async function sendTicketWhatsApp({
         "orderId",
     });
 
-  const database:
-    DatabaseClient =
-    transaction ??
-    prisma;
+  const validGeneratedAt =
+    normalizeGeneratedAt(
+      generatedAt,
+    );
+
+  const database: DatabaseClient =
+    transaction ?? prisma;
 
   const order =
     await getOrderWhatsAppData({
@@ -1364,20 +2094,86 @@ export async function sendTicketWhatsApp({
       order.customerPhone,
     );
 
-  const existingDelivery =
+  const ticketTargets =
+    getTicketDeliveryTargets(order);
+
+  const successfulDeliveries =
     await findExistingSuccessfulDelivery({
       database,
+
       orderId:
         order.id,
+
       recipient,
     });
 
+  const successfulTicketIds =
+    new Set(
+      successfulDeliveries
+        .map(
+          (delivery) =>
+            delivery.ticketId,
+        )
+        .filter(
+          (
+            ticketId,
+          ): ticketId is string =>
+            Boolean(ticketId),
+        ),
+    );
+
+  const allTicketsAlreadySent =
+    ticketTargets.length > 0 &&
+    ticketTargets.every(
+      (target) =>
+        successfulTicketIds.has(
+          target.ticketId,
+        ),
+    );
+
   if (
-    existingDelivery &&
-    !forceResend &&
-    existingDelivery
-      .providerMessageId
+    allTicketsAlreadySent &&
+    !forceResend
   ) {
+    const providerMessageIds =
+      Array.from(
+        new Set(
+          successfulDeliveries
+            .flatMap(
+              (delivery) =>
+                normalizeText(
+                  delivery
+                    .providerMessageId,
+                )
+                  .split(",")
+                  .map(
+                    (messageId) =>
+                      messageId.trim(),
+                  )
+                  .filter(Boolean),
+            ),
+        ),
+      );
+
+    const latestSentAt =
+      successfulDeliveries
+        .map(
+          (delivery) =>
+            delivery.sentAt,
+        )
+        .filter(
+          (
+            value,
+          ): value is Date =>
+            value instanceof Date,
+        )
+        .sort(
+          (left, right) =>
+            right.getTime() -
+            left.getTime(),
+        )[0] ??
+      validGeneratedAt;
+
     return {
       orderId:
         order.id,
@@ -1390,35 +2186,22 @@ export async function sendTicketWhatsApp({
       provider:
         PROVIDER,
 
-      providerMessageIds: [
-        existingDelivery
-          .providerMessageId,
-      ],
+      providerMessageIds,
 
       sentMessages:
-        1,
+        providerMessageIds.length,
 
       sentDocuments:
-        order.items.reduce(
-          (
-            total,
-            item,
-          ) =>
-            total +
-            item.tickets.length,
-          0,
+        ticketTargets.length,
+
+      deliveryLogIds:
+        successfulDeliveries.map(
+          (delivery) =>
+            delivery.id,
         ),
 
-      deliveryLogIds: [
-        existingDelivery.id,
-      ],
-
       sentAt:
-        (
-          existingDelivery
-            .sentAt ??
-          generatedAt
-        ).toISOString(),
+        latestSentAt.toISOString(),
     };
   }
 
@@ -1431,144 +2214,140 @@ export async function sendTicketWhatsApp({
 
       logoPath,
 
-      generatedAt,
+      generatedAt:
+        validGeneratedAt,
     });
 
-  const providerMessageIds:
-    string[] =
-    [];
+  if (
+    generatedPdfs.tickets.length !==
+    ticketTargets.length
+  ) {
+    throw new PaymentError({
+      code:
+        "PAYMENT_TICKET_ISSUANCE_FAILED",
 
-  const summaryMessageId =
-    await sendWhatsAppText({
-      recipient,
+      message:
+        "Le nombre de PDF ne correspond pas au nombre de billets.",
 
-      text:
-        buildWhatsAppSummary({
-          order,
-        }),
+      status: 500,
+
+      retryable: true,
+
+      exposeMessage: false,
+
+      orderId:
+        order.id,
+
+      details: {
+        expected:
+          ticketTargets.length,
+
+        generated:
+          generatedPdfs.tickets.length,
+      },
     });
-
-  providerMessageIds.push(
-    summaryMessageId,
-  );
+  }
 
   for (
     const pdf of
     generatedPdfs.tickets
   ) {
-    const mediaId =
-      await uploadWhatsAppDocument({
-        pdf,
-      });
+    validateGeneratedPdf(pdf);
+  }
 
-    const documentMessageId =
-      await sendWhatsAppDocument({
+  const deliveryLogIds =
+    await ensurePendingDeliveryLogs({
+      database,
+      order,
+      recipient,
+    });
+
+  const attemptedAt =
+    new Date();
+
+  await markDeliveriesProcessing({
+    database,
+    deliveryLogIds,
+    attemptedAt,
+  });
+
+  const providerMessageIds:
+    string[] = [];
+
+  let sentDocuments = 0;
+
+  try {
+    const summaryMessageId =
+      await sendWhatsAppText({
         recipient,
 
-        mediaId,
-
-        fileName:
-          pdf.fileName,
-
-        caption:
-          buildDocumentCaption({
+        text:
+          buildWhatsAppSummary({
             order,
-            pdf,
           }),
+
+        signal,
       });
 
     providerMessageIds.push(
-      documentMessageId,
+      summaryMessageId,
     );
-  }
 
-  const sentAt =
-    new Date();
+    for (
+      const pdf of
+      generatedPdfs.tickets
+    ) {
+      const mediaId =
+        await uploadWhatsAppDocument({
+          pdf,
+          signal,
+        });
 
-  const deliveryLogs =
-    await database
-      .deliveryLog
-      .findMany({
-        where: {
-          orderId:
-            order.id,
-
-          channel:
-            DeliveryChannel.WHATSAPP,
-
-          type:
-            DeliveryType.TICKET_PDF,
-
+      const documentMessageId =
+        await sendWhatsAppDocument({
           recipient,
+          mediaId,
 
-          status: {
-            in: [
-              DeliveryStatus.PENDING,
-              DeliveryStatus.PROCESSING,
-              DeliveryStatus.FAILED,
-            ],
-          },
-        },
+          fileName:
+            pdf.fileName,
 
-        select: {
-          id:
-            true,
-        },
-      });
+          caption:
+            buildDocumentCaption({
+              order,
+              pdf,
+            }),
 
-  const deliveryLogIds =
-    deliveryLogs.map(
-      (
-        log,
-      ) =>
-        log.id,
-    );
+          signal,
+        });
 
-  if (
-    deliveryLogIds.length >
-    0
-  ) {
-    await database
-      .deliveryLog
-      .updateMany({
-        where: {
-          id: {
-            in:
-              deliveryLogIds,
-          },
-        },
+      providerMessageIds.push(
+        documentMessageId,
+      );
 
-        data: {
-          status:
-            DeliveryStatus.SENT,
+      sentDocuments += 1;
+    }
+  } catch (error) {
+    await markDeliveriesFailed({
+      database,
+      deliveryLogIds,
 
-          provider:
-            PROVIDER,
+      failedAt:
+        new Date(),
 
-          providerMessageId:
-            providerMessageIds.join(
-              ",",
-            ),
+      error,
+    });
 
-          sentAt,
-
-          deliveredAt:
-            null,
-
-          failedAt:
-            null,
-
-          errorCode:
-            null,
-
-          errorMessage:
-            null,
-
-          lastAttemptAt:
-            sentAt,
-        },
-      });
+    throw error;
   }
+
+  const sentAt = new Date();
+
+  await markDeliveriesSent({
+    database,
+    deliveryLogIds,
+    providerMessageIds,
+    sentAt,
+  });
 
   return {
     orderId:
@@ -1587,10 +2366,7 @@ export async function sendTicketWhatsApp({
     sentMessages:
       providerMessageIds.length,
 
-    sentDocuments:
-      generatedPdfs
-        .tickets
-        .length,
+    sentDocuments,
 
     deliveryLogIds,
 

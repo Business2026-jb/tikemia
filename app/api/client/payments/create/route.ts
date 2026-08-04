@@ -1,6 +1,5 @@
 import {
   createHash,
-  randomBytes,
   timingSafeEqual,
 } from "node:crypto";
 
@@ -14,24 +13,26 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 
 import {
-  createFedaPayHostedCheckout,
-} from "@/lib/payments/providers/fedapay/fedapay-client";
-import {
-  getFedaPayConfig,
-} from "@/lib/payments/providers/fedapay/config";
+  createPayment,
+} from "@/lib/payments/create-payment";
 import {
   PaymentError,
   PaymentValidationError,
   getPaymentError,
   getPaymentErrorLogContext,
 } from "@/lib/payments/payment-errors";
+import {
+  getDefaultPaymentProviderName,
+} from "@/lib/payments/provider-router";
+import type {
+  PaymentMetadata,
+  PaymentMethod,
+  PaymentProviderName,
+} from "@/lib/payments/payment-provider-types";
 import { prisma } from "@/lib/prisma";
 
-export const runtime =
-  "nodejs";
-
-export const dynamic =
-  "force-dynamic";
+export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
 
 const DEFAULT_CLIENT_SESSION_COOKIE_NAME =
   "tikemia_client_session";
@@ -39,162 +40,126 @@ const DEFAULT_CLIENT_SESSION_COOKIE_NAME =
 const LEGACY_SESSION_COOKIE_NAME =
   "tikemia_session";
 
-const PAYMENT_PROVIDER =
-  "FEDAPAY";
+const DEFAULT_RESERVATION_MINUTES = 15;
 
-const paymentMethodSchema =
-  z.enum([
-    "FEDAPAY_CHECKOUT",
-    "MOBILE_MONEY",
-    "CARD",
-    "MTN_MOMO",
-    "MOOV_MONEY",
-    "CELTIIS_CASH",
-    "ORANGE_MONEY",
-    "WAVE",
-    "VISA",
-    "MASTERCARD",
-  ]);
+const paymentMethodSchema = z.enum([
+  "MONEROO_CHECKOUT",
+  "FEDAPAY_CHECKOUT",
+  "MOBILE_MONEY",
+  "CARD",
+  "MTN_MOMO",
+  "MOOV_MONEY",
+  "CELTIIS_CASH",
+  "ORANGE_MONEY",
+  "WAVE",
+  "VISA",
+  "MASTERCARD",
+]);
 
-const createPaymentSchema =
-  z
-    .object({
-      orderId:
-        z
-          .string()
-          .trim()
-          .min(
-            1,
-            "La commande est obligatoire.",
-          )
-          .max(
-            100,
-            "L’identifiant de la commande est invalide.",
-          ),
+const createPaymentSchema = z
+  .object({
+    orderId: z
+      .string()
+      .trim()
+      .min(1, "La commande est obligatoire.")
+      .max(
+        100,
+        "L’identifiant de la commande est invalide.",
+      ),
 
-      checkoutToken:
-        z
-          .string()
-          .trim()
-          .min(
-            32,
-            "Le jeton de checkout est invalide.",
-          )
-          .max(
-            500,
-            "Le jeton de checkout est trop long.",
-          )
-          .optional(),
+    checkoutToken: z
+      .string()
+      .trim()
+      .min(
+        32,
+        "Le jeton de checkout est invalide.",
+      )
+      .max(
+        500,
+        "Le jeton de checkout est trop long.",
+      )
+      .optional(),
 
-      paymentMethod:
-        paymentMethodSchema
-          .optional()
-          .default(
-            "FEDAPAY_CHECKOUT",
-          ),
+    paymentMethod:
+      paymentMethodSchema.optional(),
 
-      idempotencyKey:
-        z
-          .string()
-          .trim()
-          .min(
-            16,
-            "La clé d’idempotence est trop courte.",
-          )
-          .max(
-            200,
-            "La clé d’idempotence est trop longue.",
-          )
-          .regex(
-            /^[A-Za-z0-9._:-]+$/,
-            "La clé d’idempotence contient des caractères invalides.",
-          )
-          .optional(),
-    })
-    .strict();
+    idempotencyKey: z
+      .string()
+      .trim()
+      .min(
+        16,
+        "La clé d’idempotence est trop courte.",
+      )
+      .max(
+        200,
+        "La clé d’idempotence est trop longue.",
+      )
+      .regex(
+        /^[A-Za-z0-9._:-]+$/,
+        "La clé d’idempotence contient des caractères invalides.",
+      )
+      .optional(),
+  })
+  .strict();
 
-type CreatePaymentInput =
-  z.infer<
-    typeof createPaymentSchema
-  >;
+type CreatePaymentInput = z.infer<
+  typeof createPaymentSchema
+>;
 
 type AuthenticatedCustomer = {
   id: string;
   email: string;
 };
 
+type PaymentRuntimeConfig = Readonly<{
+  successUrl: string;
+  cancelUrl: string;
+  reservationMinutes: number;
+}>;
+
 function jsonResponse(
-  body:
-    Record<
-      string,
-      unknown
-    >,
+  body: Record<string, unknown>,
   status = 200,
 ) {
-  return NextResponse.json(
-    body,
-    {
-      status,
-
-      headers: {
-        "Cache-Control":
-          "no-store, max-age=0",
-
-        Pragma:
-          "no-cache",
-
-        "X-Content-Type-Options":
-          "nosniff",
-      },
+  return NextResponse.json(body, {
+    status,
+    headers: {
+      "Cache-Control": "no-store, max-age=0",
+      Pragma: "no-cache",
+      "X-Content-Type-Options": "nosniff",
     },
-  );
+  });
 }
 
 function normalizeText(
-  value:
-    | string
-    | null
-    | undefined,
+  value: string | null | undefined,
 ): string {
   return value?.trim() ?? "";
 }
 
-function hashToken(
-  token:
-    string,
-): string {
-  return createHash(
-    "sha256",
-  )
-    .update(
-      token,
-    )
-    .digest(
-      "hex",
-    );
+function toJsonValue(
+  value: unknown,
+): Prisma.InputJsonValue {
+  return JSON.parse(
+    JSON.stringify(value),
+  ) as Prisma.InputJsonValue;
+}
+
+function hashToken(token: string): string {
+  return createHash("sha256")
+    .update(token)
+    .digest("hex");
 }
 
 function secureHashEquals(
-  left:
-    string,
-  right:
-    string,
+  left: string,
+  right: string,
 ): boolean {
-  const leftBuffer =
-    Buffer.from(
-      left,
-      "utf8",
-    );
-
-  const rightBuffer =
-    Buffer.from(
-      right,
-      "utf8",
-    );
+  const leftBuffer = Buffer.from(left, "utf8");
+  const rightBuffer = Buffer.from(right, "utf8");
 
   if (
-    leftBuffer.length !==
-    rightBuffer.length
+    leftBuffer.length !== rightBuffer.length
   ) {
     return false;
   }
@@ -213,18 +178,13 @@ function getSessionCookieNames(): string[] {
           process.env
             .CLIENT_SESSION_COOKIE_NAME,
         ),
-
         normalizeText(
           process.env
             .SESSION_COOKIE_NAME,
         ),
-
         DEFAULT_CLIENT_SESSION_COOKIE_NAME,
-
         LEGACY_SESSION_COOKIE_NAME,
-      ].filter(
-        Boolean,
-      ),
+      ].filter(Boolean),
     ),
   );
 }
@@ -232,76 +192,45 @@ function getSessionCookieNames(): string[] {
 async function getAuthenticatedCustomer(): Promise<
   AuthenticatedCustomer | null
 > {
-  const cookieStore =
-    await cookies();
+  const cookieStore = await cookies();
 
-  let sessionToken =
-    "";
+  let sessionToken = "";
 
-  for (
-    const cookieName of
-    getSessionCookieNames()
-  ) {
-    sessionToken =
-      normalizeText(
-        cookieStore.get(
-          cookieName,
-        )?.value,
-      );
+  for (const cookieName of getSessionCookieNames()) {
+    sessionToken = normalizeText(
+      cookieStore.get(cookieName)?.value,
+    );
 
-    if (
-      sessionToken
-    ) {
+    if (sessionToken) {
       break;
     }
   }
 
-  if (
-    !sessionToken
-  ) {
+  if (!sessionToken) {
     return null;
   }
 
   const session =
     await prisma.session.findUnique({
       where: {
-        tokenHash:
-          hashToken(
-            sessionToken,
-          ),
+        tokenHash: hashToken(sessionToken),
       },
-
       select: {
-        id:
-          true,
-
-        expiresAt:
-          true,
-
+        id: true,
+        expiresAt: true,
         user: {
           select: {
-            id:
-              true,
-
-            email:
-              true,
-
-            role:
-              true,
-
-            emailVerified:
-              true,
-
-            isActive:
-              true,
+            id: true,
+            email: true,
+            role: true,
+            emailVerified: true,
+            isActive: true,
           },
         },
       },
     });
 
-  if (
-    !session
-  ) {
+  if (!session) {
     return null;
   }
 
@@ -312,14 +241,10 @@ async function getAuthenticatedCustomer(): Promise<
     await prisma.session
       .delete({
         where: {
-          id:
-            session.id,
+          id: session.id,
         },
       })
-      .catch(
-        () =>
-          undefined,
-      );
+      .catch(() => undefined);
 
     return null;
   }
@@ -334,30 +259,154 @@ async function getAuthenticatedCustomer(): Promise<
   }
 
   return {
-    id:
-      session.user.id,
-
-    email:
-      session.user.email
-        .trim()
-        .toLowerCase(),
+    id: session.user.id,
+    email: session.user.email
+      .trim()
+      .toLowerCase(),
   };
+}
+
+function getApplicationBaseUrl(): string {
+  const candidate =
+    normalizeText(
+      process.env.NEXT_PUBLIC_APP_URL,
+    ) ||
+    normalizeText(process.env.APP_URL);
+
+  if (!candidate) {
+    throw new PaymentError({
+      code: "PAYMENT_CONFIGURATION_ERROR",
+      message:
+        "L’URL publique de Tikemia n’est pas configurée.",
+      status: 500,
+    });
+  }
+
+  let url: URL;
+
+  try {
+    url = new URL(candidate);
+  } catch {
+    throw new PaymentError({
+      code: "PAYMENT_CONFIGURATION_ERROR",
+      message:
+        "L’URL publique de Tikemia est invalide.",
+      status: 500,
+    });
+  }
+
+  if (
+    process.env.NODE_ENV === "production" &&
+    url.protocol !== "https:"
+  ) {
+    throw new PaymentError({
+      code: "PAYMENT_CONFIGURATION_ERROR",
+      message:
+        "L’URL publique de Tikemia doit utiliser HTTPS en production.",
+      status: 500,
+    });
+  }
+
+  return url.toString();
+}
+
+function readReservationMinutes(): number {
+  const rawValue = normalizeText(
+    process.env.PAYMENT_RESERVATION_MINUTES,
+  );
+
+  if (!rawValue) {
+    return DEFAULT_RESERVATION_MINUTES;
+  }
+
+  const parsedValue = Number(rawValue);
+
+  if (
+    !Number.isInteger(parsedValue) ||
+    parsedValue < 1 ||
+    parsedValue > 1440
+  ) {
+    throw new PaymentError({
+      code: "PAYMENT_CONFIGURATION_ERROR",
+      message:
+        "PAYMENT_RESERVATION_MINUTES doit être un entier compris entre 1 et 1440.",
+      status: 500,
+    });
+  }
+
+  return parsedValue;
+}
+
+function getPaymentRuntimeConfig():
+  PaymentRuntimeConfig {
+  const applicationBaseUrl =
+    getApplicationBaseUrl();
+
+  const successUrl =
+    normalizeText(
+      process.env.PAYMENT_SUCCESS_URL,
+    ) ||
+    new URL(
+      "/payment/success",
+      applicationBaseUrl,
+    ).toString();
+
+  const cancelUrl =
+    normalizeText(
+      process.env.PAYMENT_CANCEL_URL,
+    ) ||
+    new URL(
+      "/payment/cancelled",
+      applicationBaseUrl,
+    ).toString();
+
+  try {
+    new URL(successUrl);
+    new URL(cancelUrl);
+  } catch {
+    throw new PaymentError({
+      code: "PAYMENT_CONFIGURATION_ERROR",
+      message:
+        "Les URL de retour du paiement sont invalides.",
+      status: 500,
+    });
+  }
+
+  return Object.freeze({
+    successUrl,
+    cancelUrl,
+    reservationMinutes:
+      readReservationMinutes(),
+  });
+}
+
+function resolvePaymentMethod(
+  requestedMethod:
+    | PaymentMethod
+    | undefined,
+  provider: PaymentProviderName,
+): PaymentMethod {
+  if (requestedMethod) {
+    return requestedMethod;
+  }
+
+  return provider === "MONEROO"
+    ? "MONEROO_CHECKOUT"
+    : "FEDAPAY_CHECKOUT";
 }
 
 function getPaymentIdempotencyKey({
   input,
   orderId,
+  provider,
 }: {
-  input:
-    CreatePaymentInput;
-  orderId:
-    string;
+  input: CreatePaymentInput;
+  orderId: string;
+  provider: PaymentProviderName;
 }): string {
   return (
-    normalizeText(
-      input.idempotencyKey,
-    ) ||
-    `fedapay_order_${orderId}`
+    normalizeText(input.idempotencyKey) ||
+    `payment_${provider.toLowerCase()}_order_${orderId}`
   );
 }
 
@@ -366,23 +415,16 @@ function buildReturnUrl({
   paymentId,
   orderId,
 }: {
-  baseUrl:
-    string;
-  paymentId:
-    string;
-  orderId:
-    string;
+  baseUrl: string;
+  paymentId: string;
+  orderId: string;
 }): string {
-  const url =
-    new URL(
-      baseUrl,
-    );
+  const url = new URL(baseUrl);
 
   url.searchParams.set(
     "paymentId",
     paymentId,
   );
-
   url.searchParams.set(
     "orderId",
     orderId,
@@ -395,78 +437,51 @@ function buildProviderMetadata({
   paymentId,
   orderId,
   orderReference,
+  eventId,
   currency,
   paymentMethod,
+  provider,
 }: {
-  paymentId:
-    string;
-  orderId:
-    string;
-  orderReference:
-    string;
-  currency:
-    string;
-  paymentMethod:
-    string;
-}): Record<
-  string,
-  unknown
-> {
+  paymentId: string;
+  orderId: string;
+  orderReference: string;
+  eventId: string;
+  currency: string;
+  paymentMethod: PaymentMethod;
+  provider: PaymentProviderName;
+}): PaymentMetadata {
   return {
-    source:
-      "TIKEMIA",
-
+    source: "TIKEMIA",
     paymentId,
-
     orderId,
-
     orderReference,
-
+    eventId,
     currency,
-
     requestedPaymentMethod:
       paymentMethod,
+    selectedProvider: provider,
   };
 }
 
 function decimalToProviderAmount(
-  amount:
-    Prisma.Decimal,
-  currency:
-    string,
+  amount: Prisma.Decimal,
+  currency: string,
 ): number {
   const normalizedCurrency =
-    currency
-      .trim()
-      .toUpperCase();
-
-  const decimalPlaces =
-    amount.decimalPlaces();
+    currency.trim().toUpperCase();
 
   if (
-    normalizedCurrency ===
-      "XOF" &&
-    decimalPlaces >
-      0
+    normalizedCurrency === "XOF" &&
+    amount.decimalPlaces() > 0
   ) {
     throw new PaymentValidationError({
-      code:
-        "PAYMENT_AMOUNT_MISMATCH",
-
+      code: "PAYMENT_AMOUNT_MISMATCH",
       message:
         "Le montant XOF de la commande doit être un nombre entier.",
-
-      status:
-        409,
-
+      status: 409,
       details: {
-        amount:
-          amount.toFixed(
-            2,
-          ),
-
-        currency:
-          normalizedCurrency,
+        amount: amount.toFixed(2),
+        currency: normalizedCurrency,
       },
     });
   }
@@ -478,27 +493,16 @@ function decimalToProviderAmount(
     !Number.isSafeInteger(
       numericAmount,
     ) ||
-    numericAmount <=
-      0
+    numericAmount <= 0
   ) {
     throw new PaymentValidationError({
-      code:
-        "PAYMENT_AMOUNT_MISMATCH",
-
+      code: "PAYMENT_AMOUNT_MISMATCH",
       message:
         "Le montant de la commande ne peut pas être envoyé au prestataire.",
-
-      status:
-        409,
-
+      status: 409,
       details: {
-        amount:
-          amount.toFixed(
-            2,
-          ),
-
-        currency:
-          normalizedCurrency,
+        amount: amount.toFixed(2),
+        currency: normalizedCurrency,
       },
     });
   }
@@ -516,54 +520,35 @@ function assertOrderCanBePaid({
     reservationExpiresAt: Date | null;
     total: Prisma.Decimal;
   };
-  now:
-    Date;
+  now: Date;
 }): void {
-  if (
-    order.status ===
-      "PAID"
-  ) {
+  if (order.status === "PAID") {
     throw new PaymentValidationError({
       code:
         "PAYMENT_ORDER_ALREADY_PAID",
-
       message:
         "Cette commande est déjà payée.",
-
-      status:
-        409,
-
-      orderId:
-        order.id,
+      status: 409,
+      orderId: order.id,
     });
   }
 
   if (
-    order.status ===
-      "CANCELLED" ||
-    order.status ===
-      "EXPIRED" ||
-    order.status ===
-      "REFUNDED" ||
+    order.status === "CANCELLED" ||
+    order.status === "EXPIRED" ||
+    order.status === "REFUNDED" ||
     order.status ===
       "PARTIALLY_REFUNDED"
   ) {
     throw new PaymentValidationError({
       code:
         "PAYMENT_ORDER_NOT_PAYABLE",
-
       message:
         "Cette commande ne peut plus être payée.",
-
-      status:
-        409,
-
-      orderId:
-        order.id,
-
+      status: 409,
+      orderId: order.id,
       details: {
-        orderStatus:
-          order.status,
+        orderStatus: order.status,
       },
     });
   }
@@ -576,35 +561,21 @@ function assertOrderCanBePaid({
     throw new PaymentValidationError({
       code:
         "PAYMENT_RESERVATION_EXPIRED",
-
       message:
         "La réservation des billets a expiré. Recommencez la commande.",
-
-      status:
-        409,
-
-      orderId:
-        order.id,
+      status: 409,
+      orderId: order.id,
     });
   }
 
-  if (
-    order.total.lte(
-      0,
-    )
-  ) {
+  if (order.total.lte(0)) {
     throw new PaymentValidationError({
       code:
         "PAYMENT_AMOUNT_MISMATCH",
-
       message:
         "Le montant de cette commande est invalide.",
-
-      status:
-        409,
-
-      orderId:
-        order.id,
+      status: 409,
+      orderId: order.id,
     });
   }
 }
@@ -621,80 +592,53 @@ function assertRequesterCanPayOrder({
   };
   customer:
     AuthenticatedCustomer | null;
-  checkoutToken:
-    string | undefined;
+  checkoutToken: string | undefined;
 }): void {
-  if (
-    customer
-  ) {
+  if (customer) {
     if (
-      order.customerId !==
-      customer.id
+      order.customerId !== customer.id
     ) {
       throw new PaymentValidationError({
         code:
           "PAYMENT_ORDER_OWNERSHIP_MISMATCH",
-
         message:
           "Cette commande n’appartient pas à votre compte.",
-
-        status:
-          403,
-
-        orderId:
-          order.id,
+        status: 403,
+        orderId: order.id,
       });
     }
 
     return;
   }
 
-  if (
-    order.customerId
-  ) {
+  if (order.customerId) {
     throw new PaymentValidationError({
-      code:
-        "PAYMENT_UNAUTHORIZED",
-
+      code: "PAYMENT_UNAUTHORIZED",
       message:
         "Connectez-vous pour payer cette commande.",
-
-      status:
-        401,
-
-      orderId:
-        order.id,
+      status: 401,
+      orderId: order.id,
     });
   }
 
   const normalizedCheckoutToken =
-    normalizeText(
-      checkoutToken,
-    );
+    normalizeText(checkoutToken);
 
   if (
     !normalizedCheckoutToken ||
     !order.checkoutTokenHash
   ) {
     throw new PaymentValidationError({
-      code:
-        "PAYMENT_UNAUTHORIZED",
-
+      code: "PAYMENT_UNAUTHORIZED",
       message:
         "Le jeton sécurisé de la commande est obligatoire.",
-
-      status:
-        401,
-
-      orderId:
-        order.id,
+      status: 401,
+      orderId: order.id,
     });
   }
 
   const suppliedTokenHash =
-    hashToken(
-      normalizedCheckoutToken,
-    );
+    hashToken(normalizedCheckoutToken);
 
   if (
     !secureHashEquals(
@@ -703,17 +647,11 @@ function assertRequesterCanPayOrder({
     )
   ) {
     throw new PaymentValidationError({
-      code:
-        "PAYMENT_FORBIDDEN",
-
+      code: "PAYMENT_FORBIDDEN",
       message:
         "Le jeton sécurisé de cette commande est invalide.",
-
-      status:
-        403,
-
-      orderId:
-        order.id,
+      status: 403,
+      orderId: order.id,
     });
   }
 }
@@ -724,25 +662,18 @@ async function markPaymentAttemptFailed({
   orderId,
   error,
 }: {
-  paymentId:
-    string;
-  attemptId:
-    string;
-  orderId:
-    string;
-  error:
-    PaymentError;
+  paymentId: string;
+  attemptId: string;
+  orderId: string;
+  error: PaymentError;
 }): Promise<void> {
-  const now =
-    new Date();
+  const now = new Date();
 
   await prisma
     .$transaction([
       prisma.payment.updateMany({
         where: {
-          id:
-            paymentId,
-
+          id: paymentId,
           status: {
             in: [
               PaymentStatus.PENDING,
@@ -750,29 +681,20 @@ async function markPaymentAttemptFailed({
             ],
           },
         },
-
         data: {
-          status:
-            PaymentStatus.FAILED,
-
-          failureCode:
-            error.code,
-
+          status: PaymentStatus.FAILED,
+          failureCode: error.code,
           failureReason:
             error.exposeMessage
               ? error.message
               : "Le prestataire de paiement n’a pas pu préparer la transaction.",
-
-          failedAt:
-            now,
+          failedAt: now,
         },
       }),
 
       prisma.paymentAttempt.updateMany({
         where: {
-          id:
-            attemptId,
-
+          id: attemptId,
           status: {
             in: [
               PaymentStatus.PENDING,
@@ -780,86 +702,57 @@ async function markPaymentAttemptFailed({
             ],
           },
         },
-
         data: {
-          status:
-            PaymentStatus.FAILED,
-
-          failureCode:
-            error.code,
-
+          status: PaymentStatus.FAILED,
+          failureCode: error.code,
           failureReason:
             error.exposeMessage
               ? error.message
               : "La tentative de paiement n’a pas pu être préparée.",
-
-          failedAt:
-            now,
+          failedAt: now,
         },
       }),
 
       prisma.order.updateMany({
         where: {
-          id:
-            orderId,
-
-          status:
-            "PROCESSING",
+          id: orderId,
+          status: "PROCESSING",
         },
-
         data: {
-          status:
-            "PENDING",
+          status: "PENDING",
         },
       }),
     ])
-    .catch(
-      (
-        persistenceError,
-      ) => {
-        console.error(
-          "[CLIENT_PAYMENT_FAILURE_PERSIST_ERROR]",
-          getPaymentErrorLogContext(
-            persistenceError,
-          ),
-        );
-      },
-    );
+    .catch((persistenceError) => {
+      console.error(
+        "[CLIENT_PAYMENT_FAILURE_PERSIST_ERROR]",
+        getPaymentErrorLogContext(
+          persistenceError,
+        ),
+      );
+    });
 }
 
-export async function POST(
-  request:
-    Request,
-) {
-  let paymentId:
-    string | null =
-    null;
+export async function POST(request: Request) {
+  let paymentId: string | null = null;
+  let attemptId: string | null = null;
+  let orderId: string | null = null;
 
-  let attemptId:
-    string | null =
-    null;
-
-  let orderId:
-    string | null =
-    null;
+  const selectedProvider =
+    getDefaultPaymentProviderName();
 
   try {
-    let rawBody:
-      unknown;
+    let rawBody: unknown;
 
     try {
-      rawBody =
-        await request.json();
+      rawBody = await request.json();
     } catch {
       return jsonResponse(
         {
-          success:
-            false,
-
+          success: false,
           error: {
             code:
               "PAYMENT_INVALID_REQUEST",
-
             message:
               "La requête envoyée est invalide.",
           },
@@ -873,190 +766,107 @@ export async function POST(
         rawBody,
       );
 
-    if (
-      !parsedBody.success
-    ) {
+    if (!parsedBody.success) {
       return jsonResponse(
         {
-          success:
-            false,
-
+          success: false,
           error: {
             code:
               "PAYMENT_INVALID_REQUEST",
-
             message:
               parsedBody.error
-                .issues[0]
-                ?.message ??
+                .issues[0]?.message ??
               "Les informations du paiement sont invalides.",
-
             field:
               parsedBody.error
-                .issues[0]
-                ?.path
-                .join(
+                .issues[0]?.path.join(
                   ".",
-                ) ??
-              null,
+                ) ?? null,
           },
         },
         400,
       );
     }
 
-    const input =
-      parsedBody.data;
+    const input = parsedBody.data;
+    orderId = input.orderId;
 
-    orderId =
-      input.orderId;
-
-    const [
-      customer,
-      config,
-    ] =
+    const [customer, config] =
       await Promise.all([
         getAuthenticatedCustomer(),
-
         Promise.resolve(
-          getFedaPayConfig(),
+          getPaymentRuntimeConfig(),
         ),
       ]);
 
-    const now =
-      new Date();
+    const now = new Date();
 
     const order =
       await prisma.order.findUnique({
         where: {
-          id:
-            input.orderId,
+          id: input.orderId,
         },
-
         select: {
-          id:
-            true,
-
-          reference:
-            true,
-
-          customerId:
-            true,
-
-          customerName:
-            true,
-
-          customerEmail:
-            true,
-
-          customerPhone:
-            true,
-
-          checkoutTokenHash:
-            true,
-
-          currency:
-            true,
-
-          total:
-            true,
-
-          status:
-            true,
-
-          reservationExpiresAt:
-            true,
-
+          id: true,
+          reference: true,
+          customerId: true,
+          customerName: true,
+          customerEmail: true,
+          customerPhone: true,
+          checkoutTokenHash: true,
+          currency: true,
+          total: true,
+          status: true,
+          reservationExpiresAt: true,
           event: {
             select: {
-              id:
-                true,
-
-              title:
-                true,
-
-              countryCode:
-                true,
+              id: true,
+              title: true,
+              countryCode: true,
             },
           },
-
           payment: {
             select: {
-              id:
-                true,
-
-              provider:
-                true,
-
+              id: true,
+              provider: true,
               providerTransactionId:
                 true,
-
-              providerReference:
-                true,
-
-              method:
-                true,
-
-              status:
-                true,
-
-              amount:
-                true,
-
-              currency:
-                true,
-
-              checkoutUrl:
-                true,
-
-              expiresAt:
-                true,
-
-              idempotencyKey:
-                true,
+              providerReference: true,
+              method: true,
+              status: true,
+              amount: true,
+              currency: true,
+              checkoutUrl: true,
+              expiresAt: true,
+              idempotencyKey: true,
             },
           },
-
           reservations: {
             where: {
-              status:
-                "PENDING",
+              status: "PENDING",
             },
-
             select: {
-              id:
-                true,
-
-              expiresAt:
-                true,
+              id: true,
+              expiresAt: true,
             },
           },
         },
       });
 
-    if (
-      !order
-    ) {
+    if (!order) {
       throw new PaymentValidationError({
         code:
           "PAYMENT_ORDER_NOT_FOUND",
-
         message:
           "La commande est introuvable.",
-
-        status:
-          404,
-
-        orderId:
-          input.orderId,
+        status: 404,
+        orderId: input.orderId,
       });
     }
 
     assertRequesterCanPayOrder({
       order,
-
       customer,
-
       checkoutToken:
         input.checkoutToken,
     });
@@ -1067,29 +877,21 @@ export async function POST(
     });
 
     if (
-      order.reservations.length ===
-      0
+      order.reservations.length === 0
     ) {
       throw new PaymentValidationError({
         code:
           "PAYMENT_RESERVATION_NOT_FOUND",
-
         message:
           "Aucune réservation active n’est associée à cette commande.",
-
-        status:
-          409,
-
-        orderId:
-          order.id,
+        status: 409,
+        orderId: order.id,
       });
     }
 
     if (
       order.reservations.some(
-        (
-          reservation,
-        ) =>
+        (reservation) =>
           reservation.expiresAt.getTime() <=
           now.getTime(),
       )
@@ -1097,42 +899,27 @@ export async function POST(
       throw new PaymentValidationError({
         code:
           "PAYMENT_RESERVATION_EXPIRED",
-
         message:
           "La réservation des billets a expiré. Recommencez la commande.",
-
-        status:
-          409,
-
-        orderId:
-          order.id,
+        status: 409,
+        orderId: order.id,
       });
     }
 
     if (
       order.payment?.status ===
-        PaymentStatus.SUCCESS
+      PaymentStatus.SUCCESS
     ) {
       return jsonResponse({
-        success:
-          true,
-
+        success: true,
         code:
           "PAYMENT_ALREADY_SUCCESSFUL",
-
         message:
           "Cette commande est déjà payée.",
-
         payment: {
-          id:
-            order.payment.id,
-
-          status:
-            order.payment.status,
-
-          orderId:
-            order.id,
-
+          id: order.payment.id,
+          status: order.payment.status,
+          orderId: order.id,
           orderReference:
             order.reference,
         },
@@ -1141,6 +928,8 @@ export async function POST(
 
     if (
       order.payment &&
+      order.payment.provider ===
+        selectedProvider &&
       (
         order.payment.status ===
           PaymentStatus.PENDING ||
@@ -1155,50 +944,42 @@ export async function POST(
       )
     ) {
       return jsonResponse({
-        success:
-          true,
-
+        success: true,
         code:
           "PAYMENT_ALREADY_PREPARED",
-
         message:
           "Le paiement est déjà prêt.",
-
         payment: {
-          id:
-            order.payment.id,
-
+          id: order.payment.id,
           status:
             order.payment.status,
-
           provider:
             order.payment.provider,
-
           method:
             order.payment.method,
-
           checkoutUrl:
             order.payment.checkoutUrl,
-
           expiresAt:
             order.payment.expiresAt
-              ?.toISOString() ??
-            null,
-
-          orderId:
-            order.id,
-
+              ?.toISOString() ?? null,
+          orderId: order.id,
           orderReference:
             order.reference,
         },
       });
     }
 
+    const paymentMethod =
+      resolvePaymentMethod(
+        input.paymentMethod,
+        selectedProvider,
+      );
+
     const paymentIdempotencyKey =
       getPaymentIdempotencyKey({
         input,
-        orderId:
-          order.id,
+        orderId: order.id,
+        provider: selectedProvider,
       });
 
     const providerAmount =
@@ -1217,311 +998,191 @@ export async function POST(
 
     const prepared =
       await prisma.$transaction(
-        async (
-          transaction,
-        ) => {
+        async (transaction) => {
           const payment =
             order.payment
-              ? await transaction
-                  .payment
-                  .update({
-                    where: {
-                      id:
-                        order.payment.id,
-                    },
-
-                    data: {
-                      provider:
-                        PAYMENT_PROVIDER,
-
-                      method:
-                        input.paymentMethod,
-
-                      amount:
-                        order.total,
-
-                      currency:
-                        order.currency,
-
-                      status:
-                        PaymentStatus.PROCESSING,
-
-                      checkoutUrl:
-                        null,
-
-                      returnUrl:
-                        null,
-
-                      cancelUrl:
-                        null,
-
-                      idempotencyKey:
-                        paymentIdempotencyKey,
-
-                      failureCode:
-                        null,
-
-                      failureReason:
-                        null,
-
-                      initiatedAt:
-                        now,
-
-                      processingAt:
-                        now,
-
-                      expiresAt:
-                        paymentExpiresAt,
-
-                      failedAt:
-                        null,
-
-                      cancelledAt:
-                        null,
-                    },
-
-                    select: {
-                      id:
-                        true,
-                    },
-                  })
-              : await transaction
-                  .payment
-                  .create({
-                    data: {
-                      orderId:
-                        order.id,
-
-                      provider:
-                        PAYMENT_PROVIDER,
-
-                      method:
-                        input.paymentMethod,
-
-                      amount:
-                        order.total,
-
-                      currency:
-                        order.currency,
-
-                      status:
-                        PaymentStatus.PROCESSING,
-
-                      idempotencyKey:
-                        paymentIdempotencyKey,
-
-                      customerEmail:
-                        order.customerEmail,
-
-                      customerPhone:
-                        order.customerPhone,
-
-                      initiatedAt:
-                        now,
-
-                      processingAt:
-                        now,
-
-                      expiresAt:
-                        paymentExpiresAt,
-
-                      metadata: {
+              ? await transaction.payment.update({
+                  where: {
+                    id: order.payment.id,
+                  },
+                  data: {
+                    provider:
+                      selectedProvider,
+                    method:
+                      paymentMethod,
+                    amount: order.total,
+                    currency:
+                      order.currency,
+                    status:
+                      PaymentStatus.PROCESSING,
+                    checkoutUrl: null,
+                    returnUrl: null,
+                    cancelUrl: null,
+                    idempotencyKey:
+                      paymentIdempotencyKey,
+                    failureCode: null,
+                    failureReason: null,
+                    initiatedAt: now,
+                    processingAt: now,
+                    expiresAt:
+                      paymentExpiresAt,
+                    failedAt: null,
+                    cancelledAt: null,
+                    customerEmail:
+                      order.customerEmail,
+                    customerPhone:
+                      order.customerPhone,
+                  },
+                  select: {
+                    id: true,
+                  },
+                })
+              : await transaction.payment.create({
+                  data: {
+                    orderId: order.id,
+                    provider:
+                      selectedProvider,
+                    method:
+                      paymentMethod,
+                    amount: order.total,
+                    currency:
+                      order.currency,
+                    status:
+                      PaymentStatus.PROCESSING,
+                    idempotencyKey:
+                      paymentIdempotencyKey,
+                    customerEmail:
+                      order.customerEmail,
+                    customerPhone:
+                      order.customerPhone,
+                    initiatedAt: now,
+                    processingAt: now,
+                    expiresAt:
+                      paymentExpiresAt,
+                    metadata:
+                      toJsonValue({
                         orderReference:
                           order.reference,
-
                         eventId:
                           order.event.id,
-
                         requestedPaymentMethod:
-                          input.paymentMethod,
-                      },
-                    },
-
-                    select: {
-                      id:
-                        true,
-                    },
-                  });
+                          paymentMethod,
+                        selectedProvider,
+                      }),
+                  },
+                  select: {
+                    id: true,
+                  },
+                });
 
           const existingAttempt =
-            await transaction
-              .paymentAttempt
+            await transaction.paymentAttempt
               .findUnique({
                 where: {
                   idempotencyKey:
                     paymentIdempotencyKey,
                 },
-
                 select: {
-                  id:
-                    true,
+                  id: true,
                 },
               });
+
+          const requestPayload =
+            toJsonValue({
+              orderId: order.id,
+              orderReference:
+                order.reference,
+              provider:
+                selectedProvider,
+              requestedPaymentMethod:
+                paymentMethod,
+              amount:
+                order.total.toFixed(2),
+              currency:
+                order.currency,
+            });
 
           const attempt =
             existingAttempt
               ? await transaction
-                  .paymentAttempt
-                  .update({
+                  .paymentAttempt.update({
                     where: {
                       id:
                         existingAttempt.id,
                     },
-
                     data: {
                       paymentId:
                         payment.id,
-
                       provider:
-                        PAYMENT_PROVIDER,
-
+                        selectedProvider,
                       method:
-                        input.paymentMethod,
-
+                        paymentMethod,
                       amount:
                         order.total,
-
                       currency:
                         order.currency,
-
                       status:
                         PaymentStatus.PROCESSING,
-
-                      checkoutUrl:
-                        null,
-
+                      checkoutUrl: null,
                       providerReference:
                         null,
-
                       providerTransactionId:
                         null,
-
-                      failureCode:
-                        null,
-
-                      failureReason:
-                        null,
-
-                      initiatedAt:
-                        now,
-
-                      processingAt:
-                        now,
-
+                      failureCode: null,
+                      failureReason: null,
+                      initiatedAt: now,
+                      processingAt: now,
                       expiresAt:
                         paymentExpiresAt,
-
-                      failedAt:
-                        null,
-
-                      cancelledAt:
-                        null,
-
-                      requestPayload: {
-                        orderId:
-                          order.id,
-
-                        orderReference:
-                          order.reference,
-
-                        requestedPaymentMethod:
-                          input.paymentMethod,
-
-                        amount:
-                          order.total.toFixed(
-                            2,
-                          ),
-
-                        currency:
-                          order.currency,
-                      },
+                      failedAt: null,
+                      cancelledAt: null,
+                      requestPayload,
                     },
-
                     select: {
-                      id:
-                        true,
+                      id: true,
                     },
                   })
               : await transaction
-                  .paymentAttempt
-                  .create({
+                  .paymentAttempt.create({
                     data: {
                       paymentId:
                         payment.id,
-
                       provider:
-                        PAYMENT_PROVIDER,
-
+                        selectedProvider,
                       method:
-                        input.paymentMethod,
-
+                        paymentMethod,
                       amount:
                         order.total,
-
                       currency:
                         order.currency,
-
                       status:
                         PaymentStatus.PROCESSING,
-
                       idempotencyKey:
                         paymentIdempotencyKey,
-
-                      initiatedAt:
-                        now,
-
-                      processingAt:
-                        now,
-
+                      initiatedAt: now,
+                      processingAt: now,
                       expiresAt:
                         paymentExpiresAt,
-
-                      requestPayload: {
-                        orderId:
-                          order.id,
-
-                        orderReference:
-                          order.reference,
-
-                        requestedPaymentMethod:
-                          input.paymentMethod,
-
-                        amount:
-                          order.total.toFixed(
-                            2,
-                          ),
-
-                        currency:
-                          order.currency,
-                      },
+                      requestPayload,
                     },
-
                     select: {
-                      id:
-                        true,
+                      id: true,
                     },
                   });
 
-          await transaction
-            .order
-            .update({
-              where: {
-                id:
-                  order.id,
-              },
-
-              data: {
-                status:
-                  "PROCESSING",
-              },
-            });
+          await transaction.order.update({
+            where: {
+              id: order.id,
+            },
+            data: {
+              status: "PROCESSING",
+              checkoutStartedAt: now,
+            },
+          });
 
           return {
-            paymentId:
-              payment.id,
-
-            attemptId:
-              attempt.id,
+            paymentId: payment.id,
+            attemptId: attempt.id,
           };
         },
         {
@@ -1529,52 +1190,31 @@ export async function POST(
             Prisma
               .TransactionIsolationLevel
               .Serializable,
-
-          maxWait:
-            10_000,
-
-          timeout:
-            20_000,
+          maxWait: 10_000,
+          timeout: 20_000,
         },
       );
 
-    paymentId =
-      prepared.paymentId;
+    paymentId = prepared.paymentId;
+    attemptId = prepared.attemptId;
 
-    attemptId =
-      prepared.attemptId;
+    const returnUrl = buildReturnUrl({
+      baseUrl: config.successUrl,
+      paymentId,
+      orderId: order.id,
+    });
 
-    const returnUrl =
-      buildReturnUrl({
-        baseUrl:
-          config.successUrl,
-
-        paymentId,
-
-        orderId:
-          order.id,
-      });
-
-    const cancelUrl =
-      buildReturnUrl({
-        baseUrl:
-          config.cancelUrl,
-
-        paymentId,
-
-        orderId:
-          order.id,
-      });
+    const cancelUrl = buildReturnUrl({
+      baseUrl: config.cancelUrl,
+      paymentId,
+      orderId: order.id,
+    });
 
     const customerNameParts =
       order.customerName
         .trim()
-        .split(
-          /\s+/,
-        )
-        .filter(
-          Boolean,
-        );
+        .split(/\s+/)
+        .filter(Boolean);
 
     const firstName =
       customerNameParts[0] ??
@@ -1582,288 +1222,162 @@ export async function POST(
 
     const lastName =
       customerNameParts
-        .slice(
-          1,
-        )
-        .join(
-          " ",
-        ) ||
-      "Tikemia";
+        .slice(1)
+        .join(" ") || "Tikemia";
+
+    const providerMetadata =
+      buildProviderMetadata({
+        paymentId,
+        orderId: order.id,
+        orderReference:
+          order.reference,
+        eventId: order.event.id,
+        currency: order.currency,
+        paymentMethod,
+        provider: selectedProvider,
+      });
 
     const hostedCheckout =
-      await createFedaPayHostedCheckout({
-        transaction: {
-          amount:
-            providerAmount,
-
-          currency:
-            order.currency,
-
-          description:
-            `Commande Tikemia ${order.reference} — ${order.event.title}`,
-
-          callbackUrl:
-            returnUrl,
-
-          customer: {
-            email:
-              order.customerEmail,
-
-            firstname:
-              firstName,
-
-            lastname:
-              lastName,
-
-            ...(order.customerPhone
-              ? {
-                  phoneNumber: {
-                    number:
-                      order.customerPhone,
-
-                    country:
-                      normalizeText(
-                        order.event.countryCode,
-                      ).toUpperCase() ||
-                      "BJ",
-                  },
-                }
-              : {}),
-
-          },
-
-          metadata:
-            buildProviderMetadata({
-              paymentId,
-
-              orderId:
-                order.id,
-
-              orderReference:
-                order.reference,
-
-              currency:
-                order.currency,
-
-              paymentMethod:
-                input.paymentMethod,
-            }),
+      await createPayment({
+        provider: selectedProvider,
+        amount: providerAmount,
+        currency: order.currency,
+        description:
+          `Commande Tikemia ${order.reference} — ${order.event.title}`,
+        returnUrl,
+        customer: {
+          email:
+            order.customerEmail,
+          firstName,
+          lastName,
+          phone:
+            order.customerPhone,
+          countryCode:
+            order.event.countryCode,
         },
-
+        metadata:
+          providerMetadata,
         idempotencyKey:
           paymentIdempotencyKey,
+        signal: request.signal,
       });
 
     const providerTransactionId =
-      String(
-        hostedCheckout
-          .transaction
-          .id,
-      );
-
+      hostedCheckout.providerTransactionId;
     const providerReference =
-      hostedCheckout
-        .transaction
-        .reference;
-
+      hostedCheckout.providerReference;
     const checkoutUrl =
-      hostedCheckout
-        .paymentLink
-        .url;
+      hostedCheckout.checkoutUrl;
 
     await prisma.$transaction(
-      async (
-        transaction,
-      ) => {
-        await transaction
-          .payment
-          .update({
-            where: {
-              id:
-                paymentId!,
-            },
+      async (transaction) => {
+        await transaction.payment.update({
+          where: {
+            id: paymentId!,
+          },
+          data: {
+            provider:
+              hostedCheckout.provider,
+            providerTransactionId,
+            providerReference,
+            checkoutUrl,
+            returnUrl,
+            cancelUrl,
+            status:
+              hostedCheckout.status,
+            failureCode: null,
+            failureReason: null,
+            metadata: toJsonValue({
+              ...providerMetadata,
+              providerRawStatus:
+                hostedCheckout.rawStatus,
+            }),
+          },
+        });
 
+        await transaction
+          .paymentAttempt.update({
+            where: {
+              id: attemptId!,
+            },
             data: {
+              provider:
+                hostedCheckout.provider,
               providerTransactionId,
-
               providerReference,
-
               checkoutUrl,
-
-              returnUrl,
-
-              cancelUrl,
-
               status:
-                PaymentStatus.PENDING,
-
-              metadata: {
-                orderReference:
-                  order.reference,
-
-                eventId:
-                  order.event.id,
-
-                requestedPaymentMethod:
-                  input.paymentMethod,
-
-                fedapayTransactionId:
-                  hostedCheckout
-                    .transaction
-                    .id,
-
-                fedapayToken:
-                  hostedCheckout
-                    .paymentLink
-                    .token,
-              },
+                hostedCheckout.status,
+              failureCode: null,
+              failureReason: null,
+              responsePayload:
+                toJsonValue(
+                  hostedCheckout.raw,
+                ),
             },
           });
 
-        await transaction
-          .paymentAttempt
-          .update({
-            where: {
-              id:
-                attemptId!,
-            },
-
-            data: {
-              providerTransactionId,
-
-              providerReference,
-
-              checkoutUrl,
-
-              status:
-                PaymentStatus.PENDING,
-
-              responsePayload: {
-                transactionId:
-                  hostedCheckout
-                    .transaction
-                    .id,
-
-                transactionReference:
-                  providerReference,
-
-                transactionStatus:
-                  hostedCheckout
-                    .transaction
-                    .rawStatus,
-
-                checkoutUrl,
-
-                token:
-                  hostedCheckout
-                    .paymentLink
-                    .token,
-              },
-            },
-          });
-
-        await transaction
-          .order
-          .update({
-            where: {
-              id:
-                order.id,
-            },
-
-            data: {
-              status:
-                "PENDING",
-            },
-          });
+        await transaction.order.update({
+          where: {
+            id: order.id,
+          },
+          data: {
+            status: "PENDING",
+          },
+        });
       },
       {
         isolationLevel:
           Prisma
             .TransactionIsolationLevel
             .Serializable,
-
-        maxWait:
-          10_000,
-
-        timeout:
-          20_000,
+        maxWait: 10_000,
+        timeout: 20_000,
       },
     );
 
     return jsonResponse(
       {
-        success:
-          true,
-
+        success: true,
         message:
           "Le paiement sécurisé a été préparé.",
-
         payment: {
-          id:
-            paymentId,
-
-          orderId:
-            order.id,
-
+          id: paymentId,
+          orderId: order.id,
           orderReference:
             order.reference,
-
           provider:
-            PAYMENT_PROVIDER,
-
-          method:
-            input.paymentMethod,
-
+            hostedCheckout.provider,
+          method: paymentMethod,
           status:
-            PaymentStatus.PENDING,
-
+            hostedCheckout.status,
           amount:
-            order.total.toFixed(
-              2,
-            ),
-
+            order.total.toFixed(2),
           currency:
             order.currency,
-
           checkoutUrl,
-
           returnUrl,
-
           cancelUrl,
-
           expiresAt:
             paymentExpiresAt.toISOString(),
         },
       },
       201,
     );
-  } catch (
-    error
-  ) {
+  } catch (error) {
     const paymentError =
-      getPaymentError(
-        error,
-        {
-          code:
-            "PAYMENT_INTERNAL_ERROR",
-
-          message:
-            "Impossible de préparer le paiement pour le moment.",
-
-          status:
-            500,
-
-          exposeMessage:
-            false,
-
-          provider:
-            PAYMENT_PROVIDER,
-
-          paymentId,
-
-          orderId,
-        },
-      );
+      getPaymentError(error, {
+        code:
+          "PAYMENT_INTERNAL_ERROR",
+        message:
+          "Impossible de préparer le paiement pour le moment.",
+        status: 500,
+        exposeMessage: false,
+        provider:
+          selectedProvider,
+        paymentId,
+        orderId,
+      });
 
     console.error(
       "[CLIENT_PAYMENT_CREATE_ERROR]",
@@ -1881,8 +1395,7 @@ export async function POST(
         paymentId,
         attemptId,
         orderId,
-        error:
-          paymentError,
+        error: paymentError,
       });
     }
 

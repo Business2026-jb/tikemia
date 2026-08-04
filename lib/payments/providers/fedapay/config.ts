@@ -31,6 +31,12 @@ const SANDBOX_API_BASE_URL =
 const LIVE_API_BASE_URL =
   "https://api.fedapay.com/v1";
 
+const ALLOWED_API_HOSTS =
+  new Set([
+    "sandbox-api.fedapay.com",
+    "api.fedapay.com",
+  ]);
+
 const DEFAULT_WEBHOOK_SIGNATURE_HEADER =
   "x-fedapay-signature";
 
@@ -109,6 +115,48 @@ function readRequiredEnvironmentVariable(
   }
 
   return value;
+}
+
+function readFirstAvailableEnvironmentVariable({
+  names,
+  required = false,
+}: {
+  names:
+    readonly string[];
+  required?:
+    boolean;
+}): string | null {
+  for (
+    const name of
+    names
+  ) {
+    const value =
+      normalizeText(
+        process.env[
+          name
+        ],
+      );
+
+    if (
+      value
+    ) {
+      return value;
+    }
+  }
+
+  if (
+    required
+  ) {
+    throw new FedaPayConfigurationError({
+      code:
+        "FEDAPAY_ENVIRONMENT_VARIABLE_MISSING",
+
+      message:
+        `Une des variables suivantes est obligatoire : ${names.join(", ")}.`,
+    });
+  }
+
+  return null;
 }
 
 function readOptionalEnvironmentVariable(
@@ -400,32 +448,92 @@ function validatePublicKey({
 
 function validateWebhookSecret({
   webhookSecret,
-  environment,
 }: {
   webhookSecret:
     string;
-  environment:
-    FedaPayEnvironment;
 }): void {
-  const expectedPrefix =
+  if (
+    webhookSecret.length <
+    16
+  ) {
+    throw new FedaPayConfigurationError({
+      code:
+        "FEDAPAY_WEBHOOK_SECRET_INVALID",
+
+      message:
+        "FEDAPAY_WEBHOOK_SECRET doit contenir au moins 16 caractères.",
+    });
+  }
+}
+
+function resolveApiBaseUrl(
+  environment:
+    FedaPayEnvironment,
+): string {
+  const configuredUrl =
+    readOptionalEnvironmentVariable(
+      "FEDAPAY_API_BASE_URL",
+    );
+
+  const expectedUrl =
     environment ===
       "sandbox"
-      ? "wh_sandbox"
-      : "wh_live";
+      ? SANDBOX_API_BASE_URL
+      : LIVE_API_BASE_URL;
 
   if (
-    !webhookSecret.startsWith(
-      expectedPrefix,
+    !configuredUrl
+  ) {
+    return expectedUrl;
+  }
+
+  const normalizedUrl =
+    normalizeAbsoluteHttpsUrl({
+      value:
+        configuredUrl,
+
+      name:
+        "FEDAPAY_API_BASE_URL",
+    });
+
+  const parsedUrl =
+    new URL(
+      normalizedUrl,
+    );
+
+  if (
+    !ALLOWED_API_HOSTS.has(
+      parsedUrl.hostname,
     )
   ) {
     throw new FedaPayConfigurationError({
       code:
-        "FEDAPAY_WEBHOOK_SECRET_ENVIRONMENT_MISMATCH",
+        "FEDAPAY_API_BASE_URL_INVALID",
 
       message:
-        `FEDAPAY_WEBHOOK_SECRET ne correspond pas à l’environnement ${environment}. Le préfixe attendu est ${expectedPrefix}.`,
+        "FEDAPAY_API_BASE_URL doit utiliser un domaine API officiel FedaPay.",
     });
   }
+
+  const expectedHost =
+    new URL(
+      expectedUrl,
+    ).hostname;
+
+  if (
+    parsedUrl.hostname !==
+    expectedHost
+  ) {
+    throw new FedaPayConfigurationError({
+      code:
+        "FEDAPAY_API_BASE_URL_ENVIRONMENT_MISMATCH",
+
+      message:
+        `FEDAPAY_API_BASE_URL ne correspond pas à l’environnement ${environment}.`,
+    });
+  }
+
+  return normalizedUrl;
 }
 
 function resolveConfiguredUrl({
@@ -469,14 +577,23 @@ function createFedaPayConfig(): FedaPayConfig {
     );
 
   const secretKey =
-    readRequiredEnvironmentVariable(
-      "FEDAPAY_SECRET_KEY",
-    );
+    readFirstAvailableEnvironmentVariable({
+      names: [
+        "FEDAPAY_SECRET_KEY",
+        "FEDAPAY_API_KEY",
+      ],
+
+      required:
+        true,
+    }) as string;
 
   const publicKey =
-    readOptionalEnvironmentVariable(
-      "FEDAPAY_PUBLIC_KEY",
-    );
+    readFirstAvailableEnvironmentVariable({
+      names: [
+        "FEDAPAY_PUBLIC_KEY",
+        "NEXT_PUBLIC_FEDAPAY_PUBLIC_KEY",
+      ],
+    });
 
   const webhookSecret =
     readRequiredEnvironmentVariable(
@@ -495,7 +612,6 @@ function createFedaPayConfig(): FedaPayConfig {
 
   validateWebhookSecret({
     webhookSecret,
-    environment,
   });
 
   const requestTimeoutMs =
@@ -559,10 +675,9 @@ function createFedaPayConfig(): FedaPayConfig {
     environment,
 
     apiBaseUrl:
-      environment ===
-        "sandbox"
-        ? SANDBOX_API_BASE_URL
-        : LIVE_API_BASE_URL,
+      resolveApiBaseUrl(
+        environment,
+      ),
 
     secretKey,
 

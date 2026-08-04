@@ -30,6 +30,9 @@ import {
   useState,
 } from "react";
 
+import EventImagesUploader, {
+  type SelectedEventImage,
+} from "@/components/organizer/events/create/event-images-uploader";
 import type {
   CreateEventOptions,
 } from "@/lib/events/get-create-event-options";
@@ -46,10 +49,6 @@ import {
   getCurrencyDecimals,
 } from "@/lib/localization/format-money";
 
-import EventImagesUploader, {
-  type SelectedEventImage,
-} from "@/components/organizer/events/create/event-images-uploader";
-
 type CreateEventFormProps = {
   options: CreateEventOptions;
 };
@@ -61,8 +60,6 @@ type TicketTypeForm = {
   price: string;
   quantity: string;
   maxPerOrder: string;
-  saleStartsAt: string;
-  saleEndsAt: string;
   isActive: boolean;
 };
 
@@ -70,6 +67,7 @@ type FormState = {
   categoryId: string;
   title: string;
   description: string;
+
   venueName: string;
   address: string;
   city: string;
@@ -79,8 +77,6 @@ type FormState = {
 
   startsAt: string;
   endsAt: string;
-  salesStartAt: string;
-  salesEndAt: string;
 
   currency: string;
 };
@@ -91,6 +87,7 @@ type ApiResponse = {
   code?: string;
   fields?: Record<string, string[]>;
   redirectTo?: string;
+
   data?: {
     event?: {
       id: string;
@@ -110,39 +107,56 @@ const createTicketType = (
   defaultMaxPerOrder: number,
 ): TicketTypeForm => ({
   localId: crypto.randomUUID(),
-  name: index === 0 ? "Standard" : `Billet ${index + 1}`,
+
+  name:
+    index === 0
+      ? "Standard"
+      : `Billet ${index + 1}`,
+
   description: "",
   price: "",
   quantity: "",
-  maxPerOrder: String(defaultMaxPerOrder),
-  saleStartsAt: "",
-  saleEndsAt: "",
+
+  maxPerOrder:
+    String(defaultMaxPerOrder),
+
   isActive: true,
 });
 
-function toIsoDate(value: string): string | null {
+function toIsoDate(
+  value: string,
+): string | null {
   if (!value) {
     return null;
   }
 
   const date = new Date(value);
 
-  if (Number.isNaN(date.getTime())) {
+  if (
+    Number.isNaN(
+      date.getTime(),
+    )
+  ) {
     return null;
   }
 
   return date.toISOString();
 }
 
-function normalizeNumberInput(value: string): number {
+function normalizeNumberInput(
+  value: string,
+): number {
   const normalized = value
     .trim()
     .replace(/\s/g, "")
     .replace(",", ".");
 
-  const parsed = Number(normalized);
+  const parsed =
+    Number(normalized);
 
-  return Number.isFinite(parsed) ? parsed : 0;
+  return Number.isFinite(parsed)
+    ? parsed
+    : 0;
 }
 
 function hasValidCurrencyPrecision(
@@ -159,7 +173,8 @@ function hasValidCurrencyPrecision(
   }
 
   const decimalPart =
-    normalizedValue.split(".")[1] ?? "";
+    normalizedValue.split(".")[1] ??
+    "";
 
   return (
     decimalPart.length <=
@@ -170,153 +185,246 @@ function hasValidCurrencyPrecision(
 export default function CreateEventForm({
   options,
 }: CreateEventFormProps) {
-  const router = useRouter();
+  const router =
+    useRouter();
 
   const defaultCountry =
     options.countries.find(
-      (country) => country.code === "BJ",
-    ) ?? options.countries[0];
+      (country) =>
+        country.code === "BJ",
+    ) ??
+    options.countries[0];
 
-  const [form, setForm] = useState<FormState>({
-    categoryId: "",
-    title: "",
-    description: "",
-    venueName: "",
-    address: "",
-    city: "",
-    countryCode: defaultCountry?.code ?? "BJ",
-    country: defaultCountry?.name ?? "Bénin",
-    timezone:
-      defaultCountry?.timezone ??
-      "Africa/Porto-Novo",
+  const [form, setForm] =
+    useState<FormState>({
+      categoryId: "",
+      title: "",
+      description: "",
 
-    startsAt: "",
-    endsAt: "",
-    salesStartAt: "",
-    salesEndAt: "",
+      venueName: "",
+      address: "",
+      city: "",
 
-    currency:
-      defaultCountry?.currency ??
-      options.rules.defaultCurrency,
-  });
+      countryCode:
+        defaultCountry?.code ??
+        "BJ",
 
-  const [ticketTypes, setTicketTypes] = useState<
-    TicketTypeForm[]
-  >([
+      country:
+        defaultCountry?.name ??
+        "Bénin",
+
+      timezone:
+        defaultCountry?.timezone ??
+        "Africa/Porto-Novo",
+
+      startsAt: "",
+      endsAt: "",
+
+      currency:
+        defaultCountry?.currency ??
+        options.rules.defaultCurrency,
+    });
+
+  const [
+    ticketTypes,
+    setTicketTypes,
+  ] = useState<TicketTypeForm[]>([
     createTicketType(
       0,
-      options.rules.defaultMaxPerOrder,
+      options.rules
+        .defaultMaxPerOrder,
     ),
   ]);
 
-  const [selectedImages, setSelectedImages] = useState<
+  const [
+    selectedImages,
+    setSelectedImages,
+  ] = useState<
     SelectedEventImage[]
   >([]);
 
-  const [coverImageIndex, setCoverImageIndex] =
-    useState(0);
+  const [
+    coverImageIndex,
+    setCoverImageIndex,
+  ] = useState(0);
 
-  const [isUploadingImages, setIsUploadingImages] =
-    useState(false);
+  const [
+    isUploadingImages,
+    setIsUploadingImages,
+  ] = useState(false);
 
-  const [isSubmitting, setIsSubmitting] =
-    useState(false);
+  const [
+    isSubmitting,
+    setIsSubmitting,
+  ] = useState(false);
 
-  const [submitMode, setSubmitMode] = useState<
+  const [
+    submitMode,
+    setSubmitMode,
+  ] = useState<
     "DRAFT" | "SUBMIT" | null
   >(null);
 
-  const [error, setError] = useState("");
-  const [successMessage, setSuccessMessage] =
-    useState("");
+  const [
+    error,
+    setError,
+  ] = useState("");
 
-  const [fieldErrors, setFieldErrors] = useState<
+  const [
+    successMessage,
+    setSuccessMessage,
+  ] = useState("");
+
+  const [
+    fieldErrors,
+    setFieldErrors,
+  ] = useState<
     Record<string, string[]>
   >({});
 
-  const selectedCategory = options.categories.find(
-    (category) => category.id === form.categoryId,
-  );
+  const selectedCategory =
+    options.categories.find(
+      (category) =>
+        category.id ===
+        form.categoryId,
+    );
 
-  const selectedCountry = options.countries.find(
-    (country) => country.code === form.countryCode,
-  );
+  const selectedCountry =
+    options.countries.find(
+      (country) =>
+        country.code ===
+        form.countryCode,
+    );
 
-  const selectedCurrency = options.currencies.find(
-    (currency) => currency.code === form.currency,
-  );
+  const selectedCurrency =
+    options.currencies.find(
+      (currency) =>
+        currency.code ===
+        form.currency,
+    );
 
-  const projection = useMemo(() => {
-    try {
-      return calculateEventRevenueProjection(
-        ticketTypes.map((ticketType) => ({
-          id: ticketType.localId,
-          name:
-            ticketType.name.trim() ||
-            "Billet sans nom",
-          unitPrice:
-            normalizeNumberInput(ticketType.price),
-          quantity: Math.max(
-            Math.trunc(
-              normalizeNumberInput(
-                ticketType.quantity,
-              ),
-            ),
-            0,
+  const projection =
+    useMemo(() => {
+      try {
+        return calculateEventRevenueProjection(
+          ticketTypes.map(
+            (ticketType) => ({
+              id:
+                ticketType.localId,
+
+              name:
+                ticketType.name.trim() ||
+                "Billet sans nom",
+
+              unitPrice:
+                normalizeNumberInput(
+                  ticketType.price,
+                ),
+
+              quantity:
+                Math.max(
+                  Math.trunc(
+                    normalizeNumberInput(
+                      ticketType.quantity,
+                    ),
+                  ),
+                  0,
+                ),
+            }),
           ),
-        })),
-        {
-          currency: form.currency,
-          platformFeePercent:
-            options.rules.platformFeePercent,
-        },
-      );
-    } catch (projectionError) {
-      if (
-        projectionError instanceof
-        PricingValidationError
+
+          {
+            currency:
+              form.currency,
+
+            platformFeePercent:
+              options.rules
+                .platformFeePercent,
+          },
+        );
+      } catch (
+        projectionError
       ) {
+        if (
+          projectionError instanceof
+          PricingValidationError
+        ) {
+          return null;
+        }
+
         return null;
       }
+    }, [
+      form.currency,
+      options.rules
+        .platformFeePercent,
+      ticketTypes,
+    ]);
 
-      return null;
-    }
-  }, [
-    form.currency,
-    options.rules.platformFeePercent,
-    ticketTypes,
-  ]);
+  const formProgress =
+    useMemo(() => {
+      const checks = [
+        Boolean(
+          form.title.trim(),
+        ),
 
-  const formProgress = useMemo(() => {
-    const checks = [
-      Boolean(form.title.trim()),
-      Boolean(form.categoryId),
-      form.description.trim().length >=
-        options.rules.minimumDescriptionLength,
-      Boolean(form.venueName.trim()),
-      Boolean(form.address.trim()),
-      Boolean(form.city.trim()),
-      Boolean(form.startsAt),
-      selectedImages.length > 0,
-      ticketTypes.every(
-        (ticket) =>
-          ticket.name.trim() &&
-          normalizeNumberInput(ticket.quantity) > 0 &&
-          normalizeNumberInput(ticket.price) >= 0,
-      ),
-    ];
+        Boolean(
+          form.categoryId,
+        ),
 
-    const completed = checks.filter(Boolean).length;
+        form.description
+          .trim()
+          .length >=
+          options.rules
+            .minimumDescriptionLength,
 
-    return Math.round(
-      (completed / checks.length) * 100,
-    );
-  }, [
-    form,
-    options.rules.minimumDescriptionLength,
-    selectedImages.length,
-    ticketTypes,
-  ]);
+        Boolean(
+          form.venueName.trim(),
+        ),
+
+        Boolean(
+          form.address.trim(),
+        ),
+
+        Boolean(
+          form.city.trim(),
+        ),
+
+        Boolean(
+          form.startsAt,
+        ),
+
+        selectedImages.length > 0,
+
+        ticketTypes.every(
+          (ticket) =>
+            Boolean(
+              ticket.name.trim(),
+            ) &&
+            normalizeNumberInput(
+              ticket.quantity,
+            ) > 0 &&
+            normalizeNumberInput(
+              ticket.price,
+            ) >= 0,
+        ),
+      ];
+
+      const completed =
+        checks.filter(Boolean).length;
+
+      return Math.round(
+        (completed /
+          checks.length) *
+          100,
+      );
+    }, [
+      form,
+      options.rules
+        .minimumDescriptionLength,
+      selectedImages.length,
+      ticketTypes,
+    ]);
 
   function clearMessages() {
     setError("");
@@ -324,7 +432,9 @@ export default function CreateEventForm({
     setFieldErrors({});
   }
 
-  function updateForm<K extends keyof FormState>(
+  function updateForm<
+    K extends keyof FormState,
+  >(
     key: K,
     value: FormState[K],
   ) {
@@ -339,9 +449,12 @@ export default function CreateEventForm({
   function handleCountryChange(
     countryCode: string,
   ) {
-    const country = options.countries.find(
-      (item) => item.code === countryCode,
-    );
+    const country =
+      options.countries.find(
+        (item) =>
+          item.code ===
+          countryCode,
+      );
 
     if (!country) {
       return;
@@ -351,10 +464,18 @@ export default function CreateEventForm({
 
     setForm((current) => ({
       ...current,
-      countryCode: country.code,
-      country: country.name,
-      currency: country.currency,
-      timezone: country.timezone,
+
+      countryCode:
+        country.code,
+
+      country:
+        country.name,
+
+      currency:
+        country.currency,
+
+      timezone:
+        country.timezone,
     }));
   }
 
@@ -366,13 +487,15 @@ export default function CreateEventForm({
     clearMessages();
 
     setTicketTypes((current) =>
-      current.map((ticketType) =>
-        ticketType.localId === localId
-          ? {
-              ...ticketType,
-              [field]: value,
-            }
-          : ticketType,
+      current.map(
+        (ticketType) =>
+          ticketType.localId ===
+          localId
+            ? {
+                ...ticketType,
+                [field]: value,
+              }
+            : ticketType,
       ),
     );
   }
@@ -380,45 +503,63 @@ export default function CreateEventForm({
   function addTicketType() {
     if (
       ticketTypes.length >=
-      options.rules.maxTicketTypes
+      options.rules
+        .maxTicketTypes
     ) {
       setError(
         `Vous ne pouvez pas ajouter plus de ${options.rules.maxTicketTypes} types de billets.`,
       );
+
       return;
     }
 
     clearMessages();
 
-    setTicketTypes((current) => [
-      ...current,
-      createTicketType(
-        current.length,
-        options.rules.defaultMaxPerOrder,
-      ),
-    ]);
-  }
+    setTicketTypes(
+      (current) => [
+        ...current,
 
-  function removeTicketType(localId: string) {
-    if (ticketTypes.length === 1) {
-      setError(
-        "L’événement doit contenir au moins un type de billet.",
-      );
-      return;
-    }
+        createTicketType(
+          current.length,
 
-    clearMessages();
-
-    setTicketTypes((current) =>
-      current.filter(
-        (ticketType) =>
-          ticketType.localId !== localId,
-      ),
+          options.rules
+            .defaultMaxPerOrder,
+        ),
+      ],
     );
   }
 
-  function validateClientForm(): string | null {
-    if (!form.title.trim()) {
+  function removeTicketType(
+    localId: string,
+  ) {
+    if (
+      ticketTypes.length === 1
+    ) {
+      setError(
+        "L’événement doit contenir au moins un type de billet.",
+      );
+
+      return;
+    }
+
+    clearMessages();
+
+    setTicketTypes(
+      (current) =>
+        current.filter(
+          (ticketType) =>
+            ticketType.localId !==
+            localId,
+        ),
+    );
+  }
+
+  function validateClientForm():
+    | string
+    | null {
+    if (
+      !form.title.trim()
+    ) {
       return "Renseignez le titre de l’événement.";
     }
 
@@ -427,8 +568,11 @@ export default function CreateEventForm({
     }
 
     if (
-      form.description.trim().length <
-      options.rules.minimumDescriptionLength
+      form.description
+        .trim()
+        .length <
+      options.rules
+        .minimumDescriptionLength
     ) {
       return `La description doit contenir au moins ${options.rules.minimumDescriptionLength} caractères.`;
     }
@@ -445,16 +589,41 @@ export default function CreateEventForm({
       return "Renseignez la date et l’heure de début.";
     }
 
-    if (selectedImages.length === 0) {
-      return "Ajoutez au moins une image pour l’événement.";
+    const startsAt =
+      new Date(form.startsAt);
+
+    if (
+      Number.isNaN(
+        startsAt.getTime(),
+      )
+    ) {
+      return "La date et l’heure de début sont invalides.";
     }
 
     if (
-      form.endsAt &&
-      new Date(form.endsAt).getTime() <=
-        new Date(form.startsAt).getTime()
+      selectedImages.length === 0
     ) {
-      return "La date de fin doit être postérieure à la date de début.";
+      return "Ajoutez au moins une image pour l’événement.";
+    }
+
+    if (form.endsAt) {
+      const endsAt =
+        new Date(form.endsAt);
+
+      if (
+        Number.isNaN(
+          endsAt.getTime(),
+        )
+      ) {
+        return "La date et l’heure de fin sont invalides.";
+      }
+
+      if (
+        endsAt.getTime() <=
+        startsAt.getTime()
+      ) {
+        return "La date de fin doit être postérieure à la date de début.";
+      }
     }
 
     if (
@@ -468,8 +637,13 @@ export default function CreateEventForm({
       return "Sélectionnez une devise prise en charge par Tikemia.";
     }
 
-    for (const ticketType of ticketTypes) {
-      if (!ticketType.name.trim()) {
+    for (
+      const ticketType of
+      ticketTypes
+    ) {
+      if (
+        !ticketType.name.trim()
+      ) {
         return "Chaque type de billet doit avoir un nom.";
       }
 
@@ -482,7 +656,9 @@ export default function CreateEventForm({
       }
 
       if (
-        normalizeNumberInput(ticketType.price) < 0
+        normalizeNumberInput(
+          ticketType.price,
+        ) < 0
       ) {
         return `Le prix du billet « ${ticketType.name} » n’est pas valide.`;
       }
@@ -502,6 +678,20 @@ export default function CreateEventForm({
           ? `Le prix du billet « ${ticketType.name} » ne doit pas contenir de décimales en ${form.currency}.`
           : `Le prix du billet « ${ticketType.name} » accepte au maximum ${decimals} décimales en ${form.currency}.`;
       }
+
+      const maximumPerOrder =
+        Math.trunc(
+          normalizeNumberInput(
+            ticketType.maxPerOrder,
+          ),
+        );
+
+      if (
+        maximumPerOrder < 1 ||
+        maximumPerOrder > 100
+      ) {
+        return `Le maximum par commande du billet « ${ticketType.name} » doit être compris entre 1 et 100.`;
+      }
     }
 
     return null;
@@ -510,11 +700,17 @@ export default function CreateEventForm({
   async function uploadEventImages(): Promise<
     UploadedEventImage[]
   > {
-    const imageFormData = new FormData();
+    const imageFormData =
+      new FormData();
 
-    selectedImages.forEach((image) => {
-      imageFormData.append("images", image.file);
-    });
+    selectedImages.forEach(
+      (image) => {
+        imageFormData.append(
+          "images",
+          image.file,
+        );
+      },
+    );
 
     imageFormData.append(
       "coverIndex",
@@ -524,21 +720,28 @@ export default function CreateEventForm({
     setIsUploadingImages(true);
 
     try {
-      const response = await fetch(
-        "/api/organizer/events/images",
-        {
-          method: "POST",
-          body: imageFormData,
-        },
-      );
+      const response =
+        await fetch(
+          "/api/organizer/events/images",
+          {
+            method: "POST",
+            body: imageFormData,
+          },
+        );
 
-      const result = (await response.json()) as {
-        success?: boolean;
-        message?: string;
-        images?: UploadedEventImage[];
-      };
+      const result =
+        (await response.json()) as {
+          success?: boolean;
+          message?: string;
 
-      if (!response.ok || !result.images) {
+          images?:
+            UploadedEventImage[];
+        };
+
+      if (
+        !response.ok ||
+        !result.images
+      ) {
         throw new Error(
           result.message ??
             "Les images n’ont pas pu être téléversées.",
@@ -552,7 +755,9 @@ export default function CreateEventForm({
   }
 
   async function submitEvent(
-    publicationMode: "DRAFT" | "SUBMIT",
+    publicationMode:
+      | "DRAFT"
+      | "SUBMIT",
   ) {
     clearMessages();
 
@@ -561,15 +766,19 @@ export default function CreateEventForm({
 
     if (validationError) {
       setError(validationError);
+
       window.scrollTo({
         top: 0,
         behavior: "smooth",
       });
+
       return;
     }
 
     setIsSubmitting(true);
-    setSubmitMode(publicationMode);
+    setSubmitMode(
+      publicationMode,
+    );
 
     try {
       const uploadedImages =
@@ -577,8 +786,10 @@ export default function CreateEventForm({
 
       const coverImage =
         uploadedImages.find(
-          (image) => image.isCover,
-        ) ?? uploadedImages[0];
+          (image) =>
+            image.isCover,
+        ) ??
+        uploadedImages[0];
 
       if (!coverImage) {
         throw new Error(
@@ -586,79 +797,149 @@ export default function CreateEventForm({
         );
       }
 
-      const response = await fetch(
-        "/api/organizer/events",
-        {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Accept: "application/json",
+      const response =
+        await fetch(
+          "/api/organizer/events",
+          {
+            method: "POST",
+
+            headers: {
+              "Content-Type":
+                "application/json",
+
+              Accept:
+                "application/json",
+            },
+
+            body: JSON.stringify({
+              categoryId:
+                form.categoryId,
+
+              title:
+                form.title.trim(),
+
+              description:
+                form.description.trim(),
+
+              images:
+                uploadedImages,
+
+              coverImage:
+                coverImage.publicUrl,
+
+              venueName:
+                form.venueName.trim(),
+
+              address:
+                form.address.trim(),
+
+              city:
+                form.city.trim(),
+
+              country:
+                form.country,
+
+              countryCode:
+                form.countryCode,
+
+              timezone:
+                form.timezone,
+
+              startsAt:
+                toIsoDate(
+                  form.startsAt,
+                ),
+
+              endsAt:
+                toIsoDate(
+                  form.endsAt,
+                ),
+
+              /*
+               * Les périodes générales de vente
+               * ont été retirées du formulaire.
+               *
+               * On conserve les propriétés dans
+               * la requête pour ne pas casser le
+               * contrat actuel de l’API.
+               *
+               * Le backend applique ses règles
+               * automatiques lorsque ces valeurs
+               * sont nulles.
+               */
+              salesStartAt: null,
+              salesEndAt: null,
+
+              currency:
+                form.currency,
+
+              publicationMode,
+
+              ticketTypes:
+                ticketTypes.map(
+                  (ticketType) => ({
+                    name:
+                      ticketType.name.trim(),
+
+                    description:
+                      ticketType.description
+                        .trim() ||
+                      null,
+
+                    price:
+                      ticketType.price
+                        .trim()
+                        .replace(
+                          ",",
+                          ".",
+                        ),
+
+                    quantity:
+                      Math.trunc(
+                        normalizeNumberInput(
+                          ticketType.quantity,
+                        ),
+                      ),
+
+                    maxPerOrder:
+                      Math.trunc(
+                        normalizeNumberInput(
+                          ticketType.maxPerOrder,
+                        ),
+                      ),
+
+                    /*
+                     * Les périodes spécifiques de
+                     * vente par billet ont été
+                     * retirées de l’interface.
+                     *
+                     * Les propriétés restent
+                     * présentes avec null pour
+                     * préserver la compatibilité
+                     * avec l’API existante.
+                     */
+                    saleStartsAt:
+                      null,
+
+                    saleEndsAt:
+                      null,
+
+                    isActive:
+                      ticketType.isActive,
+                  }),
+                ),
+            }),
           },
-          body: JSON.stringify({
-            categoryId: form.categoryId,
-            title: form.title.trim(),
-            description:
-              form.description.trim(),
-            images: uploadedImages,
-            coverImage:
-              coverImage.publicUrl,
-
-            venueName: form.venueName.trim(),
-            address: form.address.trim(),
-            city: form.city.trim(),
-            country: form.country,
-            countryCode: form.countryCode,
-            timezone: form.timezone,
-
-            startsAt: toIsoDate(form.startsAt),
-            endsAt: toIsoDate(form.endsAt),
-            salesStartAt: toIsoDate(
-              form.salesStartAt,
-            ),
-            salesEndAt: toIsoDate(
-              form.salesEndAt,
-            ),
-
-            currency: form.currency,
-            publicationMode,
-
-            ticketTypes: ticketTypes.map(
-              (ticketType) => ({
-                name: ticketType.name.trim(),
-                description:
-                  ticketType.description.trim() ||
-                  null,
-                price: ticketType.price
-                  .trim()
-                  .replace(",", "."),
-                quantity: Math.trunc(
-                  normalizeNumberInput(
-                    ticketType.quantity,
-                  ),
-                ),
-                maxPerOrder: Math.trunc(
-                  normalizeNumberInput(
-                    ticketType.maxPerOrder,
-                  ),
-                ),
-                saleStartsAt: toIsoDate(
-                  ticketType.saleStartsAt,
-                ),
-                saleEndsAt: toIsoDate(
-                  ticketType.saleEndsAt,
-                ),
-                isActive: ticketType.isActive,
-              }),
-            ),
-          }),
-        },
-      );
+        );
 
       const result =
-        (await response.json()) as ApiResponse;
+        (await response.json()) as
+          ApiResponse;
 
       if (!response.ok) {
-        setFieldErrors(result.fields ?? {});
+        setFieldErrors(
+          result.fields ?? {},
+        );
 
         throw new Error(
           result.message ??
@@ -668,18 +949,23 @@ export default function CreateEventForm({
 
       setSuccessMessage(
         result.message ??
-          (publicationMode === "DRAFT"
+          (publicationMode ===
+          "DRAFT"
             ? "L’événement a été enregistré comme brouillon."
             : "L’événement a été publié avec succès."),
       );
 
-      window.setTimeout(() => {
-        router.push(
-          result.redirectTo ??
-            "/organizer/events",
-        );
-        router.refresh();
-      }, 900);
+      window.setTimeout(
+        () => {
+          router.push(
+            result.redirectTo ??
+              "/organizer/events",
+          );
+
+          router.refresh();
+        },
+        900,
+      );
     } catch (submitError) {
       setError(
         submitError instanceof Error
@@ -698,9 +984,11 @@ export default function CreateEventForm({
   }
 
   function handleSubmit(
-    event: FormEvent<HTMLFormElement>,
+    event:
+      FormEvent<HTMLFormElement>,
   ) {
     event.preventDefault();
+
     void submitEvent("SUBMIT");
   }
 
@@ -709,7 +997,6 @@ export default function CreateEventForm({
       onSubmit={handleSubmit}
       className="space-y-5"
     >
-      {/* Barre supérieure */}
       <section className="flex flex-col gap-4 rounded-2xl border border-white/[0.08] bg-[#081015] p-4 sm:flex-row sm:items-center sm:justify-between sm:p-5">
         <div className="flex min-w-0 items-start gap-3">
           <Link
@@ -726,8 +1013,7 @@ export default function CreateEventForm({
             </h1>
 
             <p className="mt-1 text-sm text-neutral-500">
-              Complétez les informations avant
-              la publication de votre événement.
+              Complétez les informations avant la publication de votre événement.
             </p>
           </div>
         </div>
@@ -747,7 +1033,8 @@ export default function CreateEventForm({
             <div
               className="h-full rounded-full bg-gradient-to-r from-emerald-500 via-lime-400 to-orange-500 transition-[width] duration-500"
               style={{
-                width: `${formProgress}%`,
+                width:
+                  `${formProgress}%`,
               }}
             />
           </div>
@@ -760,7 +1047,10 @@ export default function CreateEventForm({
           className="flex items-start gap-3 rounded-xl border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm leading-6 text-red-300"
         >
           <AlertCircle className="mt-0.5 h-5 w-5 shrink-0" />
-          <span>{error}</span>
+
+          <span>
+            {error}
+          </span>
         </div>
       )}
 
@@ -770,14 +1060,15 @@ export default function CreateEventForm({
           className="flex items-start gap-3 rounded-xl border border-emerald-500/30 bg-emerald-500/10 px-4 py-3 text-sm leading-6 text-emerald-200"
         >
           <CheckCircle2 className="mt-0.5 h-5 w-5 shrink-0 text-lime-400" />
-          <span>{successMessage}</span>
+
+          <span>
+            {successMessage}
+          </span>
         </div>
       )}
 
       <div className="grid items-start gap-5 xl:grid-cols-[minmax(0,1fr)_360px]">
-        {/* Formulaire principal */}
         <div className="space-y-5">
-          {/* Informations générales */}
           <FormSection
             icon={FileText}
             title="Informations générales"
@@ -787,29 +1078,39 @@ export default function CreateEventForm({
               <Field
                 label="Titre de l’événement"
                 required
-                error={fieldErrors.title?.[0]}
+                error={
+                  fieldErrors.title?.[0]
+                }
                 className="md:col-span-2"
               >
                 <input
                   type="text"
                   value={form.title}
-                  onChange={(event) =>
+                  onChange={(
+                    event,
+                  ) =>
                     updateForm(
                       "title",
                       event.target.value,
                     )
                   }
                   maxLength={
-                    options.rules.maximumTitleLength
+                    options.rules
+                      .maximumTitleLength
                   }
                   placeholder="Ex. Festival Tikemia 2026"
-                  className={inputClassName}
+                  className={
+                    inputClassName
+                  }
                 />
 
                 <FieldCounter
-                  current={form.title.length}
+                  current={
+                    form.title.length
+                  }
                   maximum={
-                    options.rules.maximumTitleLength
+                    options.rules
+                      .maximumTitleLength
                   }
                 />
               </Field>
@@ -818,16 +1119,22 @@ export default function CreateEventForm({
                 label="Catégorie"
                 required
                 error={
-                  fieldErrors.categoryId?.[0]
+                  fieldErrors
+                    .categoryId?.[0]
                 }
               >
                 <div className="relative">
                   <select
-                    value={form.categoryId}
-                    onChange={(event) =>
+                    value={
+                      form.categoryId
+                    }
+                    onChange={(
+                      event,
+                    ) =>
                       updateForm(
                         "categoryId",
-                        event.target.value,
+                        event.target
+                          .value,
                       )
                     }
                     className={`${inputClassName} appearance-none pr-11`}
@@ -839,10 +1146,16 @@ export default function CreateEventForm({
                     {options.categories.map(
                       (category) => (
                         <option
-                          key={category.id}
-                          value={category.id}
+                          key={
+                            category.id
+                          }
+                          value={
+                            category.id
+                          }
                         >
-                          {category.name}
+                          {
+                            category.name
+                          }
                         </option>
                       ),
                     )}
@@ -854,14 +1167,35 @@ export default function CreateEventForm({
 
               <div className="md:col-span-2">
                 <EventImagesUploader
-                  value={selectedImages}
-                  coverIndex={coverImageIndex}
-                  disabled={isSubmitting || isUploadingImages}
-                  isUploading={isUploadingImages}
-                  error={fieldErrors.images?.[0]}
-                  onChange={({ images, coverIndex }) => {
-                    setSelectedImages(images);
-                    setCoverImageIndex(coverIndex);
+                  value={
+                    selectedImages
+                  }
+                  coverIndex={
+                    coverImageIndex
+                  }
+                  disabled={
+                    isSubmitting ||
+                    isUploadingImages
+                  }
+                  isUploading={
+                    isUploadingImages
+                  }
+                  error={
+                    fieldErrors
+                      .images?.[0]
+                  }
+                  onChange={({
+                    images,
+                    coverIndex,
+                  }) => {
+                    setSelectedImages(
+                      images,
+                    );
+
+                    setCoverImageIndex(
+                      coverIndex,
+                    );
+
                     clearMessages();
                   }}
                 />
@@ -871,13 +1205,18 @@ export default function CreateEventForm({
                 label="Description"
                 required
                 error={
-                  fieldErrors.description?.[0]
+                  fieldErrors
+                    .description?.[0]
                 }
                 className="md:col-span-2"
               >
                 <textarea
-                  value={form.description}
-                  onChange={(event) =>
+                  value={
+                    form.description
+                  }
+                  onChange={(
+                    event,
+                  ) =>
                     updateForm(
                       "description",
                       event.target.value,
@@ -893,7 +1232,10 @@ export default function CreateEventForm({
                 />
 
                 <FieldCounter
-                  current={form.description.length}
+                  current={
+                    form.description
+                      .length
+                  }
                   minimum={
                     options.rules
                       .minimumDescriptionLength
@@ -907,7 +1249,6 @@ export default function CreateEventForm({
             </div>
           </FormSection>
 
-          {/* Lieu */}
           <FormSection
             icon={MapPin}
             title="Lieu de l’événement"
@@ -918,16 +1259,23 @@ export default function CreateEventForm({
                 label="Pays"
                 required
                 error={
-                  fieldErrors.countryCode?.[0] ??
-                  fieldErrors.country?.[0]
+                  fieldErrors
+                    .countryCode?.[0] ??
+                  fieldErrors
+                    .country?.[0]
                 }
               >
                 <div className="relative">
                   <select
-                    value={form.countryCode}
-                    onChange={(event) =>
+                    value={
+                      form.countryCode
+                    }
+                    onChange={(
+                      event,
+                    ) =>
                       handleCountryChange(
-                        event.target.value,
+                        event.target
+                          .value,
                       )
                     }
                     className={`${inputClassName} appearance-none pr-11`}
@@ -935,10 +1283,16 @@ export default function CreateEventForm({
                     {options.countries.map(
                       (country) => (
                         <option
-                          key={country.code}
-                          value={country.code}
+                          key={
+                            country.code
+                          }
+                          value={
+                            country.code
+                          }
                         >
-                          {country.name}
+                          {
+                            country.name
+                          }
                         </option>
                       ),
                     )}
@@ -951,19 +1305,25 @@ export default function CreateEventForm({
               <Field
                 label="Ville"
                 required
-                error={fieldErrors.city?.[0]}
+                error={
+                  fieldErrors.city?.[0]
+                }
               >
                 <input
                   type="text"
                   value={form.city}
-                  onChange={(event) =>
+                  onChange={(
+                    event,
+                  ) =>
                     updateForm(
                       "city",
                       event.target.value,
                     )
                   }
                   placeholder="Ex. Cotonou"
-                  className={inputClassName}
+                  className={
+                    inputClassName
+                  }
                 />
               </Field>
 
@@ -971,20 +1331,27 @@ export default function CreateEventForm({
                 label="Nom du lieu"
                 required
                 error={
-                  fieldErrors.venueName?.[0]
+                  fieldErrors
+                    .venueName?.[0]
                 }
               >
                 <input
                   type="text"
-                  value={form.venueName}
-                  onChange={(event) =>
+                  value={
+                    form.venueName
+                  }
+                  onChange={(
+                    event,
+                  ) =>
                     updateForm(
                       "venueName",
                       event.target.value,
                     )
                   }
                   placeholder="Ex. Palais des Congrès"
-                  className={inputClassName}
+                  className={
+                    inputClassName
+                  }
                 />
               </Field>
 
@@ -992,101 +1359,97 @@ export default function CreateEventForm({
                 label="Adresse complète"
                 required
                 error={
-                  fieldErrors.address?.[0]
+                  fieldErrors
+                    .address?.[0]
                 }
               >
                 <input
                   type="text"
                   value={form.address}
-                  onChange={(event) =>
+                  onChange={(
+                    event,
+                  ) =>
                     updateForm(
                       "address",
                       event.target.value,
                     )
                   }
                   placeholder="Rue, quartier, repère"
-                  className={inputClassName}
+                  className={
+                    inputClassName
+                  }
                 />
               </Field>
             </div>
           </FormSection>
 
-          {/* Dates */}
           <FormSection
             icon={CalendarDays}
             title="Dates et horaires"
-            description="Planifiez l’événement et la période de vente."
+            description="Indiquez simplement le début et la fin de votre événement."
           >
             <div className="grid gap-4 md:grid-cols-2">
               <Field
                 label="Début de l’événement"
                 required
                 error={
-                  fieldErrors.startsAt?.[0]
+                  fieldErrors
+                    .startsAt?.[0]
                 }
               >
                 <input
                   type="datetime-local"
-                  value={form.startsAt}
-                  onChange={(event) =>
+                  value={
+                    form.startsAt
+                  }
+                  onChange={(
+                    event,
+                  ) =>
                     updateForm(
                       "startsAt",
                       event.target.value,
                     )
                   }
-                  className={inputClassName}
+                  className={
+                    inputClassName
+                  }
                 />
               </Field>
 
               <Field
                 label="Fin de l’événement"
-                error={fieldErrors.endsAt?.[0]}
+                error={
+                  fieldErrors
+                    .endsAt?.[0]
+                }
               >
                 <input
                   type="datetime-local"
                   value={form.endsAt}
-                  onChange={(event) =>
+                  min={
+                    form.startsAt ||
+                    undefined
+                  }
+                  onChange={(
+                    event,
+                  ) =>
                     updateForm(
                       "endsAt",
                       event.target.value,
                     )
                   }
-                  className={inputClassName}
-                />
-              </Field>
-
-              <Field label="Ouverture générale des ventes">
-                <input
-                  type="datetime-local"
-                  value={form.salesStartAt}
-                  onChange={(event) =>
-                    updateForm(
-                      "salesStartAt",
-                      event.target.value,
-                    )
+                  className={
+                    inputClassName
                   }
-                  className={inputClassName}
                 />
               </Field>
 
-              <Field label="Fermeture générale des ventes">
-                <input
-                  type="datetime-local"
-                  value={form.salesEndAt}
-                  onChange={(event) =>
-                    updateForm(
-                      "salesEndAt",
-                      event.target.value,
-                    )
-                  }
-                  className={inputClassName}
-                />
-              </Field>
-
-              <div className="md:col-span-2 grid gap-4 sm:grid-cols-2">
+              <div className="grid gap-4 md:col-span-2 sm:grid-cols-2">
                 <InfoValue
                   label="Fuseau horaire"
-                  value={form.timezone}
+                  value={
+                    form.timezone
+                  }
                   icon={Clock3}
                 />
 
@@ -1094,16 +1457,22 @@ export default function CreateEventForm({
                   label="Devise de vente"
                   required
                   error={
-                    fieldErrors.currency?.[0]
+                    fieldErrors
+                      .currency?.[0]
                   }
                 >
                   <div className="relative">
                     <select
-                      value={form.currency}
-                      onChange={(event) =>
+                      value={
+                        form.currency
+                      }
+                      onChange={(
+                        event,
+                      ) =>
                         updateForm(
                           "currency",
-                          event.target.value,
+                          event.target
+                            .value,
                         )
                       }
                       className={`${inputClassName} appearance-none pr-11`}
@@ -1111,12 +1480,20 @@ export default function CreateEventForm({
                       {options.currencies.map(
                         (currency) => (
                           <option
-                            key={currency.code}
-                            value={currency.code}
+                            key={
+                              currency.code
+                            }
+                            value={
+                              currency.code
+                            }
                           >
-                            {currency.label}
+                            {
+                              currency.label
+                            }
                             {" — "}
-                            {currency.symbol}
+                            {
+                              currency.symbol
+                            }
                           </option>
                         ),
                       )}
@@ -1130,61 +1507,79 @@ export default function CreateEventForm({
                     {selectedCountry?.name ??
                       form.country}
                     {" : "}
+
                     <span className="font-bold text-neutral-400">
                       {selectedCountry?.currency ??
                         options.rules.defaultCurrency}
                     </span>
-                    . Vous pouvez choisir une autre
-                    devise prise en charge avant les
-                    premières ventes.
+                    . Vous pouvez choisir une autre devise prise en charge avant les premières ventes.
                   </p>
                 </Field>
               </div>
             </div>
           </FormSection>
 
-          {/* Billets */}
           <FormSection
             icon={TicketCheck}
             title="Billets et tarifs"
-            description="Créez les différentes offres disponibles."
+            description="Créez simplement les billets disponibles pour votre événement."
             action={
               <button
                 type="button"
-                onClick={addTicketType}
+                onClick={
+                  addTicketType
+                }
                 className="inline-flex h-10 items-center justify-center gap-2 rounded-xl border border-emerald-500/30 bg-emerald-500/[0.06] px-4 text-xs font-bold text-lime-400 transition hover:bg-emerald-500/10"
               >
                 <Plus className="h-4 w-4" />
+
                 Ajouter un billet
               </button>
             }
           >
             <div className="space-y-4">
               {ticketTypes.map(
-                (ticketType, index) => (
+                (
+                  ticketType,
+                  index,
+                ) => (
                   <TicketTypeCard
-                    key={ticketType.localId}
+                    key={
+                      ticketType.localId
+                    }
                     index={index}
-                    ticketType={ticketType}
-                    currency={form.currency}
+                    ticketType={
+                      ticketType
+                    }
+                    currency={
+                      form.currency
+                    }
                     currencySymbol={
-                      selectedCurrency?.symbol ??
+                      selectedCurrency
+                        ?.symbol ??
                       form.currency
                     }
                     currencyDecimals={
-                      selectedCurrency?.fractionDigits ??
+                      selectedCurrency
+                        ?.fractionDigits ??
                       getCurrencyDecimals(
                         form.currency,
                       )
                     }
                     platformFeePercent={
-                      options.rules.platformFeePercent
+                      options.rules
+                        .platformFeePercent
                     }
                     canDelete={
-                      ticketTypes.length > 1
+                      ticketTypes.length >
+                      1
                     }
-                    onUpdate={updateTicketType}
-                    onRemove={removeTicketType}
+                    onUpdate={
+                      updateTicketType
+                    }
+                    onRemove={
+                      removeTicketType
+                    }
                   />
                 ),
               )}
@@ -1192,7 +1587,6 @@ export default function CreateEventForm({
           </FormSection>
         </div>
 
-        {/* Colonne résumé */}
         <aside className="space-y-5 xl:sticky xl:top-[112px]">
           <section className="overflow-hidden rounded-2xl border border-white/[0.08] bg-[#081015] shadow-[0_18px_50px_rgba(0,0,0,0.25)]">
             <header className="border-b border-white/[0.07] px-4 py-4">
@@ -1213,8 +1607,11 @@ export default function CreateEventForm({
               <SummaryLine
                 label="Capacité totale"
                 value={`${(
-                  projection?.totalCapacity ?? 0
-                ).toLocaleString("fr-FR")} billets`}
+                  projection?.totalCapacity ??
+                  0
+                ).toLocaleString(
+                  "fr-FR",
+                )} billets`}
                 icon={UsersRound}
               />
 
@@ -1222,11 +1619,16 @@ export default function CreateEventForm({
                 label="Prix moyen"
                 value={formatMoney({
                   amount:
-                    projection?.averageTicketPrice ??
+                    projection
+                      ?.averageTicketPrice ??
                     0,
-                  currency: form.currency,
+
+                  currency:
+                    form.currency,
+
                   locale:
-                    selectedCountry?.locale ??
+                    selectedCountry
+                      ?.locale ??
                     "fr-FR",
                 })}
                 icon={TicketCheck}
@@ -1236,23 +1638,37 @@ export default function CreateEventForm({
                 label="Chiffre d’affaires potentiel"
                 value={formatMoney({
                   amount:
-                    projection?.grossRevenue ?? 0,
-                  currency: form.currency,
+                    projection
+                      ?.grossRevenue ??
+                    0,
+
+                  currency:
+                    form.currency,
+
                   locale:
-                    selectedCountry?.locale ??
+                    selectedCountry
+                      ?.locale ??
                     "fr-FR",
                 })}
-                icon={CircleDollarSign}
+                icon={
+                  CircleDollarSign
+                }
               />
 
               <SummaryLine
                 label={`Commission Tikemia (${options.rules.platformFeePercent} %)`}
                 value={formatMoney({
                   amount:
-                    projection?.platformFee ?? 0,
-                  currency: form.currency,
+                    projection
+                      ?.platformFee ??
+                    0,
+
+                  currency:
+                    form.currency,
+
                   locale:
-                    selectedCountry?.locale ??
+                    selectedCountry
+                      ?.locale ??
                     "fr-FR",
                 })}
                 icon={ShieldCheck}
@@ -1263,10 +1679,16 @@ export default function CreateEventForm({
                 label="Revenu net organisateur"
                 value={formatMoney({
                   amount:
-                    projection?.organizerNet ?? 0,
-                  currency: form.currency,
+                    projection
+                      ?.organizerNet ??
+                    0,
+
+                  currency:
+                    form.currency,
+
                   locale:
-                    selectedCountry?.locale ??
+                    selectedCountry
+                      ?.locale ??
                     "fr-FR",
                 })}
                 icon={WalletCards}
@@ -1280,9 +1702,11 @@ export default function CreateEventForm({
 
                 <p className="text-[11px] leading-5 text-neutral-500">
                   La commission de{" "}
-                  {options.rules.platformFeePercent} %
-                  est calculée automatiquement sur
-                  chaque vente confirmée.
+                  {
+                    options.rules
+                      .platformFeePercent
+                  }{" "}
+                  % est calculée automatiquement sur chaque vente confirmée.
                 </p>
               </div>
             </div>
@@ -1295,12 +1719,15 @@ export default function CreateEventForm({
 
             <div className="mt-4 overflow-hidden rounded-xl border border-white/[0.08] bg-[#050b0f]">
               <div className="relative flex h-36 items-center justify-center overflow-hidden bg-gradient-to-br from-emerald-500/10 via-lime-500/[0.04] to-orange-500/10">
-                {selectedImages[coverImageIndex]?.previewUrl ? (
+                {selectedImages[
+                  coverImageIndex
+                ]?.previewUrl ? (
                   // eslint-disable-next-line @next/next/no-img-element
                   <img
                     src={
-                      selectedImages[coverImageIndex]
-                        .previewUrl
+                      selectedImages[
+                        coverImageIndex
+                      ].previewUrl
                     }
                     alt="Aperçu de l’image principale"
                     className="h-full w-full object-cover"
@@ -1324,24 +1751,32 @@ export default function CreateEventForm({
                 <div className="mt-3 space-y-2 text-[11px] text-neutral-500">
                   <p className="flex items-center gap-2">
                     <CalendarDays className="h-3.5 w-3.5" />
+
                     {form.startsAt
                       ? new Intl.DateTimeFormat(
                           selectedCountry?.locale ??
                             "fr-FR",
                           {
-                            dateStyle: "medium",
-                            timeStyle: "short",
+                            dateStyle:
+                              "medium",
+
+                            timeStyle:
+                              "short",
                           },
                         ).format(
-                          new Date(form.startsAt),
+                          new Date(
+                            form.startsAt,
+                          ),
                         )
                       : "Date à renseigner"}
                   </p>
 
                   <p className="flex items-center gap-2">
                     <MapPin className="h-3.5 w-3.5" />
-                    {form.city || "Ville"},{" "}
-                    {form.country}
+
+                    {form.city ||
+                      "Ville"}
+                    , {form.country}
                   </p>
                 </div>
               </div>
@@ -1350,25 +1785,28 @@ export default function CreateEventForm({
         </aside>
       </div>
 
-      {/* Actions */}
       <section className="sticky bottom-3 z-20 flex flex-col gap-3 rounded-2xl border border-white/[0.09] bg-[#050b0f]/95 p-3 shadow-[0_22px_60px_rgba(0,0,0,0.5)] backdrop-blur-xl sm:flex-row sm:items-center sm:justify-between sm:p-4">
         <p className="hidden max-w-md text-xs leading-5 text-neutral-500 lg:block">
-          Enregistrez un brouillon pour continuer
-          plus tard ou publiez immédiatement
-          votre événement sur Tikemia.
+          Enregistrez un brouillon pour continuer plus tard ou publiez immédiatement votre événement sur Tikemia.
         </p>
 
         <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-end">
           <button
             type="button"
-            disabled={isSubmitting || isUploadingImages}
+            disabled={
+              isSubmitting ||
+              isUploadingImages
+            }
             onClick={() =>
-              void submitEvent("DRAFT")
+              void submitEvent(
+                "DRAFT",
+              )
             }
             className="inline-flex h-12 items-center justify-center gap-2 rounded-xl border border-white/[0.1] bg-white/[0.035] px-5 text-sm font-bold text-neutral-300 transition hover:bg-white/[0.06] hover:text-white disabled:cursor-not-allowed disabled:opacity-50"
           >
             {isSubmitting &&
-            submitMode === "DRAFT" ? (
+            submitMode ===
+              "DRAFT" ? (
               <LoaderCircle className="h-4 w-4 animate-spin" />
             ) : (
               <Save className="h-4 w-4" />
@@ -1379,19 +1817,26 @@ export default function CreateEventForm({
 
           <button
             type="submit"
-            disabled={isSubmitting || isUploadingImages}
+            disabled={
+              isSubmitting ||
+              isUploadingImages
+            }
             className="inline-flex h-12 items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-emerald-500 via-lime-500 to-orange-500 px-6 text-sm font-black text-white shadow-[0_15px_40px_rgba(34,197,94,0.18)] transition hover:scale-[1.01] disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:scale-100"
           >
             {isSubmitting &&
-            submitMode === "SUBMIT" ? (
+            submitMode ===
+              "SUBMIT" ? (
               <>
                 <LoaderCircle className="h-4 w-4 animate-spin" />
+
                 Publication en cours...
               </>
             ) : (
               <>
                 <Send className="h-4 w-4" />
+
                 Publier l’événement
+
                 <ArrowRight className="h-4 w-4" />
               </>
             )}
@@ -1409,8 +1854,10 @@ type FormSectionProps = {
   icon: React.ComponentType<{
     className?: string;
   }>;
+
   title: string;
   description: string;
+
   action?: React.ReactNode;
   children: React.ReactNode;
 };
@@ -1467,7 +1914,9 @@ function Field({
   children,
 }: FieldProps) {
   return (
-    <label className={`block ${className}`}>
+    <label
+      className={`block ${className}`}
+    >
       <span className="mb-2 block text-sm font-semibold text-neutral-300">
         {label}
 
@@ -1499,7 +1948,8 @@ function FieldCounter({
   maximum: number;
 }) {
   const invalid =
-    minimum !== undefined && current < minimum;
+    minimum !== undefined &&
+    current < minimum;
 
   return (
     <div className="mt-2 flex items-center justify-between gap-3 text-[11px]">
@@ -1516,8 +1966,13 @@ function FieldCounter({
       </span>
 
       <span className="text-neutral-600">
-        {current.toLocaleString("fr-FR")} /{" "}
-        {maximum.toLocaleString("fr-FR")}
+        {current.toLocaleString(
+          "fr-FR",
+        )}{" "}
+        /{" "}
+        {maximum.toLocaleString(
+          "fr-FR",
+        )}
       </span>
     </div>
   );
@@ -1530,6 +1985,7 @@ function InfoValue({
 }: {
   label: string;
   value: string;
+
   icon: React.ComponentType<{
     className?: string;
   }>;
@@ -1553,18 +2009,29 @@ function InfoValue({
 
 type TicketTypeCardProps = {
   index: number;
-  ticketType: TicketTypeForm;
+
+  ticketType:
+    TicketTypeForm;
+
   currency: string;
   currencySymbol: string;
   currencyDecimals: number;
   platformFeePercent: number;
+
   canDelete: boolean;
+
   onUpdate: (
     localId: string,
-    field: keyof TicketTypeForm,
-    value: string | boolean,
+    field:
+      keyof TicketTypeForm,
+    value:
+      | string
+      | boolean,
   ) => void;
-  onRemove: (localId: string) => void;
+
+  onRemove: (
+    localId: string,
+  ) => void;
 };
 
 function TicketTypeCard({
@@ -1578,22 +2045,31 @@ function TicketTypeCard({
   onUpdate,
   onRemove,
 }: TicketTypeCardProps) {
-  const unitPrice = normalizeNumberInput(
-    ticketType.price,
-  );
+  const unitPrice =
+    normalizeNumberInput(
+      ticketType.price,
+    );
 
-  const quantity = Math.max(
-    Math.trunc(
-      normalizeNumberInput(ticketType.quantity),
-    ),
-    0,
-  );
+  const quantity =
+    Math.max(
+      Math.trunc(
+        normalizeNumberInput(
+          ticketType.quantity,
+        ),
+      ),
+      0,
+    );
 
-  const estimatedGross = unitPrice * quantity;
+  const estimatedGross =
+    unitPrice * quantity;
+
   const estimatedFee =
-    estimatedGross * (platformFeePercent / 100);
+    estimatedGross *
+    (platformFeePercent / 100);
+
   const estimatedNet =
-    estimatedGross - estimatedFee;
+    estimatedGross -
+    estimatedFee;
 
   return (
     <article className="rounded-2xl border border-white/[0.08] bg-[#050b0f] p-4">
@@ -1619,7 +2095,9 @@ function TicketTypeCard({
           type="button"
           disabled={!canDelete}
           onClick={() =>
-            onRemove(ticketType.localId)
+            onRemove(
+              ticketType.localId,
+            )
           }
           aria-label="Supprimer ce type de billet"
           className="flex h-9 w-9 items-center justify-center rounded-xl border border-white/[0.08] text-neutral-600 transition hover:border-red-500/30 hover:bg-red-500/10 hover:text-red-400 disabled:cursor-not-allowed disabled:opacity-30"
@@ -1629,11 +2107,18 @@ function TicketTypeCard({
       </div>
 
       <div className="mt-4 grid gap-4 md:grid-cols-2">
-        <Field label="Nom du billet" required>
+        <Field
+          label="Nom du billet"
+          required
+        >
           <input
             type="text"
-            value={ticketType.name}
-            onChange={(event) =>
+            value={
+              ticketType.name
+            }
+            onChange={(
+              event,
+            ) =>
               onUpdate(
                 ticketType.localId,
                 "name",
@@ -1641,15 +2126,21 @@ function TicketTypeCard({
               )
             }
             placeholder="Standard, VIP, VVIP..."
-            className={inputClassName}
+            className={
+              inputClassName
+            }
           />
         </Field>
 
         <Field label="Description">
           <input
             type="text"
-            value={ticketType.description}
-            onChange={(event) =>
+            value={
+              ticketType.description
+            }
+            onChange={(
+              event,
+            ) =>
               onUpdate(
                 ticketType.localId,
                 "description",
@@ -1657,7 +2148,9 @@ function TicketTypeCard({
               )
             }
             placeholder="Avantages et accès inclus"
-            className={inputClassName}
+            className={
+              inputClassName
+            }
           />
         </Field>
 
@@ -1672,11 +2165,16 @@ function TicketTypeCard({
                 ? "numeric"
                 : "decimal"
             }
-            value={ticketType.price}
-            onChange={(event) =>
+            value={
+              ticketType.price
+            }
+            onChange={(
+              event,
+            ) =>
               onUpdate(
                 ticketType.localId,
                 "price",
+
                 event.target.value.replace(
                   /[^0-9.,]/g,
                   "",
@@ -1688,16 +2186,25 @@ function TicketTypeCard({
                 ? "5000"
                 : "5000.00"
             }
-            className={inputClassName}
+            className={
+              inputClassName
+            }
           />
         </Field>
 
-        <Field label="Quantité disponible" required>
+        <Field
+          label="Quantité disponible"
+          required
+        >
           <input
             type="number"
             min={1}
-            value={ticketType.quantity}
-            onChange={(event) =>
+            value={
+              ticketType.quantity
+            }
+            onChange={(
+              event,
+            ) =>
               onUpdate(
                 ticketType.localId,
                 "quantity",
@@ -1705,7 +2212,9 @@ function TicketTypeCard({
               )
             }
             placeholder="500"
-            className={inputClassName}
+            className={
+              inputClassName
+            }
           />
         </Field>
 
@@ -1714,15 +2223,21 @@ function TicketTypeCard({
             type="number"
             min={1}
             max={100}
-            value={ticketType.maxPerOrder}
-            onChange={(event) =>
+            value={
+              ticketType.maxPerOrder
+            }
+            onChange={(
+              event,
+            ) =>
               onUpdate(
                 ticketType.localId,
                 "maxPerOrder",
                 event.target.value,
               )
             }
-            className={inputClassName}
+            className={
+              inputClassName
+            }
           />
         </Field>
 
@@ -1734,8 +2249,12 @@ function TicketTypeCard({
 
             <input
               type="checkbox"
-              checked={ticketType.isActive}
-              onChange={(event) =>
+              checked={
+                ticketType.isActive
+              }
+              onChange={(
+                event,
+              ) =>
                 onUpdate(
                   ticketType.localId,
                   "isActive",
@@ -1750,43 +2269,15 @@ function TicketTypeCard({
             </span>
           </label>
         </div>
-
-        <Field label="Début de vente spécifique">
-          <input
-            type="datetime-local"
-            value={ticketType.saleStartsAt}
-            onChange={(event) =>
-              onUpdate(
-                ticketType.localId,
-                "saleStartsAt",
-                event.target.value,
-              )
-            }
-            className={inputClassName}
-          />
-        </Field>
-
-        <Field label="Fin de vente spécifique">
-          <input
-            type="datetime-local"
-            value={ticketType.saleEndsAt}
-            onChange={(event) =>
-              onUpdate(
-                ticketType.localId,
-                "saleEndsAt",
-                event.target.value,
-              )
-            }
-            className={inputClassName}
-          />
-        </Field>
       </div>
 
       <div className="mt-4 grid gap-2.5 sm:grid-cols-3">
         <SmallTicketMetric
           label="Revenu brut potentiel"
           value={formatMoney({
-            amount: estimatedGross,
+            amount:
+              estimatedGross,
+
             currency,
           })}
         />
@@ -1794,7 +2285,9 @@ function TicketTypeCard({
         <SmallTicketMetric
           label="Commission Tikemia"
           value={formatMoney({
-            amount: estimatedFee,
+            amount:
+              estimatedFee,
+
             currency,
           })}
           tone="orange"
@@ -1803,7 +2296,9 @@ function TicketTypeCard({
         <SmallTicketMetric
           label="Revenu net potentiel"
           value={formatMoney({
-            amount: estimatedNet,
+            amount:
+              estimatedNet,
+
             currency,
           })}
           tone="green"
@@ -1820,7 +2315,11 @@ function SmallTicketMetric({
 }: {
   label: string;
   value: string;
-  tone?: "neutral" | "orange" | "green";
+
+  tone?:
+    | "neutral"
+    | "orange"
+    | "green";
 }) {
   const valueClass =
     tone === "green"
@@ -1852,29 +2351,46 @@ function SummaryLine({
 }: {
   label: string;
   value: string;
+
   icon: React.ComponentType<{
     className?: string;
   }>;
-  tone?: "neutral" | "orange" | "green";
+
+  tone?:
+    | "neutral"
+    | "orange"
+    | "green";
 }) {
   const styles =
     tone === "green"
       ? {
-          icon: "text-lime-400",
-          value: "text-lime-400",
+          icon:
+            "text-lime-400",
+
+          value:
+            "text-lime-400",
+
           wrapper:
             "border-emerald-500/18 bg-emerald-500/[0.045]",
         }
       : tone === "orange"
         ? {
-            icon: "text-orange-400",
-            value: "text-orange-400",
+            icon:
+              "text-orange-400",
+
+            value:
+              "text-orange-400",
+
             wrapper:
               "border-orange-500/18 bg-orange-500/[0.045]",
           }
         : {
-            icon: "text-neutral-500",
-            value: "text-white",
+            icon:
+              "text-neutral-500",
+
+            value:
+              "text-white",
+
             wrapper:
               "border-white/[0.07] bg-white/[0.02]",
           };
