@@ -1,6 +1,13 @@
-import { createHash } from "node:crypto";
+import {
+  createHash,
+} from "node:crypto";
 
-import { Prisma, TicketStatus, TicketTransferStatus } from "@prisma/client";
+import {
+  Prisma,
+  TicketStatus,
+  TicketTransferStatus,
+  UserRole,
+} from "@prisma/client";
 import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
 
@@ -8,33 +15,77 @@ import { prisma } from "@/lib/prisma";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
+export const revalidate = 0;
 
-const CLIENT_SESSION_COOKIE_NAME =
-  process.env.CLIENT_SESSION_COOKIE_NAME?.trim() ||
+const DEFAULT_CLIENT_SESSION_COOKIE_NAME =
   "tikemia_client_session";
 
-const ACTIVE_TRANSFER_STATUSES: TicketTransferStatus[] = [
+const LEGACY_SESSION_COOKIE_NAME =
+  "tikemia_session";
+
+const ACTIVE_TRANSFER_STATUSES:
+  TicketTransferStatus[] = [
   TicketTransferStatus.PENDING_VERIFICATION,
   TicketTransferStatus.PROCESSING,
 ];
 
+type AuthenticatedCustomer = Readonly<{
+  id: string;
+  firstName: string;
+  lastName: string;
+  email: string;
+  phone: string | null;
+}>;
+
 function jsonResponse(
   body: Record<string, unknown>,
   status = 200,
-) {
+): NextResponse {
   return NextResponse.json(body, {
     status,
+
     headers: {
-      "Cache-Control": "no-store, max-age=0",
-      Pragma: "no-cache",
+      "Cache-Control":
+        "no-store, no-cache, must-revalidate, max-age=0",
+
+      Pragma:
+        "no-cache",
+
+      Expires:
+        "0",
+
+      "X-Content-Type-Options":
+        "nosniff",
     },
   });
+}
+
+function normalizeText(
+  value:
+    | string
+    | null
+    | undefined,
+): string {
+  return value?.trim() ?? "";
+}
+
+function normalizeEmail(
+  value:
+    | string
+    | null
+    | undefined,
+): string {
+  return normalizeText(
+    value,
+  ).toLowerCase();
 }
 
 function hashSessionToken(
   token: string,
 ): string {
-  return createHash("sha256")
+  return createHash(
+    "sha256",
+  )
     .update(token)
     .digest("hex");
 }
@@ -45,14 +96,53 @@ function formatDecimal(
   return value.toFixed(2);
 }
 
-async function getAuthenticatedCustomer() {
+function getSessionCookieNames():
+  string[] {
+  return Array.from(
+    new Set(
+      [
+        normalizeText(
+          process.env
+            .CLIENT_SESSION_COOKIE_NAME,
+        ),
+
+        normalizeText(
+          process.env
+            .SESSION_COOKIE_NAME,
+        ),
+
+        DEFAULT_CLIENT_SESSION_COOKIE_NAME,
+        LEGACY_SESSION_COOKIE_NAME,
+      ].filter(Boolean),
+    ),
+  );
+}
+
+async function getAuthenticatedCustomer():
+  Promise<AuthenticatedCustomer | null> {
   const cookieStore =
     await cookies();
 
-  const sessionToken =
-    cookieStore
-      .get(CLIENT_SESSION_COOKIE_NAME)
-      ?.value?.trim();
+  let sessionToken = "";
+
+  for (
+    const cookieName of
+    getSessionCookieNames()
+  ) {
+    const cookieValue =
+      normalizeText(
+        cookieStore.get(
+          cookieName,
+        )?.value,
+      );
+
+    if (cookieValue) {
+      sessionToken =
+        cookieValue;
+
+      break;
+    }
+  }
 
   if (!sessionToken) {
     return null;
@@ -111,17 +201,47 @@ async function getAuthenticatedCustomer() {
 
   if (
     customer.role !==
-      "CUSTOMER" ||
+      UserRole.CUSTOMER ||
     !customer.emailVerified ||
     !customer.isActive
   ) {
     return null;
   }
 
-  return customer;
+  const email =
+    normalizeEmail(
+      customer.email,
+    );
+
+  if (!email) {
+    return null;
+  }
+
+  return {
+    id:
+      customer.id,
+
+    firstName:
+      normalizeText(
+        customer.firstName,
+      ),
+
+    lastName:
+      normalizeText(
+        customer.lastName,
+      ),
+
+    email,
+
+    phone:
+      normalizeText(
+        customer.phone,
+      ) || null,
+  };
 }
 
-export async function GET() {
+export async function GET():
+  Promise<NextResponse> {
   try {
     const customer =
       await getAuthenticatedCustomer();
@@ -129,8 +249,12 @@ export async function GET() {
     if (!customer) {
       return jsonResponse(
         {
-          success: false,
-          code: "UNAUTHORIZED",
+          success:
+            false,
+
+          code:
+            "UNAUTHORIZED",
+
           message:
             "Connectez-vous à votre compte Tikemia pour consulter vos billets transférables.",
         },
@@ -141,45 +265,76 @@ export async function GET() {
     const now =
       new Date();
 
-    const ticketWhere: Prisma.TicketWhereInput = {
-      status:
-        TicketStatus.VALID,
-
-      ownerId:
-        customer.id,
-
-      event: {
-        status:
-          "PUBLISHED",
-
-        startsAt: {
-          gt:
-            now,
+    /*
+     * Un billet est considéré comme appartenant au client si :
+     *
+     * 1. ownerId correspond directement au compte ;
+     * ou
+     * 2. holderEmail correspond à l’adresse du compte.
+     *
+     * Le deuxième cas couvre notamment :
+     * - les commandes invitées rattachées plus tard au compte ;
+     * - les anciens billets générés avant la liaison ownerId ;
+     * - les billets dont le propriétaire est connu par e-mail.
+     */
+    const ownershipFilter:
+      Prisma.TicketWhereInput = {
+      OR: [
+        {
+          ownerId:
+            customer.id,
         },
 
-        organizer: {
-          organizerSettings: {
-            is: {
-              allowTicketTransfer:
-                true,
-            },
+        {
+          holderEmail: {
+            equals:
+              customer.email,
+
+            mode:
+              "insensitive",
           },
         },
-      },
-
-      transferItems: {
-        none: {
-          transfer: {
-            status: {
-              in:
-                ACTIVE_TRANSFER_STATUSES,
-            },
-          },
-        },
-      },
+      ],
     };
 
-    const tickets =
+    const ticketWhere:
+      Prisma.TicketWhereInput = {
+      AND: [
+        ownershipFilter,
+
+        {
+          status:
+            TicketStatus.VALID,
+        },
+
+        {
+          event: {
+            status:
+              "PUBLISHED",
+
+            startsAt: {
+              gt:
+                now,
+            },
+          },
+        },
+
+        {
+          transferItems: {
+            none: {
+              transfer: {
+                status: {
+                  in:
+                    ACTIVE_TRANSFER_STATUSES,
+                },
+              },
+            },
+          },
+        },
+      ],
+    };
+
+    const foundTickets =
       await prisma.ticket.findMany({
         where:
           ticketWhere,
@@ -191,12 +346,14 @@ export async function GET() {
                 "asc",
             },
           },
+
           {
             ticketType: {
               name:
                 "asc",
             },
           },
+
           {
             createdAt:
               "asc",
@@ -207,6 +364,7 @@ export async function GET() {
           id: true,
           code: true,
           status: true,
+          ownerId: true,
           holderName: true,
           holderEmail: true,
           createdAt: true,
@@ -248,6 +406,22 @@ export async function GET() {
         },
       });
 
+    /*
+     * Si aucune ligne OrganizerSettings n’existe encore,
+     * le transfert reste autorisé par défaut.
+     *
+     * Le billet est exclu uniquement lorsque l’organisateur
+     * a explicitement défini allowTicketTransfer à false.
+     */
+    const tickets =
+      foundTickets.filter(
+        (ticket) =>
+          ticket.event.organizer
+            .organizerSettings
+            ?.allowTicketTransfer !==
+          false,
+      );
+
     const eventsMap =
       new Map<
         string,
@@ -255,35 +429,52 @@ export async function GET() {
           id: string;
           slug: string;
           title: string;
-          coverImage: string | null;
+          coverImage:
+            string | null;
           venueName: string;
           city: string;
           country: string;
           startsAt: string;
-          endsAt: string | null;
+          endsAt:
+            string | null;
           currency: string;
-          transferableTicketsCount: number;
+          transferableTicketsCount:
+            number;
+
           categories: Map<
             string,
             {
-              ticketTypeId: string;
-              name: string;
-              description: string | null;
-              unitPrice: string;
-              availableQuantity: number;
+              ticketTypeId:
+                string;
+              name:
+                string;
+              description:
+                string | null;
+              unitPrice:
+                string;
+              availableQuantity:
+                number;
+
               tickets: Array<{
-                id: string;
-                code: string;
-                holderName: string;
-                holderEmail: string;
-                purchasedAt: string;
+                id:
+                  string;
+                code:
+                  string;
+                holderName:
+                  string;
+                holderEmail:
+                  string;
+                purchasedAt:
+                  string;
               }>;
             }
           >;
         }
       >();
 
-    for (const ticket of tickets) {
+    for (
+      const ticket of tickets
+    ) {
       const eventId =
         ticket.event.id;
 
@@ -319,7 +510,8 @@ export async function GET() {
             ticket.event.startsAt.toISOString(),
 
           endsAt:
-            ticket.event.endsAt?.toISOString() ??
+            ticket.event.endsAt
+              ?.toISOString() ??
             null,
 
           currency:
@@ -338,7 +530,8 @@ export async function GET() {
         );
       }
 
-      eventEntry.transferableTicketsCount +=
+      eventEntry
+        .transferableTicketsCount +=
         1;
 
       const ticketTypeId =
@@ -352,11 +545,13 @@ export async function GET() {
       if (!categoryEntry) {
         categoryEntry = {
           ticketTypeId,
+
           name:
             ticket.ticketType.name,
 
           description:
-            ticket.ticketType.description,
+            ticket.ticketType
+              .description,
 
           unitPrice:
             formatDecimal(
@@ -376,7 +571,8 @@ export async function GET() {
         );
       }
 
-      categoryEntry.availableQuantity +=
+      categoryEntry
+        .availableQuantity +=
         1;
 
       categoryEntry.tickets.push({
@@ -387,10 +583,21 @@ export async function GET() {
           ticket.code,
 
         holderName:
-          ticket.holderName,
+          normalizeText(
+            ticket.holderName,
+          ) ||
+          `${customer.firstName} ${customer.lastName}`
+            .replace(
+              /\s+/g,
+              " ",
+            )
+            .trim(),
 
         holderEmail:
-          ticket.holderEmail,
+          normalizeEmail(
+            ticket.holderEmail,
+          ) ||
+          customer.email,
 
         purchasedAt:
           ticket.createdAt.toISOString(),
@@ -415,7 +622,13 @@ export async function GET() {
       );
 
     return jsonResponse({
-      success: true,
+      success:
+        true,
+
+      code:
+        events.length > 0
+          ? "TRANSFER_OPTIONS_LOADED"
+          : "NO_TRANSFERABLE_TICKETS",
 
       message:
         events.length > 0
@@ -428,6 +641,10 @@ export async function GET() {
 
         ticketsCount:
           tickets.length,
+
+        excludedByOrganizer:
+          foundTickets.length -
+          tickets.length,
       },
 
       events,
@@ -435,13 +652,31 @@ export async function GET() {
   } catch (error) {
     console.error(
       "[CLIENT_TRANSFER_OPTIONS_ERROR]",
-      error,
+      error instanceof Error
+        ? {
+            name:
+              error.name,
+
+            message:
+              error.message,
+
+            stack:
+              process.env.NODE_ENV ===
+              "development"
+                ? error.stack
+                : undefined,
+          }
+        : error,
     );
 
     return jsonResponse(
       {
-        success: false,
-        code: "INTERNAL_ERROR",
+        success:
+          false,
+
+        code:
+          "INTERNAL_ERROR",
+
         message:
           "Impossible de charger les billets transférables pour le moment. Réessayez.",
       },

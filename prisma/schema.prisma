@@ -51,12 +51,14 @@ model User {
   platformReportsCreated  PlatformReport[]         @relation("PlatformReportReporter")
   platformReportsAssigned PlatformReport[]         @relation("PlatformReportAssignee")
 
-  ownedTickets            Ticket[]         @relation("TicketOwner")
-  sentTicketTransfers     TicketTransfer[] @relation("TicketTransferSender")
-  receivedTicketTransfers TicketTransfer[] @relation("TicketTransferRecipient")
-  favoriteEvents          EventFavorite[]
-  deliveryLogs            DeliveryLog[]    @relation("DeliveryLogUser")
-  performedTicketScans    TicketScan[]     @relation("TicketScanPerformedBy")
+  ownedTickets              Ticket[]         @relation("TicketOwner")
+  sentTicketTransfers       TicketTransfer[] @relation("TicketTransferSender")
+  receivedTicketTransfers   TicketTransfer[] @relation("TicketTransferRecipient")
+  favoriteEvents            EventFavorite[]
+  deliveryLogs              DeliveryLog[]    @relation("DeliveryLogUser")
+  performedTicketScans      TicketScan[]     @relation("TicketScanPerformedBy")
+  scannerAssignments        EventScanner[]   @relation("EventScannerUser")
+  scannerAssignmentsCreated EventScanner[]   @relation("EventScannerCreatedBy")
 
   @@index([role])
   @@index([isActive])
@@ -216,6 +218,7 @@ model Event {
   boosts                EventBoost[]
   platformReports       PlatformReport[]
   eventFavorites        EventFavorite[]
+  scannerAssignments    EventScanner[]
 
   @@index([organizerId])
   @@index([categoryId])
@@ -1286,6 +1289,33 @@ model PlatformReport {
   @@index([category])
   @@index([targetType, targetId])
   @@index([createdAt])
+}
+
+model EventScanner {
+  id          String    @id @default(cuid())
+  eventId     String
+  scannerId   String
+  createdById String?
+  isActive    Boolean   @default(true)
+  gateName    String?
+  notes       String?
+  assignedAt  DateTime  @default(now())
+  revokedAt   DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  event Event @relation(fields: [eventId], references: [id], onDelete: Cascade)
+
+  scanner   User  @relation("EventScannerUser", fields: [scannerId], references: [id], onDelete: Cascade)
+  createdBy User? @relation("EventScannerCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+
+  @@unique([eventId, scannerId])
+  @@index([eventId])
+  @@index([scannerId])
+  @@index([createdById])
+  @@index([isActive])
+  @@index([eventId, isActive])
+  @@index([scannerId, isActive])
 }
 
 enum UserRole {

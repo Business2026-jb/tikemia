@@ -13,12 +13,17 @@ import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
 import { z } from "zod";
 
-import { sendTransferRecipientNotificationEmail } from "@/lib/client/transfers/send-transfer-recipient-notification-email";
+import {
+  sendTransferRecipientNotificationEmail,
+  type TransferTicketPdfAttachment,
+} from "@/lib/client/transfers/send-transfer-recipient-notification-email";
 import { sendTransferSenderConfirmationEmail } from "@/lib/client/transfers/send-transfer-sender-confirmation-email";
 import { prisma } from "@/lib/prisma";
+import { generateTicketPdf } from "@/lib/tickets/generate-ticket-pdf";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
+export const revalidate = 0;
 
 const CLIENT_SESSION_COOKIE_NAME =
   process.env.CLIENT_SESSION_COOKIE_NAME?.trim() ||
@@ -36,8 +41,14 @@ const confirmTransferSchema = z
     reference: z
       .string()
       .trim()
-      .min(8, "La référence du transfert est invalide.")
-      .max(100, "La référence du transfert est invalide."),
+      .min(
+        8,
+        "La référence du transfert est invalide.",
+      )
+      .max(
+        100,
+        "La référence du transfert est invalide.",
+      ),
 
     code: z
       .string()
@@ -54,8 +65,19 @@ type RateLimitEntry = {
   resetAt: number;
 };
 
-const RATE_LIMIT_WINDOW_MS = 10 * 60 * 1000;
-const RATE_LIMIT_MAX_REQUESTS = 12;
+type AuthenticatedCustomer = Readonly<{
+  id: string;
+  firstName: string;
+  lastName: string;
+  email: string;
+  phone: string | null;
+}>;
+
+const RATE_LIMIT_WINDOW_MS =
+  10 * 60 * 1000;
+
+const RATE_LIMIT_MAX_REQUESTS =
+  12;
 
 const globalForConfirmTransferRateLimit =
   globalThis as typeof globalThis & {
@@ -68,33 +90,100 @@ const globalForConfirmTransferRateLimit =
 const confirmTransferRateLimit =
   globalForConfirmTransferRateLimit
     .tikemiaConfirmTransferRateLimit ??
-  new Map<string, RateLimitEntry>();
+  new Map<
+    string,
+    RateLimitEntry
+  >();
 
-if (process.env.NODE_ENV !== "production") {
-  globalForConfirmTransferRateLimit
-    .tikemiaConfirmTransferRateLimit =
-    confirmTransferRateLimit;
-}
+globalForConfirmTransferRateLimit
+  .tikemiaConfirmTransferRateLimit =
+  confirmTransferRateLimit;
 
 function jsonResponse(
   body: Record<string, unknown>,
   status = 200,
-) {
-  return NextResponse.json(body, {
-    status,
-    headers: {
-      "Cache-Control": "no-store, max-age=0",
-      Pragma: "no-cache",
+): NextResponse {
+  return NextResponse.json(
+    body,
+    {
+      status,
+
+      headers: {
+        "Cache-Control":
+          "no-store, no-cache, must-revalidate, max-age=0",
+
+        Pragma:
+          "no-cache",
+
+        Expires:
+          "0",
+
+        "X-Content-Type-Options":
+          "nosniff",
+      },
     },
-  });
+  );
+}
+
+function normalizeText(
+  value:
+    | string
+    | null
+    | undefined,
+): string {
+  return value?.trim() ?? "";
+}
+
+function normalizeEmail(
+  value:
+    | string
+    | null
+    | undefined,
+): string {
+  return normalizeText(
+    value,
+  ).toLowerCase();
 }
 
 function hashValue(
   value: string,
 ): string {
-  return createHash("sha256")
-    .update(value)
-    .digest("hex");
+  return createHash(
+    "sha256",
+  )
+    .update(
+      value,
+    )
+    .digest(
+      "hex",
+    );
+}
+
+function getTransferCodeSecret():
+  string {
+  const secret =
+    normalizeText(
+      process.env
+        .TRANSFER_CODE_SECRET,
+    ) ||
+    normalizeText(
+      process.env
+        .SESSION_SECRET,
+    );
+
+  if (!secret) {
+    throw new Error(
+      "TRANSFER_CODE_SECRET_NOT_CONFIGURED",
+    );
+  }
+
+  if (secret.length < 32) {
+    throw new Error(
+      "TRANSFER_CODE_SECRET_TOO_SHORT",
+    );
+  }
+
+  return secret;
 }
 
 function hashTransferCode({
@@ -105,9 +194,7 @@ function hashTransferCode({
   code: string;
 }): string {
   const secret =
-    process.env.TRANSFER_CODE_SECRET?.trim() ||
-    process.env.SESSION_SECRET?.trim() ||
-    "";
+    getTransferCodeSecret();
 
   return hashValue(
     `${transferReference}:${code}:${secret}`,
@@ -118,6 +205,17 @@ function safeHashEquals(
   leftHash: string,
   rightHash: string,
 ): boolean {
+  if (
+    !/^[a-f0-9]{64}$/i.test(
+      leftHash,
+    ) ||
+    !/^[a-f0-9]{64}$/i.test(
+      rightHash,
+    )
+  ) {
+    return false;
+  }
+
   const leftBuffer =
     Buffer.from(
       leftHash,
@@ -144,14 +242,6 @@ function safeHashEquals(
   );
 }
 
-function normalizeEmail(
-  value: string,
-): string {
-  return value
-    .trim()
-    .toLowerCase();
-}
-
 function maskEmail(
   email: string,
 ): string {
@@ -164,7 +254,9 @@ function maskEmail(
     localPart,
     domain,
   ] =
-    normalized.split("@");
+    normalized.split(
+      "@",
+    );
 
   if (
     !localPart ||
@@ -202,11 +294,17 @@ function getRequestAddress(
 ): string {
   return (
     request.headers
-      .get("x-forwarded-for")
-      ?.split(",")[0]
+      .get(
+        "x-forwarded-for",
+      )
+      ?.split(
+        ",",
+      )[0]
       ?.trim() ||
     request.headers
-      .get("x-real-ip")
+      .get(
+        "x-real-ip",
+      )
       ?.trim() ||
     "unknown"
   );
@@ -233,7 +331,9 @@ function consumeRateLimit(
     confirmTransferRateLimit.set(
       key,
       {
-        count: 1,
+        count:
+          1,
+
         resetAt:
           now +
           RATE_LIMIT_WINDOW_MS,
@@ -241,8 +341,11 @@ function consumeRateLimit(
     );
 
     return {
-      allowed: true,
-      retryAfterSeconds: 0,
+      allowed:
+        true,
+
+      retryAfterSeconds:
+        0,
     };
   }
 
@@ -251,20 +354,25 @@ function consumeRateLimit(
     RATE_LIMIT_MAX_REQUESTS
   ) {
     return {
-      allowed: false,
+      allowed:
+        false,
+
       retryAfterSeconds:
         Math.max(
           1,
           Math.ceil(
-            (current.resetAt -
-              now) /
+            (
+              current.resetAt -
+              now
+            ) /
               1000,
           ),
         ),
     };
   }
 
-  current.count += 1;
+  current.count +=
+    1;
 
   confirmTransferRateLimit.set(
     key,
@@ -272,21 +380,25 @@ function consumeRateLimit(
   );
 
   return {
-    allowed: true,
-    retryAfterSeconds: 0,
+    allowed:
+      true,
+
+    retryAfterSeconds:
+      0,
   };
 }
 
-async function getAuthenticatedCustomer() {
+async function getAuthenticatedCustomer():
+  Promise<AuthenticatedCustomer | null> {
   const cookieStore =
     await cookies();
 
   const sessionToken =
-    cookieStore
-      .get(
+    normalizeText(
+      cookieStore.get(
         CLIENT_SESSION_COOKIE_NAME,
-      )
-      ?.value?.trim();
+      )?.value,
+    );
 
   if (!sessionToken) {
     return null;
@@ -302,19 +414,37 @@ async function getAuthenticatedCustomer() {
       },
 
       select: {
-        id: true,
-        expiresAt: true,
+        id:
+          true,
+
+        expiresAt:
+          true,
 
         user: {
           select: {
-            id: true,
-            firstName: true,
-            lastName: true,
-            email: true,
-            phone: true,
-            role: true,
-            emailVerified: true,
-            isActive: true,
+            id:
+              true,
+
+            firstName:
+              true,
+
+            lastName:
+              true,
+
+            email:
+              true,
+
+            phone:
+              true,
+
+            role:
+              true,
+
+            emailVerified:
+              true,
+
+            isActive:
+              true,
           },
         },
       },
@@ -335,7 +465,10 @@ async function getAuthenticatedCustomer() {
             session.id,
         },
       })
-      .catch(() => undefined);
+      .catch(
+        () =>
+          undefined,
+      );
 
     return null;
   }
@@ -343,13 +476,256 @@ async function getAuthenticatedCustomer() {
   if (
     session.user.role !==
       "CUSTOMER" ||
-    !session.user.emailVerified ||
-    !session.user.isActive
+    !session.user
+      .emailVerified ||
+    !session.user
+      .isActive
   ) {
     return null;
   }
 
-  return session.user;
+  const email =
+    normalizeEmail(
+      session.user.email,
+    );
+
+  if (!email) {
+    return null;
+  }
+
+  return {
+    id:
+      session.user.id,
+
+    firstName:
+      normalizeText(
+        session.user.firstName,
+      ),
+
+    lastName:
+      normalizeText(
+        session.user.lastName,
+      ),
+
+    email,
+
+    phone:
+      normalizeText(
+        session.user.phone,
+      ) || null,
+  };
+}
+
+function ticketBelongsToSender({
+  ownerId,
+  holderEmail,
+  senderId,
+  senderEmail,
+}: {
+  ownerId:
+    string | null;
+  holderEmail:
+    string | null;
+  senderId:
+    string;
+  senderEmail:
+    string;
+}): boolean {
+  if (
+    ownerId ===
+    senderId
+  ) {
+    return true;
+  }
+
+  const normalizedHolderEmail =
+    normalizeEmail(
+      holderEmail,
+    );
+
+  const normalizedSenderEmail =
+    normalizeEmail(
+      senderEmail,
+    );
+
+  return (
+    Boolean(
+      normalizedHolderEmail,
+    ) &&
+    normalizedHolderEmail ===
+      normalizedSenderEmail
+  );
+}
+
+function isTransferAllowedByOrganizer(
+  allowTicketTransfer:
+    | boolean
+    | null
+    | undefined,
+): boolean {
+  /*
+   * Règle commune aux trois routes :
+   *
+   * false       → transfert interdit
+   * true        → transfert autorisé
+   * null/absent → transfert autorisé par défaut
+   */
+  return (
+    allowTicketTransfer !==
+    false
+  );
+}
+
+function buildCurrentOwnerWhere({
+  senderId,
+  senderEmail,
+}: {
+  senderId: string;
+  senderEmail: string;
+}): Prisma.TicketWhereInput {
+  const normalizedSenderEmail =
+    normalizeEmail(
+      senderEmail,
+    );
+
+  const ownershipConditions:
+    Prisma.TicketWhereInput[] = [
+    {
+      ownerId:
+        senderId,
+    },
+  ];
+
+  if (normalizedSenderEmail) {
+    ownershipConditions.push({
+      holderEmail: {
+        equals:
+          normalizedSenderEmail,
+
+        mode:
+          Prisma.QueryMode.insensitive,
+      },
+    });
+  }
+
+  return {
+    OR:
+      ownershipConditions,
+  };
+}
+
+type TransferPdfGenerationResult =
+  | Readonly<{
+      success: true;
+      attachments: TransferTicketPdfAttachment[];
+      error: null;
+    }>
+  | Readonly<{
+      success: false;
+      attachments: [];
+      error: string;
+    }>;
+
+async function generateTransferredTicketPdfAttachments({
+  ticketIds,
+  generatedAt,
+}: {
+  ticketIds: readonly string[];
+  generatedAt: Date;
+}): Promise<TransferPdfGenerationResult> {
+  try {
+    const generatedPdfs =
+      await Promise.all(
+        ticketIds.map(
+          async (
+            ticketId,
+          ) => {
+            /*
+             * Le PDF est généré après la transaction.
+             * Le billet contient donc déjà le nouveau
+             * propriétaire et les informations du destinataire.
+             */
+            return generateTicketPdf({
+              ticketId,
+              generatedAt,
+            });
+          },
+        ),
+      );
+
+    if (
+      generatedPdfs.length !==
+      ticketIds.length
+    ) {
+      return {
+        success:
+          false,
+
+        attachments:
+          [],
+
+        error:
+          "Tous les billets PDF transférés n’ont pas pu être générés.",
+      };
+    }
+
+    const attachments =
+      generatedPdfs.map(
+        (
+          pdf,
+        ): TransferTicketPdfAttachment => ({
+          filename:
+            pdf.fileName,
+
+          contentBase64:
+            pdf.buffer.toString(
+              "base64",
+            ),
+        }),
+      );
+
+    return {
+      success:
+        true,
+
+      attachments,
+
+      error:
+        null,
+    };
+  } catch (error) {
+    console.error(
+      "[CLIENT_TRANSFER_PDF_GENERATION_ERROR]",
+      error instanceof Error
+        ? {
+            name:
+              error.name,
+
+            message:
+              error.message,
+
+            stack:
+              process.env.NODE_ENV ===
+              "development"
+                ? error.stack
+                : undefined,
+          }
+        : error,
+    );
+
+    return {
+      success:
+        false,
+
+      attachments:
+        [],
+
+      error:
+        error instanceof Error
+          ? error.message
+          : "Impossible de générer les billets PDF transférés.",
+    };
+  }
 }
 
 async function registerInvalidAttempt({
@@ -358,9 +734,14 @@ async function registerInvalidAttempt({
 }: {
   transferId: string;
   currentAttempts: number;
-}) {
+}): Promise<{
+  nextAttempts: number;
+  reachedLimit: boolean;
+  remainingAttempts: number;
+}> {
   const nextAttempts =
-    currentAttempts + 1;
+    currentAttempts +
+    1;
 
   const reachedLimit =
     nextAttempts >=
@@ -394,6 +775,7 @@ async function registerInvalidAttempt({
   return {
     nextAttempts,
     reachedLimit,
+
     remainingAttempts:
       Math.max(
         0,
@@ -405,7 +787,7 @@ async function registerInvalidAttempt({
 
 export async function POST(
   request: Request,
-) {
+): Promise<NextResponse> {
   try {
     const customer =
       await getAuthenticatedCustomer();
@@ -413,8 +795,12 @@ export async function POST(
     if (!customer) {
       return jsonResponse(
         {
-          success: false,
-          code: "UNAUTHORIZED",
+          success:
+            false,
+
+          code:
+            "UNAUTHORIZED",
+
           message:
             "Connectez-vous à votre compte Tikemia pour confirmer ce transfert.",
         },
@@ -429,30 +815,43 @@ export async function POST(
         )}`,
       );
 
-    if (!rateLimit.allowed) {
+    if (
+      !rateLimit.allowed
+    ) {
       return NextResponse.json(
         {
-          success: false,
-          code: "TOO_MANY_REQUESTS",
+          success:
+            false,
+
+          code:
+            "TOO_MANY_REQUESTS",
+
           message:
             "Trop de tentatives ont été effectuées. Réessayez dans quelques minutes.",
         },
         {
-          status: 429,
+          status:
+            429,
+
           headers: {
             "Cache-Control":
               "no-store, max-age=0",
 
             "Retry-After":
               String(
-                rateLimit.retryAfterSeconds,
+                rateLimit
+                  .retryAfterSeconds,
               ),
+
+            "X-Content-Type-Options":
+              "nosniff",
           },
         },
       );
     }
 
-    let rawBody: unknown;
+    let rawBody:
+      unknown;
 
     try {
       rawBody =
@@ -460,8 +859,12 @@ export async function POST(
     } catch {
       return jsonResponse(
         {
-          success: false,
-          code: "INVALID_JSON",
+          success:
+            false,
+
+          code:
+            "INVALID_JSON",
+
           message:
             "La requête envoyée est invalide.",
         },
@@ -474,13 +877,20 @@ export async function POST(
         rawBody,
       );
 
-    if (!parsedBody.success) {
+    if (
+      !parsedBody.success
+    ) {
       return jsonResponse(
         {
-          success: false,
-          code: "INVALID_REQUEST",
+          success:
+            false,
+
+          code:
+            "INVALID_REQUEST",
+
           message:
-            parsedBody.error.issues[0]
+            parsedBody.error
+              .issues[0]
               ?.message ||
             "Les informations de confirmation sont invalides.",
         },
@@ -501,33 +911,68 @@ export async function POST(
         },
 
         select: {
-          id: true,
-          reference: true,
-          senderId: true,
-          recipientId: true,
-          status: true,
-          verificationCodeHash: true,
-          verificationAttempts: true,
-          verificationExpiresAt: true,
-          completedAt: true,
+          id:
+            true,
+
+          reference:
+            true,
+
+          senderId:
+            true,
+
+          recipientId:
+            true,
+
+          status:
+            true,
+
+          verificationCodeHash:
+            true,
+
+          verificationAttempts:
+            true,
+
+          verificationExpiresAt:
+            true,
+
+          completedAt:
+            true,
 
           recipient: {
             select: {
-              id: true,
-              firstName: true,
-              lastName: true,
-              email: true,
-              phone: true,
-              role: true,
-              emailVerified: true,
-              isActive: true,
+              id:
+                true,
+
+              firstName:
+                true,
+
+              lastName:
+                true,
+
+              email:
+                true,
+
+              phone:
+                true,
+
+              role:
+                true,
+
+              emailVerified:
+                true,
+
+              isActive:
+                true,
             },
           },
 
           items: {
             select: {
-              id: true,
-              ticketId: true,
+              id:
+                true,
+
+              ticketId:
+                true,
             },
           },
         },
@@ -540,8 +985,12 @@ export async function POST(
     ) {
       return jsonResponse(
         {
-          success: false,
-          code: "TRANSFER_NOT_FOUND",
+          success:
+            false,
+
+          code:
+            "TRANSFER_NOT_FOUND",
+
           message:
             "Ce transfert est introuvable ou ne vous appartient pas.",
         },
@@ -554,8 +1003,12 @@ export async function POST(
       TicketTransferStatus.COMPLETED
     ) {
       return jsonResponse({
-        success: true,
-        code: "ALREADY_COMPLETED",
+        success:
+          true,
+
+        code:
+          "ALREADY_COMPLETED",
+
         message:
           "Ce transfert a déjà été confirmé.",
 
@@ -564,7 +1017,8 @@ export async function POST(
             existingTransfer.reference,
 
           completedAt:
-            existingTransfer.completedAt?.toISOString() ??
+            existingTransfer.completedAt
+              ?.toISOString() ??
             null,
 
           ticketsCount:
@@ -579,8 +1033,12 @@ export async function POST(
     ) {
       return jsonResponse(
         {
-          success: false,
-          code: "TRANSFER_PROCESSING",
+          success:
+            false,
+
+          code:
+            "TRANSFER_PROCESSING",
+
           message:
             "Ce transfert est déjà en cours de traitement.",
         },
@@ -594,8 +1052,12 @@ export async function POST(
     ) {
       return jsonResponse(
         {
-          success: false,
-          code: "TRANSFER_NOT_CONFIRMABLE",
+          success:
+            false,
+
+          code:
+            "TRANSFER_NOT_CONFIRMABLE",
+
           message:
             "Ce transfert ne peut plus être confirmé.",
         },
@@ -607,7 +1069,9 @@ export async function POST(
       new Date();
 
     if (
-      existingTransfer.verificationExpiresAt.getTime() <=
+      existingTransfer
+        .verificationExpiresAt
+        .getTime() <=
       now.getTime()
     ) {
       await prisma.ticketTransfer.updateMany({
@@ -633,8 +1097,12 @@ export async function POST(
 
       return jsonResponse(
         {
-          success: false,
-          code: "CODE_EXPIRED",
+          success:
+            false,
+
+          code:
+            "CODE_EXPIRED",
+
           message:
             "Le code de confirmation a expiré. Demandez un nouveau code.",
         },
@@ -643,13 +1111,18 @@ export async function POST(
     }
 
     if (
-      existingTransfer.verificationAttempts >=
+      existingTransfer
+        .verificationAttempts >=
       MAX_VERIFICATION_ATTEMPTS
     ) {
       return jsonResponse(
         {
-          success: false,
-          code: "MAX_ATTEMPTS_REACHED",
+          success:
+            false,
+
+          code:
+            "MAX_ATTEMPTS_REACHED",
+
           message:
             "Le nombre maximal de tentatives a été atteint. Recommencez le transfert.",
         },
@@ -667,7 +1140,9 @@ export async function POST(
 
     const codeIsValid =
       safeHashEquals(
-        existingTransfer.verificationCodeHash,
+        existingTransfer
+          .verificationCodeHash,
+
         submittedHash,
       );
 
@@ -678,12 +1153,14 @@ export async function POST(
             existingTransfer.id,
 
           currentAttempts:
-            existingTransfer.verificationAttempts,
+            existingTransfer
+              .verificationAttempts,
         });
 
       return jsonResponse(
         {
-          success: false,
+          success:
+            false,
 
           code:
             attempt.reachedLimit
@@ -705,10 +1182,13 @@ export async function POST(
     }
 
     if (
-      existingTransfer.recipient.role !==
+      existingTransfer
+        .recipient.role !==
         "CUSTOMER" ||
-      !existingTransfer.recipient.emailVerified ||
-      !existingTransfer.recipient.isActive
+      !existingTransfer
+        .recipient.emailVerified ||
+      !existingTransfer
+        .recipient.isActive
     ) {
       await prisma.ticketTransfer.update({
         where: {
@@ -730,8 +1210,12 @@ export async function POST(
 
       return jsonResponse(
         {
-          success: false,
-          code: "RECIPIENT_UNAVAILABLE",
+          success:
+            false,
+
+          code:
+            "RECIPIENT_UNAVAILABLE",
+
           message:
             "Le compte Tikemia du destinataire n’est plus disponible.",
         },
@@ -752,36 +1236,77 @@ export async function POST(
               },
 
               select: {
-                id: true,
-                reference: true,
-                senderId: true,
-                recipientId: true,
-                status: true,
-                verificationExpiresAt: true,
+                id:
+                  true,
+
+                reference:
+                  true,
+
+                senderId:
+                  true,
+
+                recipientId:
+                  true,
+
+                status:
+                  true,
+
+                verificationExpiresAt:
+                  true,
 
                 sender: {
                   select: {
-                    id: true,
-                    firstName: true,
-                    lastName: true,
-                    email: true,
-                    phone: true,
-                    role: true,
-                    emailVerified: true,
-                    isActive: true,
+                    id:
+                      true,
+
+                    firstName:
+                      true,
+
+                    lastName:
+                      true,
+
+                    email:
+                      true,
+
+                    phone:
+                      true,
+
+                    role:
+                      true,
+
+                    emailVerified:
+                      true,
+
+                    isActive:
+                      true,
                   },
                 },
 
                 recipient: {
                   select: {
-                    id: true,
-                    firstName: true,
-                    lastName: true,
-                    email: true,
-                    phone: true,
-                    role: true,
-                    emailVerified: true,
-                    isActive: true,
+                    id:
+                      true,
+
+                    firstName:
+                      true,
+
+                    lastName:
+                      true,
+
+                    email:
+                      true,
+
+                    phone:
+                      true,
+
+                    role:
+                      true,
+
+                    emailVerified:
+                      true,
+
+                    isActive:
+                      true,
                   },
                 },
 
@@ -792,32 +1317,69 @@ export async function POST(
                   },
 
                   select: {
-                    id: true,
-                    ticketId: true,
-                    newOwnerId: true,
-                    newHolderName: true,
-                    newHolderEmail: true,
-                    newHolderPhone: true,
+                    id:
+                      true,
+
+                    ticketId:
+                      true,
+
+                    newOwnerId:
+                      true,
+
+                    newHolderName:
+                      true,
+
+                    newHolderEmail:
+                      true,
+
+                    newHolderPhone:
+                      true,
 
                     ticket: {
                       select: {
-                        id: true,
-                        code: true,
-                        ownerId: true,
-                        status: true,
-                        holderName: true,
-                        holderEmail: true,
-                        holderPhone: true,
+                        id:
+                          true,
+
+                        code:
+                          true,
+
+                        ownerId:
+                          true,
+
+                        status:
+                          true,
+
+                        holderName:
+                          true,
+
+                        holderEmail:
+                          true,
+
+                        holderPhone:
+                          true,
 
                         event: {
                           select: {
-                            id: true,
-                            title: true,
-                            startsAt: true,
-                            endsAt: true,
-                            venueName: true,
-                            city: true,
-                            status: true,
+                            id:
+                              true,
+
+                            title:
+                              true,
+
+                            startsAt:
+                              true,
+
+                            endsAt:
+                              true,
+
+                            venueName:
+                              true,
+
+                            city:
+                              true,
+
+                            status:
+                              true,
 
                             organizer: {
                               select: {
@@ -834,8 +1396,11 @@ export async function POST(
 
                         ticketType: {
                           select: {
-                            id: true,
-                            name: true,
+                            id:
+                              true,
+
+                            name:
+                              true,
                           },
                         },
 
@@ -855,7 +1420,8 @@ export async function POST(
                           },
 
                           select: {
-                            id: true,
+                            id:
+                              true,
                           },
 
                           take:
@@ -888,7 +1454,9 @@ export async function POST(
           }
 
           if (
-            transfer.verificationExpiresAt.getTime() <=
+            transfer
+              .verificationExpiresAt
+              .getTime() <=
             Date.now()
           ) {
             throw new Error(
@@ -899,8 +1467,10 @@ export async function POST(
           if (
             transfer.sender.role !==
               "CUSTOMER" ||
-            !transfer.sender.emailVerified ||
-            !transfer.sender.isActive
+            !transfer.sender
+              .emailVerified ||
+            !transfer.sender
+              .isActive
           ) {
             throw new Error(
               "SENDER_UNAVAILABLE",
@@ -910,8 +1480,10 @@ export async function POST(
           if (
             transfer.recipient.role !==
               "CUSTOMER" ||
-            !transfer.recipient.emailVerified ||
-            !transfer.recipient.isActive
+            !transfer.recipient
+              .emailVerified ||
+            !transfer.recipient
+              .isActive
           ) {
             throw new Error(
               "RECIPIENT_UNAVAILABLE",
@@ -928,7 +1500,8 @@ export async function POST(
           }
 
           if (
-            transfer.items.length === 0
+            transfer.items.length ===
+            0
           ) {
             throw new Error(
               "NO_TRANSFER_ITEMS",
@@ -939,7 +1512,8 @@ export async function POST(
             new Set<string>();
 
           for (
-            const item of transfer.items
+            const item of
+            transfer.items
           ) {
             const ticket =
               item.ticket;
@@ -949,8 +1523,19 @@ export async function POST(
             );
 
             if (
-              ticket.ownerId !==
-              transfer.senderId
+              !ticketBelongsToSender({
+                ownerId:
+                  ticket.ownerId,
+
+                holderEmail:
+                  ticket.holderEmail,
+
+                senderId:
+                  transfer.senderId,
+
+                senderEmail:
+                  transfer.sender.email,
+              })
             ) {
               throw new Error(
                 "TICKET_OWNER_CHANGED",
@@ -976,7 +1561,9 @@ export async function POST(
             }
 
             if (
-              ticket.event.startsAt.getTime() <=
+              ticket.event
+                .startsAt
+                .getTime() <=
               Date.now()
             ) {
               throw new Error(
@@ -985,10 +1572,12 @@ export async function POST(
             }
 
             if (
-              ticket.event.organizer
-                .organizerSettings
-                ?.allowTicketTransfer !==
-              true
+              !isTransferAllowedByOrganizer(
+                ticket.event
+                  .organizer
+                  .organizerSettings
+                  ?.allowTicketTransfer,
+              )
             ) {
               throw new Error(
                 "TRANSFER_DISABLED",
@@ -996,7 +1585,9 @@ export async function POST(
             }
 
             if (
-              ticket.transferItems.length >
+              ticket
+                .transferItems
+                .length >
               0
             ) {
               throw new Error(
@@ -1060,8 +1651,26 @@ export async function POST(
           const transferredAt =
             new Date();
 
+          const recipientFullName =
+            `${normalizeText(
+              transfer.recipient.firstName,
+            )} ${normalizeText(
+              transfer.recipient.lastName,
+            )}`
+              .replace(
+                /\s+/g,
+                " ",
+              )
+              .trim();
+
+          const recipientEmail =
+            normalizeEmail(
+              transfer.recipient.email,
+            );
+
           for (
-            const item of transfer.items
+            const item of
+            transfer.items
           ) {
             const ticketUpdate =
               await transaction.ticket.updateMany({
@@ -1069,11 +1678,36 @@ export async function POST(
                   id:
                     item.ticketId,
 
-                  ownerId:
-                    transfer.senderId,
-
                   status:
                     TicketStatus.VALID,
+
+                  AND: [
+                    buildCurrentOwnerWhere({
+                      senderId:
+                        transfer.senderId,
+
+                      senderEmail:
+                        transfer.sender.email,
+                    }),
+
+                    {
+                      transferItems: {
+                        none: {
+                          transfer: {
+                            id: {
+                              not:
+                                transfer.id,
+                            },
+
+                            status: {
+                              in:
+                                ACTIVE_TRANSFER_STATUSES,
+                            },
+                          },
+                        },
+                      },
+                    },
+                  ],
                 },
 
                 data: {
@@ -1081,10 +1715,10 @@ export async function POST(
                     transfer.recipientId,
 
                   holderName:
-                    `${transfer.recipient.firstName} ${transfer.recipient.lastName}`.trim(),
+                    recipientFullName,
 
                   holderEmail:
-                    transfer.recipient.email,
+                    recipientEmail,
 
                   holderPhone:
                     transfer.recipient.phone,
@@ -1111,10 +1745,10 @@ export async function POST(
                   transfer.recipientId,
 
                 newHolderName:
-                  `${transfer.recipient.firstName} ${transfer.recipient.lastName}`.trim(),
+                  recipientFullName,
 
                 newHolderEmail:
-                  transfer.recipient.email,
+                  recipientEmail,
 
                 newHolderPhone:
                   transfer.recipient.phone,
@@ -1124,98 +1758,129 @@ export async function POST(
             });
           }
 
-          const finalTransfer =
-            await transaction.ticketTransfer.update({
-              where: {
-                id:
-                  transfer.id,
+          return transaction.ticketTransfer.update({
+            where: {
+              id:
+                transfer.id,
+            },
+
+            data: {
+              status:
+                TicketTransferStatus.COMPLETED,
+
+              completedAt:
+                transferredAt,
+
+              failureReason:
+                null,
+
+              senderEmailStatus:
+                TransferEmailStatus.PENDING,
+
+              senderEmailFailureReason:
+                null,
+
+              recipientEmailStatus:
+                TransferEmailStatus.PENDING,
+
+              recipientEmailFailureReason:
+                null,
+            },
+
+            select: {
+              id:
+                true,
+
+              reference:
+                true,
+
+              completedAt:
+                true,
+
+              sender: {
+                select: {
+                  id:
+                    true,
+
+                  firstName:
+                    true,
+
+                  lastName:
+                    true,
+
+                  email:
+                    true,
+                },
               },
 
-              data: {
-                status:
-                  TicketTransferStatus.COMPLETED,
+              recipient: {
+                select: {
+                  id:
+                    true,
 
-                completedAt:
-                  transferredAt,
+                  firstName:
+                    true,
 
-                failureReason:
-                  null,
+                  lastName:
+                    true,
 
-                senderEmailStatus:
-                  TransferEmailStatus.PENDING,
-
-                senderEmailFailureReason:
-                  null,
-
-                recipientEmailStatus:
-                  TransferEmailStatus.PENDING,
-
-                recipientEmailFailureReason:
-                  null,
+                  email:
+                    true,
+                },
               },
 
-              select: {
-                id: true,
-                reference: true,
-                completedAt: true,
-
-                sender: {
-                  select: {
-                    id: true,
-                    firstName: true,
-                    lastName: true,
-                    email: true,
-                  },
+              items: {
+                orderBy: {
+                  createdAt:
+                    "asc",
                 },
 
-                recipient: {
-                  select: {
-                    id: true,
-                    firstName: true,
-                    lastName: true,
-                    email: true,
-                  },
-                },
+                select: {
+                  ticket: {
+                    select: {
+                      id:
+                        true,
 
-                items: {
-                  orderBy: {
-                    createdAt:
-                      "asc",
-                  },
+                      code:
+                        true,
 
-                  select: {
-                    ticket: {
-                      select: {
-                        id: true,
-                        code: true,
+                      event: {
+                        select: {
+                          id:
+                            true,
 
-                        event: {
-                          select: {
-                            id: true,
-                            title: true,
-                            startsAt: true,
-                            venueName: true,
-                            city: true,
-                          },
+                          title:
+                            true,
+
+                          startsAt:
+                            true,
+
+                          venueName:
+                            true,
+
+                          city:
+                            true,
                         },
+                      },
 
-                        ticketType: {
-                          select: {
-                            name: true,
-                          },
+                      ticketType: {
+                        select: {
+                          name:
+                            true,
                         },
                       },
                     },
                   },
                 },
               },
-            });
-
-          return finalTransfer;
+            },
+          });
         },
         {
           isolationLevel:
-            Prisma.TransactionIsolationLevel.Serializable,
+            Prisma
+              .TransactionIsolationLevel
+              .Serializable,
 
           maxWait:
             5000,
@@ -1226,7 +1891,8 @@ export async function POST(
       );
 
     const firstTransferredTicket =
-      completedTransfer.items[0]
+      completedTransfer
+        .items[0]
         ?.ticket;
 
     if (!firstTransferredTicket) {
@@ -1236,14 +1902,33 @@ export async function POST(
     }
 
     const completedAt =
-      completedTransfer.completedAt ??
+      completedTransfer
+        .completedAt ??
       new Date();
 
     const senderFullName =
-      `${completedTransfer.sender.firstName} ${completedTransfer.sender.lastName}`.trim();
+      `${normalizeText(
+        completedTransfer.sender.firstName,
+      )} ${normalizeText(
+        completedTransfer.sender.lastName,
+      )}`
+        .replace(
+          /\s+/g,
+          " ",
+        )
+        .trim();
 
     const recipientFullName =
-      `${completedTransfer.recipient.firstName} ${completedTransfer.recipient.lastName}`.trim();
+      `${normalizeText(
+        completedTransfer.recipient.firstName,
+      )} ${normalizeText(
+        completedTransfer.recipient.lastName,
+      )}`
+        .replace(
+          /\s+/g,
+          " ",
+        )
+        .trim();
 
     const transferredTickets =
       completedTransfer.items.map(
@@ -1251,12 +1936,28 @@ export async function POST(
           item,
         ) => ({
           ticketTypeName:
-            item.ticket.ticketType.name,
+            item.ticket
+              .ticketType
+              .name,
 
           ticketCode:
             item.ticket.code,
         }),
       );
+
+    const transferPdfGeneration =
+      await generateTransferredTicketPdfAttachments({
+        ticketIds:
+          completedTransfer.items.map(
+            (
+              item,
+            ) =>
+              item.ticket.id,
+          ),
+
+        generatedAt:
+          completedAt,
+      });
 
     const [
       senderEmailResult,
@@ -1299,9 +2000,10 @@ export async function POST(
           completedAt,
         }),
 
-        sendTransferRecipientNotificationEmail({
-          to:
-            completedTransfer.recipient.email,
+        transferPdfGeneration.success
+          ? sendTransferRecipientNotificationEmail({
+              to:
+                completedTransfer.recipient.email,
 
           firstName:
             completedTransfer.recipient.firstName,
@@ -1333,50 +2035,83 @@ export async function POST(
             transferredTickets,
 
           completedAt,
-        }),
+
+              pdfAttachments:
+                transferPdfGeneration.attachments,
+            })
+          : Promise.resolve({
+              success:
+                false as const,
+
+              messageId:
+                null,
+
+              attachedPdfCount:
+                0,
+
+              error:
+                transferPdfGeneration.error,
+            }),
       ]);
 
-    await prisma.ticketTransfer.update({
-      where: {
-        id:
-          completedTransfer.id,
-      },
+    await prisma.ticketTransfer
+      .update({
+        where: {
+          id:
+            completedTransfer.id,
+        },
 
-      data: {
-        senderEmailStatus:
-          senderEmailResult.success
-            ? TransferEmailStatus.SENT
-            : TransferEmailStatus.FAILED,
+        data: {
+          senderEmailStatus:
+            senderEmailResult.success
+              ? TransferEmailStatus.SENT
+              : TransferEmailStatus.FAILED,
 
-        senderEmailSentAt:
-          senderEmailResult.success
-            ? new Date()
-            : null,
+          senderEmailSentAt:
+            senderEmailResult.success
+              ? new Date()
+              : null,
 
-        senderEmailFailureReason:
-          senderEmailResult.success
-            ? null
-            : senderEmailResult.error,
+          senderEmailFailureReason:
+            senderEmailResult.success
+              ? null
+              : senderEmailResult.error,
 
-        recipientEmailStatus:
-          recipientEmailResult.success
-            ? TransferEmailStatus.SENT
-            : TransferEmailStatus.FAILED,
+          recipientEmailStatus:
+            recipientEmailResult.success
+              ? TransferEmailStatus.SENT
+              : TransferEmailStatus.FAILED,
 
-        recipientEmailSentAt:
-          recipientEmailResult.success
-            ? new Date()
-            : null,
+          recipientEmailSentAt:
+            recipientEmailResult.success
+              ? new Date()
+              : null,
 
-        recipientEmailFailureReason:
-          recipientEmailResult.success
-            ? null
-            : recipientEmailResult.error,
-      },
-    });
+          recipientEmailFailureReason:
+            recipientEmailResult.success
+              ? null
+              : recipientEmailResult.error,
+        },
+      })
+      .catch(
+        (
+          emailStatusUpdateError,
+        ) => {
+          /*
+           * Le transfert est déjà terminé.
+           * Une erreur d’enregistrement des statuts d’e-mail
+           * ne doit jamais annuler ou masquer le transfert.
+           */
+          console.error(
+            "[CLIENT_TRANSFER_EMAIL_STATUS_UPDATE_ERROR]",
+            emailStatusUpdateError,
+          );
+        },
+      );
 
     return jsonResponse({
-      success: true,
+      success:
+        true,
 
       message:
         "Le transfert a été effectué avec succès.",
@@ -1433,14 +2168,63 @@ export async function POST(
 
           recipientNotificationSent:
             recipientEmailResult.success,
+
+          recipientPdfAttached:
+            recipientEmailResult.success
+              ? recipientEmailResult.attachedPdfCount >
+                0
+              : false,
+
+          recipientPdfCount:
+            recipientEmailResult.success
+              ? recipientEmailResult.attachedPdfCount
+              : 0,
         },
       },
     });
   } catch (error) {
     console.error(
       "[CLIENT_TRANSFER_CONFIRM_ERROR]",
-      error,
+      error instanceof Error
+        ? {
+            name:
+              error.name,
+
+            message:
+              error.message,
+
+            stack:
+              process.env.NODE_ENV ===
+              "development"
+                ? error.stack
+                : undefined,
+          }
+        : error,
     );
+
+    if (
+      error instanceof Error &&
+      (
+        error.message ===
+          "TRANSFER_CODE_SECRET_NOT_CONFIGURED" ||
+        error.message ===
+          "TRANSFER_CODE_SECRET_TOO_SHORT"
+      )
+    ) {
+      return jsonResponse(
+        {
+          success:
+            false,
+
+          code:
+            "TRANSFER_CONFIGURATION_ERROR",
+
+          message:
+            "La configuration sécurisée du transfert est incomplète.",
+        },
+        500,
+      );
+    }
 
     if (
       error instanceof Error
@@ -1454,115 +2238,190 @@ export async function POST(
         }
       > = {
         TRANSFER_NOT_FOUND: {
-          status: 404,
-          code: "TRANSFER_NOT_FOUND",
+          status:
+            404,
+
+          code:
+            "TRANSFER_NOT_FOUND",
+
           message:
             "Ce transfert est introuvable.",
         },
 
         TRANSFER_STATUS_CHANGED: {
-          status: 409,
-          code: "TRANSFER_STATUS_CHANGED",
+          status:
+            409,
+
+          code:
+            "TRANSFER_STATUS_CHANGED",
+
           message:
             "Le statut du transfert a changé. Actualisez la page.",
         },
 
         TRANSFER_CODE_EXPIRED: {
-          status: 410,
-          code: "CODE_EXPIRED",
+          status:
+            410,
+
+          code:
+            "CODE_EXPIRED",
+
           message:
             "Le code de confirmation a expiré.",
         },
 
         SENDER_UNAVAILABLE: {
-          status: 409,
-          code: "SENDER_UNAVAILABLE",
+          status:
+            409,
+
+          code:
+            "SENDER_UNAVAILABLE",
+
           message:
             "Votre compte Tikemia n’est plus disponible pour ce transfert.",
         },
 
         RECIPIENT_UNAVAILABLE: {
-          status: 409,
-          code: "RECIPIENT_UNAVAILABLE",
+          status:
+            409,
+
+          code:
+            "RECIPIENT_UNAVAILABLE",
+
           message:
             "Le compte Tikemia du destinataire n’est plus disponible.",
         },
 
         SELF_TRANSFER_NOT_ALLOWED: {
-          status: 409,
-          code: "SELF_TRANSFER_NOT_ALLOWED",
+          status:
+            409,
+
+          code:
+            "SELF_TRANSFER_NOT_ALLOWED",
+
           message:
             "Vous ne pouvez pas transférer des billets vers votre propre compte.",
         },
 
         NO_TRANSFER_ITEMS: {
-          status: 409,
-          code: "NO_TRANSFER_ITEMS",
+          status:
+            409,
+
+          code:
+            "NO_TRANSFER_ITEMS",
+
           message:
             "Aucun billet n’est associé à ce transfert.",
         },
 
         TICKET_OWNER_CHANGED: {
-          status: 409,
-          code: "TICKET_OWNER_CHANGED",
+          status:
+            409,
+
+          code:
+            "TICKET_OWNER_CHANGED",
+
           message:
             "Un billet sélectionné ne vous appartient plus.",
         },
 
         TICKET_NOT_VALID: {
-          status: 409,
-          code: "TICKET_NOT_VALID",
+          status:
+            409,
+
+          code:
+            "TICKET_NOT_VALID",
+
           message:
             "Un billet sélectionné n’est plus valide.",
         },
 
         EVENT_NOT_PUBLISHED: {
-          status: 409,
-          code: "EVENT_NOT_PUBLISHED",
+          status:
+            409,
+
+          code:
+            "EVENT_NOT_PUBLISHED",
+
           message:
             "L’événement n’est plus disponible.",
         },
 
         EVENT_ALREADY_STARTED: {
-          status: 409,
-          code: "EVENT_ALREADY_STARTED",
+          status:
+            409,
+
+          code:
+            "EVENT_ALREADY_STARTED",
+
           message:
             "Le transfert est impossible après le début de l’événement.",
         },
 
         TRANSFER_DISABLED: {
-          status: 409,
-          code: "TRANSFER_DISABLED",
+          status:
+            409,
+
+          code:
+            "TRANSFER_DISABLED",
+
           message:
-            "L’organisateur n’autorise plus le transfert pour cet événement.",
+            "L’organisateur a désactivé le transfert des billets pour cet événement.",
         },
 
         TICKET_RESERVED_ELSEWHERE: {
-          status: 409,
-          code: "TICKET_RESERVED_ELSEWHERE",
+          status:
+            409,
+
+          code:
+            "TICKET_RESERVED_ELSEWHERE",
+
           message:
             "Un billet est déjà réservé dans un autre transfert.",
         },
 
         RECIPIENT_DATA_MISMATCH: {
-          status: 409,
-          code: "RECIPIENT_DATA_MISMATCH",
+          status:
+            409,
+
+          code:
+            "RECIPIENT_DATA_MISMATCH",
+
           message:
             "Les informations du destinataire ne correspondent plus.",
         },
 
         MULTIPLE_EVENTS_NOT_ALLOWED: {
-          status: 400,
-          code: "MULTIPLE_EVENTS_NOT_ALLOWED",
+          status:
+            400,
+
+          code:
+            "MULTIPLE_EVENTS_NOT_ALLOWED",
+
           message:
             "Les billets doivent appartenir au même événement.",
         },
 
         TICKET_UPDATE_CONFLICT: {
-          status: 409,
-          code: "TICKET_UPDATE_CONFLICT",
+          status:
+            409,
+
+          code:
+            "TICKET_UPDATE_CONFLICT",
+
           message:
             "Un billet a été modifié pendant le transfert. Réessayez.",
+        },
+
+        COMPLETED_TRANSFER_WITHOUT_TICKETS: {
+          status:
+            500,
+
+          code:
+            "COMPLETED_TRANSFER_WITHOUT_TICKETS",
+
+          message:
+            "Le transfert a été effectué, mais ses informations ne peuvent pas être affichées.",
         },
       };
 
@@ -1574,9 +2433,12 @@ export async function POST(
       if (knownError) {
         return jsonResponse(
           {
-            success: false,
+            success:
+              false,
+
             code:
               knownError.code,
+
             message:
               knownError.message,
           },
@@ -1585,10 +2447,57 @@ export async function POST(
       }
     }
 
+    if (
+      error instanceof
+        Prisma.PrismaClientKnownRequestError
+    ) {
+      if (
+        error.code ===
+        "P2034"
+      ) {
+        return jsonResponse(
+          {
+            success:
+              false,
+
+            code:
+              "TRANSFER_CONCURRENCY_CONFLICT",
+
+            message:
+              "Le transfert a rencontré une modification simultanée. Réessayez.",
+          },
+          409,
+        );
+      }
+
+      if (
+        error.code ===
+        "P2002"
+      ) {
+        return jsonResponse(
+          {
+            success:
+              false,
+
+            code:
+              "TRANSFER_CONFLICT",
+
+            message:
+              "Un billet est déjà associé à un autre transfert actif.",
+          },
+          409,
+        );
+      }
+    }
+
     return jsonResponse(
       {
-        success: false,
-        code: "INTERNAL_ERROR",
+        success:
+          false,
+
+        code:
+          "INTERNAL_ERROR",
+
         message:
           "Impossible de confirmer le transfert pour le moment. Réessayez.",
       },

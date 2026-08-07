@@ -1,11 +1,18 @@
+import "server-only";
+
 import { Resend } from "resend";
 
-export type ReceivedTicketSummary = {
+export type ReceivedTicketSummary = Readonly<{
   ticketTypeName: string;
   ticketCode: string;
-};
+}>;
 
-export type SendTransferRecipientNotificationEmailParams = {
+export type TransferTicketPdfAttachment = Readonly<{
+  filename: string;
+  contentBase64: string;
+}>;
+
+export type SendTransferRecipientNotificationEmailParams = Readonly<{
   to: string;
   firstName: string;
   senderName: string;
@@ -15,20 +22,28 @@ export type SendTransferRecipientNotificationEmailParams = {
   eventStartsAt: Date;
   eventVenueName: string;
   eventCity: string;
-  tickets: ReceivedTicketSummary[];
+  tickets: readonly ReceivedTicketSummary[];
   completedAt?: Date;
-};
+
+  /*
+   * PDF déjà générés par la logique de billets.
+   * Resend reçoit le contenu encodé en Base64.
+   */
+  pdfAttachments?: readonly TransferTicketPdfAttachment[];
+}>;
 
 export type SendTransferRecipientNotificationEmailResult =
-  | {
+  | Readonly<{
       success: true;
       messageId: string | null;
-    }
-  | {
+      attachedPdfCount: number;
+    }>
+  | Readonly<{
       success: false;
       messageId: null;
+      attachedPdfCount: 0;
       error: string;
-    };
+    }>;
 
 const APP_NAME =
   process.env.APP_NAME?.trim() ||
@@ -54,9 +69,10 @@ const APP_TIMEZONE =
   process.env.APP_TIMEZONE?.trim() ||
   "Africa/Porto-Novo";
 
-function escapeHtml(
-  value: string,
-): string {
+const MAX_ATTACHMENT_BASE64_LENGTH =
+  40 * 1024 * 1024;
+
+function escapeHtml(value: string): string {
   return value
     .replaceAll("&", "&amp;")
     .replaceAll("<", "&lt;")
@@ -65,52 +81,126 @@ function escapeHtml(
     .replaceAll("'", "&#039;");
 }
 
-function normalizeEmail(
-  value: string,
+function normalizeText(
+  value: string | null | undefined,
 ): string {
-  return value
-    .trim()
-    .toLowerCase();
+  return value?.trim() ?? "";
 }
 
-function isValidEmail(
-  value: string,
-): boolean {
-  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(
-    value,
+function normalizeEmail(value: string): string {
+  return value.trim().toLowerCase();
+}
+
+function isValidEmail(value: string): boolean {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value);
+}
+
+function isValidDate(value: Date | undefined): value is Date {
+  return (
+    value instanceof Date &&
+    !Number.isNaN(value.getTime())
   );
 }
 
-function formatDateTime(
-  value: Date,
-): string {
-  return new Intl.DateTimeFormat(
-    "fr-FR",
-    {
-      weekday:
-        "long",
-      day:
-        "2-digit",
-      month:
-        "long",
-      year:
-        "numeric",
-      hour:
-        "2-digit",
-      minute:
-        "2-digit",
-      timeZone:
-        APP_TIMEZONE,
-    },
-  ).format(value);
+function formatDateTime(value: Date): string {
+  return new Intl.DateTimeFormat("fr-FR", {
+    weekday: "long",
+    day: "2-digit",
+    month: "long",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+    timeZone: APP_TIMEZONE,
+  }).format(value);
 }
 
-function getTicketLabel(
-  count: number,
-): string {
+function getTicketLabel(count: number): string {
   return count > 1
     ? `${count} billets`
     : "1 billet";
+}
+
+function sanitizeFilename(value: string): string {
+  const normalized = value
+    .normalize("NFKD")
+    .replace(/[^\w.\- ]+/g, "")
+    .replace(/\s+/g, "-")
+    .replace(/-+/g, "-")
+    .replace(/^\.+/, "")
+    .trim();
+
+  const withExtension =
+    normalized.toLowerCase().endsWith(".pdf")
+      ? normalized
+      : `${normalized || "billet-tikemia"}.pdf`;
+
+  return withExtension.slice(0, 180);
+}
+
+function normalizeBase64(value: string): string {
+  return value
+    .trim()
+    .replace(/^data:application\/pdf;base64,/i, "")
+    .replace(/\s+/g, "");
+}
+
+function isValidBase64(value: string): boolean {
+  if (!value || value.length % 4 !== 0) {
+    return false;
+  }
+
+  return /^[A-Za-z0-9+/]+={0,2}$/.test(value);
+}
+
+function normalizePdfAttachments(
+  attachments:
+    | readonly TransferTicketPdfAttachment[]
+    | undefined,
+): TransferTicketPdfAttachment[] {
+  if (!attachments?.length) {
+    return [];
+  }
+
+  const normalized =
+    attachments.map((attachment, index) => {
+      const filename =
+        sanitizeFilename(
+          normalizeText(attachment.filename) ||
+            `billet-tikemia-${index + 1}.pdf`,
+        );
+
+      const contentBase64 =
+        normalizeBase64(attachment.contentBase64);
+
+      if (!isValidBase64(contentBase64)) {
+        throw new Error(
+          `Le PDF ${filename} ne contient pas un contenu Base64 valide.`,
+        );
+      }
+
+      return {
+        filename,
+        contentBase64,
+      };
+    });
+
+  const totalBase64Length =
+    normalized.reduce(
+      (total, attachment) =>
+        total + attachment.contentBase64.length,
+      0,
+    );
+
+  if (
+    totalBase64Length >
+    MAX_ATTACHMENT_BASE64_LENGTH
+  ) {
+    throw new Error(
+      "La taille totale des billets PDF dépasse la limite autorisée.",
+    );
+  }
+
+  return normalized;
 }
 
 function buildSubject({
@@ -136,27 +226,30 @@ function buildText({
   eventCity,
   tickets,
   completedAt,
+  attachedPdfCount,
 }: Omit<
   SendTransferRecipientNotificationEmailParams,
-  "to"
->): string {
+  "to" | "pdfAttachments"
+> & {
+  attachedPdfCount: number;
+}): string {
   const receivedAt =
-    completedAt ??
-    new Date();
+    completedAt ?? new Date();
 
   const ticketLines =
     tickets.map(
-      (
-        ticket,
-        index,
-      ) =>
+      (ticket, index) =>
         `${index + 1}. ${ticket.ticketTypeName} — ${ticket.ticketCode}`,
     );
 
   return [
     `Bonjour ${firstName},`,
     "",
-    `${senderName}${senderMaskedEmail ? ` (${senderMaskedEmail})` : ""} vous a transféré ${getTicketLabel(tickets.length)} sur Tikemia.`,
+    `${senderName}${
+      senderMaskedEmail
+        ? ` (${senderMaskedEmail})`
+        : ""
+    } vous a transféré ${getTicketLabel(tickets.length)} sur Tikemia.`,
     "",
     `Événement : ${eventTitle}`,
     `Date : ${formatDateTime(eventStartsAt)}`,
@@ -167,9 +260,11 @@ function buildText({
     "Billets reçus :",
     ...ticketLines,
     "",
-    "Ces billets sont maintenant rattachés à votre compte Tikemia et portent vos informations.",
-    "Ils sont disponibles dans votre espace Mes billets.",
+    attachedPdfCount > 0
+      ? `${attachedPdfCount} billet(s) PDF sont joints à cet e-mail.`
+      : "Les billets sont disponibles dans votre espace Mes billets.",
     "",
+    "Ces billets sont maintenant rattachés à votre compte Tikemia et portent vos informations.",
     `Voir mes billets : ${APP_URL.replace(/\/+$/, "")}/account/tickets`,
     "",
     "Si vous ne reconnaissez pas ce transfert, contactez immédiatement le support Tikemia.",
@@ -179,14 +274,11 @@ function buildText({
 }
 
 function buildTicketsRows(
-  tickets: ReceivedTicketSummary[],
+  tickets: readonly ReceivedTicketSummary[],
 ): string {
   return tickets
     .map(
-      (
-        ticket,
-        index,
-      ) => `
+      (ticket, index) => `
         <tr>
           <td
             style="
@@ -238,13 +330,15 @@ function buildHtml({
   eventCity,
   tickets,
   completedAt,
+  attachedPdfCount,
 }: Omit<
   SendTransferRecipientNotificationEmailParams,
-  "to"
->): string {
+  "to" | "pdfAttachments"
+> & {
+  attachedPdfCount: number;
+}): string {
   const receivedAt =
-    completedAt ??
-    new Date();
+    completedAt ?? new Date();
 
   const ticketsUrl =
     `${APP_URL.replace(/\/+$/, "")}/account/tickets`;
@@ -253,6 +347,11 @@ function buildHtml({
     senderMaskedEmail
       ? `${escapeHtml(senderName)} (${escapeHtml(senderMaskedEmail)})`
       : escapeHtml(senderName);
+
+  const attachmentMessage =
+    attachedPdfCount > 0
+      ? `${attachedPdfCount} billet(s) PDF sont joints à cet e-mail. Vous pouvez les télécharger et les présenter à l’entrée.`
+      : "Vos billets restent disponibles dans votre espace Mes billets.";
 
   return `
 <!doctype html>
@@ -346,9 +445,7 @@ function buildHtml({
             </tr>
 
             <tr>
-              <td
-                style="padding: 32px 30px 10px;"
-              >
+              <td style="padding: 32px 30px 10px;">
                 <p
                   style="
                     margin: 0;
@@ -396,9 +493,7 @@ function buildHtml({
             </tr>
 
             <tr>
-              <td
-                style="padding: 22px 30px 10px;"
-              >
+              <td style="padding: 22px 30px 10px;">
                 <table
                   role="presentation"
                   width="100%"
@@ -471,9 +566,7 @@ function buildHtml({
             </tr>
 
             <tr>
-              <td
-                style="padding: 14px 30px 10px;"
-              >
+              <td style="padding: 14px 30px 10px;">
                 <div
                   style="
                     margin-bottom: 10px;
@@ -506,9 +599,39 @@ function buildHtml({
             </tr>
 
             <tr>
-              <td
-                style="padding: 14px 30px 10px;"
-              >
+              <td style="padding: 14px 30px 10px;">
+                <table
+                  role="presentation"
+                  width="100%"
+                  cellspacing="0"
+                  cellpadding="0"
+                  border="0"
+                  style="
+                    border: 1px solid rgba(132, 204, 22, 0.18);
+                    border-radius: 16px;
+                    background: rgba(132, 204, 22, 0.06);
+                  "
+                >
+                  <tr>
+                    <td
+                      style="
+                        padding: 16px 18px;
+                        font-size: 13px;
+                        line-height: 22px;
+                        color: #bef264;
+                      "
+                    >
+                      <strong>Vos billets sont prêts.</strong>
+                      <br />
+                      ${escapeHtml(attachmentMessage)}
+                    </td>
+                  </tr>
+                </table>
+              </td>
+            </tr>
+
+            <tr>
+              <td style="padding: 14px 30px 10px;">
                 <table
                   role="presentation"
                   width="100%"
@@ -575,45 +698,6 @@ function buildHtml({
                     </td>
                   </tr>
                 </table>
-              </td>
-            </tr>
-
-            <tr>
-              <td
-                style="padding: 18px 30px 10px;"
-              >
-                <div
-                  style="
-                    padding: 16px 18px;
-                    border: 1px solid rgba(132, 204, 22, 0.18);
-                    border-radius: 16px;
-                    background: rgba(132, 204, 22, 0.06);
-                  "
-                >
-                  <p
-                    style="
-                      margin: 0;
-                      font-size: 13px;
-                      line-height: 21px;
-                      font-weight: 800;
-                      color: #bef264;
-                    "
-                  >
-                    Ces billets sont maintenant à votre nom.
-                  </p>
-
-                  <p
-                    style="
-                      margin: 6px 0 0;
-                      font-size: 12px;
-                      line-height: 20px;
-                      color: #a3a3a3;
-                    "
-                  >
-                    Ils sont disponibles dans votre espace Mes billets.
-                    Vos informations seront utilisées lors du contrôle à l’entrée.
-                  </p>
-                </div>
               </td>
             </tr>
 
@@ -708,14 +792,13 @@ export async function sendTransferRecipientNotificationEmail({
   eventCity,
   tickets,
   completedAt,
+  pdfAttachments,
 }: SendTransferRecipientNotificationEmailParams): Promise<SendTransferRecipientNotificationEmailResult> {
   const apiKey =
     process.env.RESEND_API_KEY?.trim();
 
   const normalizedTo =
-    normalizeEmail(
-      to,
-    );
+    normalizeEmail(to);
 
   if (!apiKey) {
     console.error(
@@ -725,58 +808,50 @@ export async function sendTransferRecipientNotificationEmail({
     return {
       success: false,
       messageId: null,
+      attachedPdfCount: 0,
       error:
         "La configuration d’envoi des e-mails est incomplète.",
     };
   }
 
-  if (
-    !isValidEmail(
-      normalizedTo,
-    )
-  ) {
+  if (!isValidEmail(normalizedTo)) {
     return {
       success: false,
       messageId: null,
+      attachedPdfCount: 0,
       error:
         "L’adresse e-mail du destinataire est invalide.",
     };
   }
 
   if (
-    !firstName.trim() ||
-    !senderName.trim() ||
-    !transferReference.trim() ||
-    !eventTitle.trim() ||
-    !eventVenueName.trim() ||
-    !eventCity.trim()
+    !normalizeText(firstName) ||
+    !normalizeText(senderName) ||
+    !normalizeText(transferReference) ||
+    !normalizeText(eventTitle) ||
+    !normalizeText(eventVenueName) ||
+    !normalizeText(eventCity)
   ) {
     return {
       success: false,
       messageId: null,
+      attachedPdfCount: 0,
       error:
         "Les informations du transfert sont incomplètes.",
     };
   }
 
   if (
-    !(eventStartsAt instanceof Date) ||
-    Number.isNaN(
-      eventStartsAt.getTime(),
-    ) ||
+    !isValidDate(eventStartsAt) ||
     (
-      completedAt &&
-      (
-        !(completedAt instanceof Date) ||
-        Number.isNaN(
-          completedAt.getTime(),
-        )
-      )
+      completedAt !== undefined &&
+      !isValidDate(completedAt)
     )
   ) {
     return {
       success: false,
       messageId: null,
+      attachedPdfCount: 0,
       error:
         "La date du transfert ou de l’événement est invalide.",
     };
@@ -785,25 +860,67 @@ export async function sendTransferRecipientNotificationEmail({
   if (
     tickets.length < 1 ||
     tickets.some(
-      (
-        ticket,
-      ) =>
-        !ticket.ticketTypeName.trim() ||
-        !ticket.ticketCode.trim(),
+      (ticket) =>
+        !normalizeText(ticket.ticketTypeName) ||
+        !normalizeText(ticket.ticketCode),
     )
   ) {
     return {
       success: false,
       messageId: null,
+      attachedPdfCount: 0,
       error:
         "La liste des billets reçus est invalide.",
     };
   }
 
+  let normalizedAttachments:
+    TransferTicketPdfAttachment[];
+
+  try {
+    normalizedAttachments =
+      normalizePdfAttachments(pdfAttachments);
+  } catch (error) {
+    return {
+      success: false,
+      messageId: null,
+      attachedPdfCount: 0,
+      error:
+        error instanceof Error
+          ? error.message
+          : "Les billets PDF sont invalides.",
+    };
+  }
+
   const resend =
-    new Resend(
-      apiKey,
-    );
+    new Resend(apiKey);
+
+  const normalizedFirstName =
+    normalizeText(firstName);
+
+  const normalizedSenderName =
+    normalizeText(senderName);
+
+  const normalizedReference =
+    normalizeText(transferReference);
+
+  const normalizedEventTitle =
+    normalizeText(eventTitle);
+
+  const normalizedVenueName =
+    normalizeText(eventVenueName);
+
+  const normalizedEventCity =
+    normalizeText(eventCity);
+
+  const normalizedTickets =
+    tickets.map((ticket) => ({
+      ticketTypeName:
+        normalizeText(ticket.ticketTypeName),
+
+      ticketCode:
+        normalizeText(ticket.ticketCode),
+    }));
 
   try {
     const response =
@@ -821,77 +938,98 @@ export async function sendTransferRecipientNotificationEmail({
         subject:
           buildSubject({
             eventTitle:
-              eventTitle.trim(),
+              normalizedEventTitle,
 
             ticketsCount:
-              tickets.length,
+              normalizedTickets.length,
           }),
 
         text:
           buildText({
             firstName:
-              firstName.trim(),
+              normalizedFirstName,
 
             senderName:
-              senderName.trim(),
+              normalizedSenderName,
 
             senderMaskedEmail:
-              senderMaskedEmail?.trim() ||
-              null,
+              normalizeText(senderMaskedEmail) || null,
 
             transferReference:
-              transferReference.trim(),
+              normalizedReference,
 
             eventTitle:
-              eventTitle.trim(),
+              normalizedEventTitle,
 
             eventStartsAt,
 
             eventVenueName:
-              eventVenueName.trim(),
+              normalizedVenueName,
 
             eventCity:
-              eventCity.trim(),
+              normalizedEventCity,
 
-            tickets,
+            tickets:
+              normalizedTickets,
 
             completedAt,
+
+            attachedPdfCount:
+              normalizedAttachments.length,
           }),
 
         html:
           buildHtml({
             firstName:
-              firstName.trim(),
+              normalizedFirstName,
 
             senderName:
-              senderName.trim(),
+              normalizedSenderName,
 
             senderMaskedEmail:
-              senderMaskedEmail?.trim() ||
-              null,
+              normalizeText(senderMaskedEmail) || null,
 
             transferReference:
-              transferReference.trim(),
+              normalizedReference,
 
             eventTitle:
-              eventTitle.trim(),
+              normalizedEventTitle,
 
             eventStartsAt,
 
             eventVenueName:
-              eventVenueName.trim(),
+              normalizedVenueName,
 
             eventCity:
-              eventCity.trim(),
+              normalizedEventCity,
 
-            tickets,
+            tickets:
+              normalizedTickets,
 
             completedAt,
+
+            attachedPdfCount:
+              normalizedAttachments.length,
           }),
+
+        ...(normalizedAttachments.length > 0
+          ? {
+              attachments:
+                normalizedAttachments.map(
+                  (attachment) => ({
+                    filename:
+                      attachment.filename,
+
+                    content:
+                      attachment.contentBase64,
+                  }),
+                ),
+            }
+          : {}),
 
         headers: {
           "X-Entity-Ref-ID":
-            transferReference.trim(),
+            normalizedReference,
 
           "X-Tikemia-Email-Type":
             "ticket-transfer-recipient-notification",
@@ -901,12 +1039,14 @@ export async function sendTransferRecipientNotificationEmail({
           {
             name:
               "category",
+
             value:
               "ticket-transfer",
           },
           {
             name:
               "type",
+
             value:
               "recipient-notification",
           },
@@ -922,6 +1062,7 @@ export async function sendTransferRecipientNotificationEmail({
       return {
         success: false,
         messageId: null,
+        attachedPdfCount: 0,
         error:
           response.error.message ||
           "Le fournisseur d’e-mail a refusé l’envoi.",
@@ -931,8 +1072,9 @@ export async function sendTransferRecipientNotificationEmail({
     return {
       success: true,
       messageId:
-        response.data?.id ??
-        null,
+        response.data?.id ?? null,
+      attachedPdfCount:
+        normalizedAttachments.length,
     };
   } catch (error) {
     console.error(
@@ -943,6 +1085,7 @@ export async function sendTransferRecipientNotificationEmail({
     return {
       success: false,
       messageId: null,
+      attachedPdfCount: 0,
       error:
         error instanceof Error
           ? error.message

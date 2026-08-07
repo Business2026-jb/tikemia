@@ -256,18 +256,24 @@ export default async function ClientTicketsPage({
       {
         OR: [
           {
-            order: {
-              customerId:
-                customer.id,
-            },
+            ownerId:
+              customer.id,
           },
           {
-            holderEmail: {
-              equals:
-                customer.email,
-              mode:
-                Prisma.QueryMode.insensitive,
-            },
+            AND: [
+              {
+                ownerId:
+                  null,
+              },
+              {
+                holderEmail: {
+                  equals:
+                    customer.email,
+                  mode:
+                    Prisma.QueryMode.insensitive,
+                },
+              },
+            ],
           },
         ],
       },

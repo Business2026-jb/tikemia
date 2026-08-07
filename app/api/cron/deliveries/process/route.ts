@@ -11,14 +11,15 @@ import {
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
+export const revalidate = 0;
 export const maxDuration = 60;
 
 const DEFAULT_LIMIT = 20;
 const MAX_LIMIT = 100;
 const DEFAULT_MAX_ATTEMPTS = 5;
+const MAX_MAX_ATTEMPTS = 20;
 
-class UnauthorizedDeliveryCronError
-  extends Error {
+class UnauthorizedDeliveryCronError extends Error {
   constructor() {
     super(
       "Accès non autorisé.",
@@ -34,8 +35,21 @@ class UnauthorizedDeliveryCronError
   }
 }
 
-class InvalidDeliveryCronParameterError
-  extends Error {
+class DeliveryCronConfigurationError extends Error {
+  constructor(message: string) {
+    super(message);
+
+    this.name =
+      "DeliveryCronConfigurationError";
+
+    Object.setPrototypeOf(
+      this,
+      new.target.prototype,
+    );
+  }
+}
+
+class InvalidDeliveryCronParameterError extends Error {
   constructor(message: string) {
     super(message);
 
@@ -49,30 +63,154 @@ class InvalidDeliveryCronParameterError
   }
 }
 
+type SerializedError = Readonly<{
+  name: string;
+  message: string;
+  code: string | null;
+  meta: unknown;
+  stack: string | null;
+}>;
+
 function jsonResponse(
   body: Record<string, unknown>,
   status = 200,
 ): NextResponse {
-  return NextResponse.json(body, {
-    status,
+  return NextResponse.json(
+    body,
+    {
+      status,
 
-    headers: {
-      "Cache-Control":
-        "no-store, max-age=0",
+      headers: {
+        "Cache-Control":
+          "no-store, no-cache, must-revalidate, max-age=0",
 
-      Pragma:
-        "no-cache",
+        Pragma:
+          "no-cache",
 
-      "X-Content-Type-Options":
-        "nosniff",
+        Expires:
+          "0",
+
+        "X-Content-Type-Options":
+          "nosniff",
+      },
     },
-  });
+  );
 }
 
 function normalizeText(
-  value: string | null | undefined,
+  value:
+    | string
+    | null
+    | undefined,
 ): string {
   return value?.trim() ?? "";
+}
+
+function isRecord(
+  value: unknown,
+): value is Record<string, unknown> {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    !Array.isArray(value)
+  );
+}
+
+function readOptionalStringProperty(
+  value: unknown,
+  propertyName: string,
+): string | null {
+  if (!isRecord(value)) {
+    return null;
+  }
+
+  const propertyValue =
+    value[propertyName];
+
+  if (
+    typeof propertyValue !==
+    "string"
+  ) {
+    return null;
+  }
+
+  const normalizedValue =
+    propertyValue.trim();
+
+  return normalizedValue || null;
+}
+
+function readUnknownProperty(
+  value: unknown,
+  propertyName: string,
+): unknown {
+  if (!isRecord(value)) {
+    return null;
+  }
+
+  return value[propertyName] ?? null;
+}
+
+function serializeError(
+  error: unknown,
+): SerializedError {
+  const name =
+    error instanceof Error
+      ? error.name
+      : readOptionalStringProperty(
+          error,
+          "name",
+        ) ?? "UnknownError";
+
+  const message =
+    error instanceof Error
+      ? error.message
+      : readOptionalStringProperty(
+          error,
+          "message",
+        ) ?? String(error);
+
+  const code =
+    readOptionalStringProperty(
+      error,
+      "code",
+    );
+
+  const meta =
+    readUnknownProperty(
+      error,
+      "meta",
+    );
+
+  const stack =
+    error instanceof Error &&
+    typeof error.stack ===
+      "string"
+      ? error.stack
+      : null;
+
+  return {
+    name,
+    message,
+    code,
+    meta,
+    stack,
+  };
+}
+
+function isDebugErrorResponseEnabled():
+  boolean {
+  const value =
+    normalizeText(
+      process.env
+        .DELIVERY_CRON_DEBUG_ERRORS,
+    ).toLowerCase();
+
+  return (
+    value === "true" ||
+    value === "1" ||
+    value === "yes"
+  );
 }
 
 function secureTextEquals(
@@ -104,19 +242,27 @@ function secureTextEquals(
   );
 }
 
-function getConfiguredCronSecret(): string {
+function getConfiguredCronSecret():
+  string {
   const secret =
     normalizeText(
       process.env
         .DELIVERY_PROCESSING_CRON_SECRET,
     ) ||
     normalizeText(
-      process.env.CRON_SECRET,
+      process.env
+        .CRON_SECRET,
     );
 
   if (!secret) {
-    throw new Error(
+    throw new DeliveryCronConfigurationError(
       "Le secret du cron de livraison n’est pas configuré.",
+    );
+  }
+
+  if (secret.length < 32) {
+    throw new DeliveryCronConfigurationError(
+      "Le secret du cron de livraison est trop court.",
     );
   }
 
@@ -150,10 +296,14 @@ function getSuppliedSecret(
   request: Request,
 ): string {
   const url =
-    new URL(request.url);
+    new URL(
+      request.url,
+    );
 
   return (
-    readBearerToken(request) ||
+    readBearerToken(
+      request,
+    ) ||
     normalizeText(
       request.headers.get(
         "x-cron-secret",
@@ -174,7 +324,9 @@ function assertAuthorized(
     getConfiguredCronSecret();
 
   const suppliedSecret =
-    getSuppliedSecret(request);
+    getSuppliedSecret(
+      request,
+    );
 
   if (
     !suppliedSecret ||
@@ -201,7 +353,9 @@ function readIntegerParameter({
   maximum: number;
 }): number {
   const url =
-    new URL(request.url);
+    new URL(
+      request.url,
+    );
 
   const rawValue =
     normalizeText(
@@ -215,10 +369,14 @@ function readIntegerParameter({
   }
 
   const parsedValue =
-    Number(rawValue);
+    Number(
+      rawValue,
+    );
 
   if (
-    !Number.isInteger(parsedValue) ||
+    !Number.isInteger(
+      parsedValue,
+    ) ||
     parsedValue < minimum ||
     parsedValue > maximum
   ) {
@@ -240,7 +398,9 @@ function readBooleanParameter({
   defaultValue: boolean;
 }): boolean {
   const url =
-    new URL(request.url);
+    new URL(
+      request.url,
+    );
 
   const rawValue =
     normalizeText(
@@ -279,15 +439,22 @@ async function handleDeliveryProcessing(
     new Date();
 
   try {
-    assertAuthorized(request);
+    assertAuthorized(
+      request,
+    );
 
     const limit =
       readIntegerParameter({
         request,
-        name: "limit",
+        name:
+          "limit",
+
         defaultValue:
           DEFAULT_LIMIT,
-        minimum: 1,
+
+        minimum:
+          1,
+
         maximum:
           MAX_LIMIT,
       });
@@ -297,10 +464,15 @@ async function handleDeliveryProcessing(
         request,
         name:
           "maxAttempts",
+
         defaultValue:
           DEFAULT_MAX_ATTEMPTS,
-        minimum: 1,
-        maximum: 20,
+
+        minimum:
+          1,
+
+        maximum:
+          MAX_MAX_ATTEMPTS,
       });
 
     const includeFailed =
@@ -308,7 +480,9 @@ async function handleDeliveryProcessing(
         request,
         name:
           "includeFailed",
-        defaultValue: true,
+
+        defaultValue:
+          true,
       });
 
     const forceResend =
@@ -316,7 +490,9 @@ async function handleDeliveryProcessing(
         request,
         name:
           "forceResend",
-        defaultValue: false,
+
+        defaultValue:
+          false,
       });
 
     const result =
@@ -331,10 +507,13 @@ async function handleDeliveryProcessing(
       });
 
     return jsonResponse({
-      success: true,
+      success:
+        true,
 
       message:
-        "Le traitement des livraisons est terminé.",
+        result.failedGroups > 0
+          ? "Le traitement est terminé, mais certaines livraisons ont échoué."
+          : "Le traitement des livraisons est terminé.",
 
       processing: {
         startedAt:
@@ -348,6 +527,9 @@ async function handleDeliveryProcessing(
 
         selectedLogs:
           result.selectedLogs,
+
+        ignoredLogs:
+          result.ignoredLogs,
 
         selectedGroups:
           result.selectedGroups,
@@ -375,7 +557,8 @@ async function handleDeliveryProcessing(
     ) {
       return jsonResponse(
         {
-          success: false,
+          success:
+            false,
 
           error: {
             code:
@@ -395,7 +578,8 @@ async function handleDeliveryProcessing(
     ) {
       return jsonResponse(
         {
-          success: false,
+          success:
+            false,
 
           error: {
             code:
@@ -411,13 +595,13 @@ async function handleDeliveryProcessing(
 
     if (
       error instanceof
-      DeliveryProcessingError
+      DeliveryCronConfigurationError
     ) {
       console.error(
-        "[DELIVERY_PROCESSING_CRON_ERROR]",
+        "[DELIVERY_PROCESSING_CRON_CONFIGURATION_ERROR]",
         {
-          code:
-            error.code,
+          name:
+            error.name,
 
           message:
             error.message,
@@ -429,7 +613,46 @@ async function handleDeliveryProcessing(
 
       return jsonResponse(
         {
-          success: false,
+          success:
+            false,
+
+          error: {
+            code:
+              "DELIVERY_CRON_CONFIGURATION_ERROR",
+
+            message:
+              isDebugErrorResponseEnabled()
+                ? error.message
+                : "La configuration du traitement des livraisons est incomplète.",
+          },
+        },
+        500,
+      );
+    }
+
+    if (
+      error instanceof
+      DeliveryProcessingError
+    ) {
+      const serializedError =
+        serializeError(
+          error,
+        );
+
+      console.error(
+        "[DELIVERY_PROCESSING_CRON_ERROR]",
+        {
+          ...serializedError,
+
+          requestStartedAt:
+            requestStartedAt.toISOString(),
+        },
+      );
+
+      return jsonResponse(
+        {
+          success:
+            false,
 
           error: {
             code:
@@ -437,40 +660,80 @@ async function handleDeliveryProcessing(
 
             message:
               error.message,
+
+            ...(isDebugErrorResponseEnabled()
+              ? {
+                  debug: {
+                    name:
+                      serializedError.name,
+
+                    code:
+                      serializedError.code,
+
+                    meta:
+                      serializedError.meta,
+
+                    stack:
+                      serializedError.stack,
+                  },
+                }
+              : {}),
           },
         },
         500,
       );
     }
 
+    const serializedError =
+      serializeError(
+        error,
+      );
+
     console.error(
       "[DELIVERY_PROCESSING_CRON_ERROR]",
       {
-        name:
-          error instanceof Error
-            ? error.name
-            : "UnknownError",
-
-        message:
-          error instanceof Error
-            ? error.message
-            : String(error),
+        ...serializedError,
 
         requestStartedAt:
           requestStartedAt.toISOString(),
       },
     );
 
+    const debugEnabled =
+      isDebugErrorResponseEnabled();
+
     return jsonResponse(
       {
-        success: false,
+        success:
+          false,
 
         error: {
           code:
+            serializedError.code ??
             "DELIVERY_PROCESSING_CRON_FAILED",
 
           message:
-            "Impossible de traiter les livraisons pour le moment.",
+            debugEnabled
+              ? serializedError.message
+              : "Impossible de traiter les livraisons pour le moment.",
+
+          ...(debugEnabled
+            ? {
+                debug: {
+                  name:
+                    serializedError.name,
+
+                  originalCode:
+                    serializedError.code,
+
+                  meta:
+                    serializedError.meta,
+
+                  stack:
+                    serializedError.stack,
+                },
+              }
+            : {}),
         },
       },
       500,

@@ -4,6 +4,7 @@ import {
   DeliveryChannel,
   DeliveryStatus,
   DeliveryType,
+  Prisma,
 } from "@prisma/client";
 
 import {
@@ -199,8 +200,11 @@ function serializeError(
     DeliveryProcessingError
   ) {
     return {
-      code: error.code,
-      message: error.message,
+      code:
+        error.code,
+
+      message:
+        error.message,
     };
   }
 
@@ -261,10 +265,14 @@ function normalizeDeliveryCandidates(
   valid: DeliveryCandidate[];
   ignored: number;
 } {
-  const valid: DeliveryCandidate[] = [];
+  const valid:
+    DeliveryCandidate[] = [];
+
   let ignored = 0;
 
-  for (const candidate of candidates) {
+  for (
+    const candidate of candidates
+  ) {
     if (
       !candidate.orderId ||
       !candidate.scheduledAt
@@ -344,7 +352,9 @@ function groupCandidates(
       }
     >();
 
-  for (const candidate of candidates) {
+  for (
+    const candidate of candidates
+  ) {
     const key =
       `${candidate.orderId}:${candidate.channel}`;
 
@@ -381,7 +391,8 @@ function getProviderMessageIds(
   result: DeliveryExecutionResult,
 ): string[] {
   if (
-    result.provider === "RESEND"
+    result.provider ===
+    "RESEND"
   ) {
     return [
       result.providerMessageId,
@@ -391,6 +402,41 @@ function getProviderMessageIds(
   return [
     ...result.providerMessageIds,
   ];
+}
+
+function normalizeProviderMessageIds(
+  providerMessageIds: readonly string[],
+): string[] {
+  const uniqueIds =
+    new Set<string>();
+
+  for (
+    const value of providerMessageIds
+  ) {
+    const normalizedValue =
+      value.trim();
+
+    if (normalizedValue) {
+      uniqueIds.add(
+        normalizedValue,
+      );
+    }
+  }
+
+  return Array.from(
+    uniqueIds,
+  );
+}
+
+function isUniqueConstraintError(
+  error: unknown,
+): boolean {
+  return (
+    error instanceof
+      Prisma.PrismaClientKnownRequestError &&
+    error.code ===
+      "P2002"
+  );
 }
 
 async function claimDeliveryGroup({
@@ -407,7 +453,9 @@ async function claimDeliveryGroup({
       (log) => log.id,
     );
 
-  if (logIds.length === 0) {
+  if (
+    logIds.length === 0
+  ) {
     return [];
   }
 
@@ -415,7 +463,8 @@ async function claimDeliveryGroup({
     await prisma.deliveryLog.findMany({
       where: {
         id: {
-          in: logIds,
+          in:
+            logIds,
         },
 
         orderId:
@@ -535,7 +584,7 @@ async function claimDeliveryGroup({
   );
 }
 
-async function markClaimedLogsSent({
+async function persistClaimedLogsSent({
   deliveryLogIds,
   provider,
   providerMessageIds,
@@ -546,12 +595,78 @@ async function markClaimedLogsSent({
   providerMessageIds: readonly string[];
   sentAt: Date;
 }): Promise<void> {
-  if (
-    deliveryLogIds.length === 0
-  ) {
-    return;
-  }
+  const normalizedProviderMessageIds =
+    normalizeProviderMessageIds(
+      providerMessageIds,
+    );
 
+  await prisma.$transaction(
+    deliveryLogIds.map(
+      (
+        deliveryLogId,
+        index,
+      ) => {
+        /*
+         * providerMessageId possède une contrainte unique.
+         *
+         * Un seul e-mail Resend peut couvrir plusieurs DeliveryLog
+         * de la même commande. Le premier journal reçoit donc
+         * l’identifiant Resend et les autres restent à null.
+         *
+         * Pour WhatsApp, plusieurs identifiants éventuels sont
+         * distribués un par un entre les journaux.
+         */
+        const providerMessageId =
+          normalizedProviderMessageIds[
+            index
+          ] ?? null;
+
+        return prisma.deliveryLog.updateMany({
+          where: {
+            id:
+              deliveryLogId,
+
+            status:
+              DeliveryStatus.PROCESSING,
+          },
+
+          data: {
+            status:
+              DeliveryStatus.SENT,
+
+            provider,
+
+            providerMessageId,
+
+            sentAt,
+
+            failedAt:
+              null,
+
+            errorCode:
+              null,
+
+            errorMessage:
+              null,
+
+            lastAttemptAt:
+              sentAt,
+          },
+        });
+      },
+    ),
+  );
+}
+
+async function persistClaimedLogsSentWithoutProviderIds({
+  deliveryLogIds,
+  provider,
+  sentAt,
+}: {
+  deliveryLogIds: readonly string[];
+  provider: string;
+  sentAt: Date;
+}): Promise<void> {
   await prisma.deliveryLog.updateMany({
     where: {
       id: {
@@ -571,7 +686,7 @@ async function markClaimedLogsSent({
       provider,
 
       providerMessageId:
-        providerMessageIds.join(","),
+        null,
 
       sentAt,
 
@@ -588,6 +703,75 @@ async function markClaimedLogsSent({
         sentAt,
     },
   });
+}
+
+async function markClaimedLogsSent({
+  deliveryLogIds,
+  provider,
+  providerMessageIds,
+  sentAt,
+}: {
+  deliveryLogIds: readonly string[];
+  provider: string;
+  providerMessageIds: readonly string[];
+  sentAt: Date;
+}): Promise<void> {
+  if (
+    deliveryLogIds.length === 0
+  ) {
+    return;
+  }
+
+  try {
+    await persistClaimedLogsSent({
+      deliveryLogIds,
+      provider,
+      providerMessageIds,
+      sentAt,
+    });
+  } catch (error) {
+    /*
+     * L’envoi auprès du fournisseur a déjà réussi.
+     *
+     * En cas de collision historique sur providerMessageId,
+     * il est plus sûr de marquer les journaux comme envoyés
+     * sans identifiant fournisseur plutôt que de renvoyer
+     * le même e-mail ou le même message WhatsApp.
+     */
+    if (
+      !isUniqueConstraintError(
+        error,
+      )
+    ) {
+      throw error;
+    }
+
+    console.warn(
+      "[DELIVERY_PROVIDER_MESSAGE_ID_CONFLICT]",
+      {
+        deliveryLogIds:
+          [
+            ...deliveryLogIds,
+          ],
+
+        provider,
+
+        providerMessageIds:
+          [
+            ...providerMessageIds,
+          ],
+
+        message:
+          "Collision détectée sur providerMessageId. Les journaux seront marqués comme envoyés sans identifiant fournisseur.",
+      },
+    );
+
+    await persistClaimedLogsSentWithoutProviderIds({
+      deliveryLogIds,
+      provider,
+      sentAt,
+    });
+  }
 }
 
 async function markClaimedLogsFailed({
@@ -639,7 +823,8 @@ async function markClaimedLogsFailed({
           ),
 
         attempts: {
-          increment: 1,
+          increment:
+            1,
         },
 
         lastAttemptAt:
@@ -647,7 +832,9 @@ async function markClaimedLogsFailed({
       },
     })
     .catch(
-      (persistenceError) => {
+      (
+        persistenceError,
+      ) => {
         console.error(
           "[DELIVERY_FAILURE_PERSIST_ERROR]",
           {
@@ -680,7 +867,9 @@ async function executeDeliveryGroup({
   forceResend: boolean;
   signal?: AbortSignal;
 }): Promise<DeliveryExecutionResult> {
-  assertNotAborted(signal);
+  assertNotAborted(
+    signal,
+  );
 
   if (
     group.channel ===
@@ -731,7 +920,9 @@ async function processOneGroup({
   forceResend: boolean;
   signal?: AbortSignal;
 }): Promise<ProcessedDeliveryGroup> {
-  assertNotAborted(signal);
+  assertNotAborted(
+    signal,
+  );
 
   const claimedAt =
     new Date();
@@ -782,9 +973,11 @@ async function processOneGroup({
       });
 
     const providerMessageIds =
-      getProviderMessageIds(
-        executionResult,
-      ).filter(Boolean);
+      normalizeProviderMessageIds(
+        getProviderMessageIds(
+          executionResult,
+        ),
+      );
 
     if (
       providerMessageIds.length === 0
@@ -849,7 +1042,9 @@ async function processOneGroup({
     });
   } catch (error) {
     const serializedError =
-      serializeError(error);
+      serializeError(
+        error,
+      );
 
     await markClaimedLogsFailed({
       deliveryLogIds,
@@ -930,10 +1125,12 @@ export async function processPendingDeliveries(
     );
 
   const includeFailed =
-    input.includeFailed ?? true;
+    input.includeFailed ??
+    true;
 
   const forceResend =
-    input.forceResend ?? false;
+    input.forceResend ??
+    false;
 
   assertNotAborted(
     input.signal,
@@ -955,7 +1152,8 @@ export async function processPendingDeliveries(
     await prisma.deliveryLog.findMany({
       where: {
         orderId: {
-          not: null,
+          not:
+            null,
         },
 
         channel: {
@@ -982,7 +1180,9 @@ export async function processPendingDeliveries(
         },
 
         scheduledAt: {
-          not: null,
+          not:
+            null,
+
           lte:
             startedAt,
         },
@@ -993,6 +1193,7 @@ export async function processPendingDeliveries(
           scheduledAt:
             "asc",
         },
+
         {
           createdAt:
             "asc",
@@ -1003,13 +1204,26 @@ export async function processPendingDeliveries(
         limit,
 
       select: {
-        id: true,
-        orderId: true,
-        channel: true,
-        type: true,
-        status: true,
-        attempts: true,
-        scheduledAt: true,
+        id:
+          true,
+
+        orderId:
+          true,
+
+        channel:
+          true,
+
+        type:
+          true,
+
+        status:
+          true,
+
+        attempts:
+          true,
+
+        scheduledAt:
+          true,
       },
     });
 
@@ -1029,7 +1243,9 @@ export async function processPendingDeliveries(
   const results:
     ProcessedDeliveryGroup[] = [];
 
-  for (const group of groups) {
+  for (
+    const group of groups
+  ) {
     assertNotAborted(
       input.signal,
     );
@@ -1044,7 +1260,9 @@ export async function processPendingDeliveries(
           input.signal,
       });
 
-    results.push(result);
+    results.push(
+      result,
+    );
   }
 
   const finishedAt =
@@ -1053,19 +1271,22 @@ export async function processPendingDeliveries(
   const sentGroups =
     results.filter(
       (result) =>
-        result.status === "SENT",
+        result.status ===
+        "SENT",
     ).length;
 
   const skippedGroups =
     results.filter(
       (result) =>
-        result.status === "SKIPPED",
+        result.status ===
+        "SKIPPED",
     ).length;
 
   const failedGroups =
     results.filter(
       (result) =>
-        result.status === "FAILED",
+        result.status ===
+        "FAILED",
     ).length;
 
   return Object.freeze({
@@ -1093,6 +1314,8 @@ export async function processPendingDeliveries(
     failedGroups,
 
     results:
-      Object.freeze(results),
+      Object.freeze(
+        results,
+      ),
   });
 }

@@ -125,6 +125,7 @@ type TicketPdfData = {
     id: string;
     title: string;
     slug: string;
+    coverImage: string | null;
 
     venueName: string;
     address: string;
@@ -831,6 +832,406 @@ async function loadOptionalLogo(
   }
 }
 
+
+const MAX_EVENT_IMAGE_BYTES =
+  8 * 1024 * 1024;
+
+const EVENT_IMAGE_TIMEOUT_MS =
+  8_000;
+
+function isHttpUrl(
+  value: string,
+): boolean {
+  return (
+    value.startsWith(
+      "https://",
+    ) ||
+    value.startsWith(
+      "http://",
+    )
+  );
+}
+
+function resolveLocalPublicImagePath(
+  value: string,
+): string | null {
+  const normalized =
+    normalizeText(
+      value,
+    );
+
+  if (
+    !normalized ||
+    isHttpUrl(
+      normalized,
+    )
+  ) {
+    return null;
+  }
+
+  const relativePath =
+    normalized
+      .replace(
+        /^\/+/,
+        "",
+      )
+      .replace(
+        /\\/g,
+        "/",
+      );
+
+  if (
+    !relativePath ||
+    relativePath.includes(
+      "..",
+    )
+  ) {
+    return null;
+  }
+
+  return join(
+    process.cwd(),
+    "public",
+    relativePath,
+  );
+}
+
+function detectImageFormat({
+  contentType,
+  source,
+  bytes,
+}: {
+  contentType: string;
+  source: string;
+  bytes: Uint8Array;
+}): "png" | "jpg" | null {
+  const normalizedContentType =
+    contentType
+      .split(
+        ";",
+      )[0]
+      ?.trim()
+      .toLowerCase() ?? "";
+
+  if (
+    normalizedContentType ===
+    "image/png"
+  ) {
+    return "png";
+  }
+
+  if (
+    normalizedContentType ===
+      "image/jpeg" ||
+    normalizedContentType ===
+      "image/jpg"
+  ) {
+    return "jpg";
+  }
+
+  const extension =
+    extname(
+      source,
+    )
+      .toLowerCase();
+
+  if (
+    extension ===
+    ".png"
+  ) {
+    return "png";
+  }
+
+  if (
+    extension ===
+      ".jpg" ||
+    extension ===
+      ".jpeg"
+  ) {
+    return "jpg";
+  }
+
+  if (
+    bytes.length >= 8 &&
+    bytes[0] === 0x89 &&
+    bytes[1] === 0x50 &&
+    bytes[2] === 0x4e &&
+    bytes[3] === 0x47
+  ) {
+    return "png";
+  }
+
+  if (
+    bytes.length >= 3 &&
+    bytes[0] === 0xff &&
+    bytes[1] === 0xd8 &&
+    bytes[2] === 0xff
+  ) {
+    return "jpg";
+  }
+
+  return null;
+}
+
+async function readEventImageBytes(
+  source: string,
+): Promise<{
+  bytes: Uint8Array;
+  contentType: string;
+} | null> {
+  const normalizedSource =
+    normalizeText(
+      source,
+    );
+
+  if (!normalizedSource) {
+    return null;
+  }
+
+  if (
+    isHttpUrl(
+      normalizedSource,
+    )
+  ) {
+    const controller =
+      new AbortController();
+
+    const timeout =
+      setTimeout(
+        () =>
+          controller.abort(),
+        EVENT_IMAGE_TIMEOUT_MS,
+      );
+
+    try {
+      const response =
+        await fetch(
+          normalizedSource,
+          {
+            signal:
+              controller.signal,
+
+            cache:
+              "no-store",
+
+            headers: {
+              Accept:
+                "image/png,image/jpeg",
+            },
+          },
+        );
+
+      if (!response.ok) {
+        return null;
+      }
+
+      const declaredLength =
+        Number(
+          response.headers.get(
+            "content-length",
+          ),
+        );
+
+      if (
+        Number.isFinite(
+          declaredLength,
+        ) &&
+        declaredLength >
+          MAX_EVENT_IMAGE_BYTES
+      ) {
+        return null;
+      }
+
+      const arrayBuffer =
+        await response.arrayBuffer();
+
+      if (
+        arrayBuffer.byteLength === 0 ||
+        arrayBuffer.byteLength >
+          MAX_EVENT_IMAGE_BYTES
+      ) {
+        return null;
+      }
+
+      return {
+        bytes:
+          new Uint8Array(
+            arrayBuffer,
+          ),
+
+        contentType:
+          response.headers.get(
+            "content-type",
+          ) ?? "",
+      };
+    } catch {
+      return null;
+    } finally {
+      clearTimeout(
+        timeout,
+      );
+    }
+  }
+
+  const localPath =
+    resolveLocalPublicImagePath(
+      normalizedSource,
+    );
+
+  if (!localPath) {
+    return null;
+  }
+
+  try {
+    const file =
+      await readFile(
+        localPath,
+      );
+
+    if (
+      file.byteLength === 0 ||
+      file.byteLength >
+        MAX_EVENT_IMAGE_BYTES
+    ) {
+      return null;
+    }
+
+    return {
+      bytes:
+        file,
+
+      contentType:
+        "",
+    };
+  } catch {
+    return null;
+  }
+}
+
+async function loadOptionalEventImage(
+  pdfDocument: PDFDocument,
+  source: string | null | undefined,
+): Promise<PDFImage | null> {
+  const normalizedSource =
+    normalizeText(
+      source,
+    );
+
+  if (!normalizedSource) {
+    return null;
+  }
+
+  const imageData =
+    await readEventImageBytes(
+      normalizedSource,
+    );
+
+  if (!imageData) {
+    return null;
+  }
+
+  const format =
+    detectImageFormat({
+      contentType:
+        imageData.contentType,
+
+      source:
+        normalizedSource,
+
+      bytes:
+        imageData.bytes,
+    });
+
+  try {
+    if (
+      format ===
+      "png"
+    ) {
+      return await pdfDocument.embedPng(
+        imageData.bytes,
+      );
+    }
+
+    if (
+      format ===
+      "jpg"
+    ) {
+      return await pdfDocument.embedJpg(
+        imageData.bytes,
+      );
+    }
+
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+function drawContainedImage({
+  page,
+  image,
+  x,
+  y,
+  width,
+  height,
+}: {
+  page: PDFPage;
+  image: PDFImage;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}): void {
+  const original =
+    image.scale(
+      1,
+    );
+
+  const scale =
+    Math.min(
+      width /
+        original.width,
+
+      height /
+        original.height,
+    );
+
+  const renderedWidth =
+    original.width *
+    scale;
+
+  const renderedHeight =
+    original.height *
+    scale;
+
+  page.drawImage(
+    image,
+    {
+      x:
+        x +
+        (
+          width -
+          renderedWidth
+        ) /
+          2,
+
+      y:
+        y +
+        (
+          height -
+          renderedHeight
+        ) /
+          2,
+
+      width:
+        renderedWidth,
+
+      height:
+        renderedHeight,
+    },
+  );
+}
+
 function assertTicketCanBeRendered(
   ticket: TicketPdfData,
 ): void {
@@ -1060,6 +1461,7 @@ async function getTicketPdfData({
             id: true,
             title: true,
             slug: true,
+            coverImage: true,
             venueName: true,
             address: true,
             city: true,
@@ -1185,6 +1587,12 @@ async function buildTicketPdf({
     await loadOptionalLogo(
       pdfDocument,
       logoPath,
+    );
+
+  const eventImage =
+    await loadOptionalEventImage(
+      pdfDocument,
+      ticket.event.coverImage,
     );
 
   const qrPng =
@@ -1333,61 +1741,107 @@ async function buildTicketPdf({
     },
   );
 
-  const eventPanelY = 560;
+  const eventPanelY =
+    535;
+
+  const eventPanelHeight =
+    215;
 
   page.drawRectangle({
-    x: PAGE_MARGIN,
-    y: eventPanelY,
+    x:
+      PAGE_MARGIN,
+
+    y:
+      eventPanelY,
 
     width:
       A4_WIDTH -
       PAGE_MARGIN * 2,
 
-    height: 190,
-    color: COLOR_PANEL,
-    borderColor: COLOR_LINE,
-    borderWidth: 1,
+    height:
+      eventPanelHeight,
+
+    color:
+      COLOR_PANEL,
+
+    borderColor:
+      COLOR_LINE,
+
+    borderWidth:
+      1,
   });
+
+  const eventContentX =
+    PAGE_MARGIN + 20;
+
+  const eventImageX =
+    PAGE_MARGIN + 318;
+
+  const eventImageY =
+    eventPanelY + 22;
+
+  const eventImageWidth =
+    A4_WIDTH -
+    PAGE_MARGIN -
+    20 -
+    eventImageX;
+
+  const eventImageHeight =
+    eventPanelHeight - 44;
 
   page.drawText(
     "EVENEMENT",
     {
       x:
-        PAGE_MARGIN + 20,
+        eventContentX,
 
       y:
-        eventPanelY + 160,
+        eventPanelY + 183,
 
-      size: 8,
-      font: boldFont,
-      color: BRAND_LIME,
+      size:
+        8,
+
+      font:
+        boldFont,
+
+      color:
+        BRAND_LIME,
     },
   );
 
   drawWrappedText({
     page,
-    text: ticket.event.title,
-    font: boldFont,
-    size: 22,
+
+    text:
+      ticket.event.title,
+
+    font:
+      boldFont,
+
+    size:
+      20,
 
     x:
-      PAGE_MARGIN + 20,
+      eventContentX,
 
     y:
-      eventPanelY + 135,
+      eventPanelY + 157,
 
     maxWidth:
-      A4_WIDTH -
-      PAGE_MARGIN * 2 -
-      40,
+      240,
 
-    lineHeight: 25,
-    maxLines: 2,
+    lineHeight:
+      23,
+
+    maxLines:
+      2,
   });
 
   drawLabelValue({
     page,
-    label: "Date",
+
+    label:
+      "Date",
 
     value:
       formatDateTime(
@@ -1395,75 +1849,165 @@ async function buildTicketPdf({
       ),
 
     x:
-      PAGE_MARGIN + 20,
+      eventContentX,
 
     y:
-      eventPanelY + 75,
+      eventPanelY + 96,
 
-    width: 235,
+    width:
+      240,
+
     regularFont,
     boldFont,
   });
 
   drawLabelValue({
     page,
-    label: "Lieu",
+
+    label:
+      "Lieu",
 
     value: [
       ticket.event.venueName,
       ticket.event.city,
       ticket.event.country,
     ]
-      .filter(Boolean)
-      .join(", "),
+      .filter(
+        Boolean,
+      )
+      .join(
+        ", ",
+      ),
 
     x:
-      PAGE_MARGIN + 290,
+      eventContentX,
 
     y:
-      eventPanelY + 75,
+      eventPanelY + 51,
 
-    width: 220,
+    width:
+      240,
+
     regularFont,
     boldFont,
   });
 
   drawLabelValue({
     page,
-    label: "Adresse",
+
+    label:
+      "Adresse",
 
     value:
       ticket.event.address,
 
     x:
-      PAGE_MARGIN + 20,
+      eventContentX,
 
     y:
-      eventPanelY + 30,
+      eventPanelY + 23,
 
     width:
-      A4_WIDTH -
-      PAGE_MARGIN * 2 -
-      40,
+      240,
 
     regularFont,
     boldFont,
   });
 
-  const detailsPanelY = 330;
+  page.drawRectangle({
+    x:
+      eventImageX,
+
+    y:
+      eventImageY,
+
+    width:
+      eventImageWidth,
+
+    height:
+      eventImageHeight,
+
+    color:
+      COLOR_DARK,
+
+    borderColor:
+      COLOR_LINE,
+
+    borderWidth:
+      1,
+  });
+
+  if (eventImage) {
+    drawContainedImage({
+      page,
+
+      image:
+        eventImage,
+
+      x:
+        eventImageX + 1,
+
+      y:
+        eventImageY + 1,
+
+      width:
+        eventImageWidth - 2,
+
+      height:
+        eventImageHeight - 2,
+    });
+  } else {
+    page.drawText(
+      "IMAGE DE L'EVENEMENT",
+      {
+        x:
+          eventImageX + 18,
+
+        y:
+          eventImageY +
+          eventImageHeight /
+            2,
+
+        size:
+          8,
+
+        font:
+          boldFont,
+
+        color:
+          COLOR_MUTED,
+      },
+    );
+  }
+
+  const detailsPanelY =
+    315;
+
+  const detailsPanelHeight =
+    195;
 
   page.drawRectangle({
-    x: PAGE_MARGIN,
-    y: detailsPanelY,
+    x:
+      PAGE_MARGIN,
+
+    y:
+      detailsPanelY,
 
     width:
       A4_WIDTH -
       PAGE_MARGIN * 2,
 
-    height: 205,
-    color: COLOR_PANEL_ALT,
-    borderColor: COLOR_LINE,
-    borderWidth: 1,
+    height:
+      detailsPanelHeight,
+
+    color:
+      COLOR_PANEL_ALT,
+
+    borderColor:
+      COLOR_LINE,
+
+    borderWidth:
+      1,
   });
 
   const leftColumnX =
@@ -1475,81 +2019,88 @@ async function buildTicketPdf({
   page.drawText(
     "INFORMATIONS DU BILLET",
     {
-      x: leftColumnX,
+      x:
+        leftColumnX,
 
       y:
-        detailsPanelY + 175,
+        detailsPanelY + 165,
 
-      size: 8,
-      font: boldFont,
-      color: BRAND_LIME,
+      size:
+        8,
+
+      font:
+        boldFont,
+
+      color:
+        BRAND_LIME,
     },
   );
 
   drawLabelValue({
     page,
-    label: "Categorie",
+
+    label:
+      "Categorie",
 
     value:
       ticket.ticketType.name,
 
-    x: leftColumnX,
+    x:
+      leftColumnX,
 
     y:
-      detailsPanelY + 145,
+      detailsPanelY + 135,
 
-    width: 245,
+    width:
+      245,
+
     regularFont,
     boldFont,
   });
 
   drawLabelValue({
     page,
-    label: "Titulaire",
+
+    label:
+      "Titulaire",
 
     value:
       ticket.holderName,
 
-    x: leftColumnX,
+    x:
+      leftColumnX,
 
     y:
-      detailsPanelY + 100,
+      detailsPanelY + 90,
 
-    width: 245,
+    width:
+      245,
+
     regularFont,
     boldFont,
   });
 
   drawLabelValue({
     page,
-    label: "Email",
+
+    label:
+      "Email",
 
     value:
       ticket.holderEmail,
 
-    x: leftColumnX,
+    x:
+      leftColumnX,
 
     y:
-      detailsPanelY + 55,
+      detailsPanelY + 45,
 
-    width: 245,
+    width:
+      245,
+
     regularFont,
     boldFont,
   });
-
-  page.drawText(
-    "TARIFICATION",
-    {
-      x: rightColumnX,
-
-      y:
-        detailsPanelY + 175,
-
-      size: 8,
-      font: boldFont,
-      color: BRAND_ORANGE,
-    },
-  );
 
   const feePerTicket =
     divideAmount({
@@ -1574,7 +2125,8 @@ async function buildTicketPdf({
         ticket.orderItem.total,
 
       quantity:
-        ticket.orderItem.quantity,
+        ticket.orderItem
+          .quantity,
 
       orderId:
         ticket.order.id,
@@ -1585,9 +2137,16 @@ async function buildTicketPdf({
 
   const unitPrice =
     decimalToFixed(
-      ticket.orderItem.unitPrice,
+      ticket.orderItem
+        .unitPrice,
     );
 
+  /*
+   * Ces valeurs restent uniquement dans les métadonnées
+   * techniques pour préserver la compatibilité avec le
+   * reste du système. Elles ne sont jamais affichées sur
+   * le billet PDF.
+   */
   const fee =
     decimalToFixed(
       feePerTicket,
@@ -1598,84 +2157,84 @@ async function buildTicketPdf({
       totalPerTicket,
     );
 
-  drawLabelValue({
-    page,
-    label: "Prix du billet",
-
-    value:
-      formatMoney({
-        amount: unitPrice,
-
-        currency:
-          ticket.order.currency,
-      }),
-
-    x: rightColumnX,
-
-    y:
-      detailsPanelY + 145,
-
-    width: 220,
-    regularFont,
-    boldFont,
-  });
-
-  drawLabelValue({
-    page,
-    label: "Frais par billet",
-
-    value:
-      formatMoney({
-        amount: fee,
-
-        currency:
-          ticket.order.currency,
-      }),
-
-    x: rightColumnX,
-
-    y:
-      detailsPanelY + 100,
-
-    width: 220,
-    regularFont,
-    boldFont,
-  });
-
   page.drawText(
-    "TOTAL",
+    "PRIX DU BILLET",
     {
-      x: rightColumnX,
+      x:
+        rightColumnX,
 
       y:
-        detailsPanelY + 50,
+        detailsPanelY + 165,
 
-      size: 8,
-      font: boldFont,
-      color: COLOR_MUTED,
+      size:
+        8,
+
+      font:
+        boldFont,
+
+      color:
+        BRAND_ORANGE,
     },
   );
 
   page.drawText(
     sanitizePdfText(
       formatMoney({
-        amount: total,
+        amount:
+          unitPrice,
 
         currency:
           ticket.order.currency,
       }),
     ),
     {
-      x: rightColumnX,
+      x:
+        rightColumnX,
 
       y:
-        detailsPanelY + 22,
+        detailsPanelY + 120,
 
-      size: 18,
-      font: boldFont,
-      color: BRAND_LIME,
+      size:
+        24,
+
+      font:
+        boldFont,
+
+      color:
+        BRAND_LIME,
     },
   );
+
+  drawWrappedText({
+    page,
+
+    text:
+      "Montant propre du billet. Les frais de service regles lors de la commande ne figurent pas sur le billet.",
+
+    font:
+      regularFont,
+
+    size:
+      9,
+
+    x:
+      rightColumnX,
+
+    y:
+      detailsPanelY + 83,
+
+    maxWidth:
+      210,
+
+    lineHeight:
+      13,
+
+    color:
+      COLOR_MUTED,
+
+    maxLines:
+      4,
+  });
 
   const qrPanelY = 70;
 
