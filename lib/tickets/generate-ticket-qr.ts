@@ -14,18 +14,27 @@ import {
   PaymentValidationError,
 } from "@/lib/payments/payment-errors";
 
-export const TICKET_QR_VERSION = 1;
+export const TICKET_QR_VERSION = 2;
+
+export const LEGACY_TICKET_QR_VERSION = 1;
 
 export const TICKET_QR_ISSUER =
   "TIKEMIA" as const;
 
 export const TICKET_QR_PREFIX =
+  "TKM2" as const;
+
+export const LEGACY_TICKET_QR_PREFIX =
   "TIKEMIA" as const;
 
-const DEFAULT_QR_IMAGE_WIDTH = 640;
+const COMPACT_SIGNATURE_BYTES = 16;
+
+const DEFAULT_QR_IMAGE_WIDTH = 720;
+
+const DEFAULT_QR_IMAGE_MARGIN = 4;
 
 const DEFAULT_QR_ERROR_CORRECTION_LEVEL =
-  "M" as const;
+  "L" as const;
 
 export type TicketQrUnsignedPayload = {
   version: number;
@@ -105,7 +114,10 @@ export type GeneratedTicketQrImage =
   }>;
 
 function normalizeText(
-  value: string | null | undefined,
+  value:
+    | string
+    | null
+    | undefined,
 ): string {
   return value?.trim() ?? "";
 }
@@ -114,20 +126,27 @@ function normalizeRequiredText({
   value,
   fieldName,
 }: {
-  value: string | null | undefined;
+  value:
+    | string
+    | null
+    | undefined;
   fieldName: string;
 }): string {
   const normalizedValue =
-    normalizeText(value);
+    normalizeText(
+      value,
+    );
 
   if (!normalizedValue) {
     throw new PaymentValidationError({
-      code: "PAYMENT_INVALID_REQUEST",
+      code:
+        "PAYMENT_INVALID_REQUEST",
 
       message:
         `${fieldName} est obligatoire.`,
 
-      status: 400,
+      status:
+        400,
 
       details: {
         fieldName,
@@ -138,72 +157,14 @@ function normalizeRequiredText({
   return normalizedValue;
 }
 
-function normalizeCurrency(
-  value: string,
-): string {
-  const currency =
-    normalizeRequiredText({
-      value,
-      fieldName: "La devise",
-    }).toUpperCase();
-
-  if (
-    !/^[A-Z]{3}$/.test(currency)
-  ) {
-    throw new PaymentValidationError({
-      code: "PAYMENT_INVALID_REQUEST",
-
-      message:
-        "La devise du billet doit respecter le format ISO 4217.",
-
-      status: 400,
-
-      details: {
-        currency,
-      },
-    });
-  }
-
-  return currency;
-}
-
-function normalizeUnitPrice(
-  value: string,
-): string {
-  const unitPrice =
-    normalizeRequiredText({
-      value,
-      fieldName:
-        "Le prix unitaire du billet",
-    });
-
-  if (
-    !/^\d+(?:\.\d{1,2})?$/.test(
-      unitPrice,
-    )
-  ) {
-    throw new PaymentValidationError({
-      code: "PAYMENT_INVALID_REQUEST",
-
-      message:
-        "Le prix unitaire du billet est invalide.",
-
-      status: 400,
-
-      details: {
-        unitPrice,
-      },
-    });
-  }
-
-  return unitPrice;
-}
-
 function normalizeIssuedAt(
-  value: Date | undefined,
+  value:
+    | Date
+    | undefined,
 ): Date {
   const issuedAt =
-    value ?? new Date();
+    value ??
+    new Date();
 
   if (
     !(issuedAt instanceof Date) ||
@@ -212,25 +173,32 @@ function normalizeIssuedAt(
     )
   ) {
     throw new PaymentValidationError({
-      code: "PAYMENT_INVALID_REQUEST",
+      code:
+        "PAYMENT_INVALID_REQUEST",
 
       message:
         "La date d’émission du billet est invalide.",
 
-      status: 400,
+      status:
+        400,
     });
   }
 
   return issuedAt;
 }
 
-function getTicketQrSecret(): string {
+function getTicketQrSecret():
+  string {
   const secret =
     normalizeText(
-      process.env.TICKET_QR_SECRET,
+      process.env
+        .TICKET_QR_SECRET,
     );
 
-  if (secret.length < 32) {
+  if (
+    secret.length <
+    32
+  ) {
     throw new PaymentError({
       code:
         "PAYMENT_CONFIGURATION_ERROR",
@@ -238,24 +206,18 @@ function getTicketQrSecret(): string {
       message:
         "La configuration de sécurité des QR codes est incomplète.",
 
-      status: 500,
+      status:
+        500,
 
-      retryable: false,
+      retryable:
+        false,
 
-      exposeMessage: false,
+      exposeMessage:
+        false,
     });
   }
 
   return secret;
-}
-
-function base64UrlEncode(
-  value: string,
-): string {
-  return Buffer.from(
-    value,
-    "utf8",
-  ).toString("base64url");
 }
 
 function base64UrlDecode(
@@ -265,17 +227,22 @@ function base64UrlDecode(
     return Buffer.from(
       value,
       "base64url",
-    ).toString("utf8");
+    ).toString(
+      "utf8",
+    );
   } catch (error) {
     throw new PaymentValidationError({
-      code: "PAYMENT_INVALID_REQUEST",
+      code:
+        "PAYMENT_INVALID_REQUEST",
 
       message:
         "Le contenu encodé du QR code est invalide.",
 
-      status: 400,
+      status:
+        400,
 
-      cause: error,
+      cause:
+        error,
     });
   }
 }
@@ -283,12 +250,19 @@ function base64UrlDecode(
 function hashValue(
   value: string,
 ): string {
-  return createHash("sha256")
-    .update(value, "utf8")
-    .digest("hex");
+  return createHash(
+    "sha256",
+  )
+    .update(
+      value,
+      "utf8",
+    )
+    .digest(
+      "hex",
+    );
 }
 
-function createQrSignature(
+function createLegacyQrSignature(
   encodedPayload: string,
 ): string {
   return createHmac(
@@ -299,7 +273,30 @@ function createQrSignature(
       encodedPayload,
       "utf8",
     )
-    .digest("base64url");
+    .digest(
+      "base64url",
+    );
+}
+
+function createCompactQrSignature(
+  value: string,
+): string {
+  return createHmac(
+    "sha256",
+    getTicketQrSecret(),
+  )
+    .update(
+      value,
+      "utf8",
+    )
+    .digest()
+    .subarray(
+      0,
+      COMPACT_SIGNATURE_BYTES,
+    )
+    .toString(
+      "base64url",
+    );
 }
 
 function safeEquals(
@@ -307,10 +304,16 @@ function safeEquals(
   right: string,
 ): boolean {
   const leftBuffer =
-    Buffer.from(left, "utf8");
+    Buffer.from(
+      left,
+      "utf8",
+    );
 
   const rightBuffer =
-    Buffer.from(right, "utf8");
+    Buffer.from(
+      right,
+      "utf8",
+    );
 
   if (
     leftBuffer.length !==
@@ -327,11 +330,17 @@ function safeEquals(
 
 function isRecord(
   value: unknown,
-): value is Record<string, unknown> {
+): value is Record<
+  string,
+  unknown
+> {
   return (
-    typeof value === "object" &&
+    typeof value ===
+      "object" &&
     value !== null &&
-    !Array.isArray(value)
+    !Array.isArray(
+      value,
+    )
   );
 }
 
@@ -340,7 +349,11 @@ function readRequiredRecordString({
   key,
   fieldName,
 }: {
-  record: Record<string, unknown>;
+  record:
+    Record<
+      string,
+      unknown
+    >;
   key: string;
   fieldName: string;
 }): string {
@@ -348,16 +361,19 @@ function readRequiredRecordString({
     record[key];
 
   if (
-    typeof value !== "string" ||
+    typeof value !==
+      "string" ||
     !value.trim()
   ) {
     throw new PaymentValidationError({
-      code: "PAYMENT_INVALID_REQUEST",
+      code:
+        "PAYMENT_INVALID_REQUEST",
 
       message:
         `${fieldName} du QR code est invalide.`,
 
-      status: 400,
+      status:
+        400,
 
       details: {
         fieldName,
@@ -368,17 +384,19 @@ function readRequiredRecordString({
   return value.trim();
 }
 
-function parseUnsignedPayload(
+function parseLegacyUnsignedPayload(
   encodedPayload: string,
 ): TicketQrUnsignedPayload {
-  let parsed: unknown;
+  let parsed:
+    unknown;
 
   try {
-    parsed = JSON.parse(
-      base64UrlDecode(
-        encodedPayload,
-      ),
-    ) as unknown;
+    parsed =
+      JSON.parse(
+        base64UrlDecode(
+          encodedPayload,
+        ),
+      ) as unknown;
   } catch (error) {
     if (
       error instanceof
@@ -388,46 +406,56 @@ function parseUnsignedPayload(
     }
 
     throw new PaymentValidationError({
-      code: "PAYMENT_INVALID_REQUEST",
+      code:
+        "PAYMENT_INVALID_REQUEST",
 
       message:
         "Le contenu du QR code est invalide.",
 
-      status: 400,
+      status:
+        400,
 
-      cause: error,
+      cause:
+        error,
     });
   }
 
   if (!isRecord(parsed)) {
     throw new PaymentValidationError({
-      code: "PAYMENT_INVALID_REQUEST",
+      code:
+        "PAYMENT_INVALID_REQUEST",
 
       message:
         "Le contenu du QR code est invalide.",
 
-      status: 400,
+      status:
+        400,
     });
   }
 
   if (
     parsed.version !==
-    TICKET_QR_VERSION
+    LEGACY_TICKET_QR_VERSION
   ) {
     throw new PaymentValidationError({
-      code: "PAYMENT_INVALID_REQUEST",
+      code:
+        "PAYMENT_INVALID_REQUEST",
 
       message:
         "La version du QR code n’est pas prise en charge.",
 
-      status: 400,
+      status:
+        400,
 
       details: {
         receivedVersion:
-          parsed.version ?? null,
+          parsed.version ??
+          null,
 
-        supportedVersion:
+        supportedVersions: [
+          LEGACY_TICKET_QR_VERSION,
           TICKET_QR_VERSION,
+        ],
       },
     });
   }
@@ -437,127 +465,175 @@ function parseUnsignedPayload(
     TICKET_QR_ISSUER
   ) {
     throw new PaymentValidationError({
-      code: "PAYMENT_INVALID_REQUEST",
+      code:
+        "PAYMENT_INVALID_REQUEST",
 
       message:
         "L’émetteur du QR code est invalide.",
 
-      status: 400,
+      status:
+        400,
     });
   }
 
   const ticketCode =
     readRequiredRecordString({
-      record: parsed,
-      key: "ticketCode",
+      record:
+        parsed,
+
+      key:
+        "ticketCode",
+
       fieldName:
         "Le code du billet",
     });
 
   const orderReference =
     readRequiredRecordString({
-      record: parsed,
-      key: "orderReference",
+      record:
+        parsed,
+
+      key:
+        "orderReference",
+
       fieldName:
         "La référence de commande",
     });
 
   const eventId =
     readRequiredRecordString({
-      record: parsed,
-      key: "eventId",
+      record:
+        parsed,
+
+      key:
+        "eventId",
+
       fieldName:
         "L’identifiant de l’événement",
     });
 
   const eventTitle =
     readRequiredRecordString({
-      record: parsed,
-      key: "eventTitle",
+      record:
+        parsed,
+
+      key:
+        "eventTitle",
+
       fieldName:
         "Le titre de l’événement",
     });
 
   const ticketTypeId =
     readRequiredRecordString({
-      record: parsed,
-      key: "ticketTypeId",
+      record:
+        parsed,
+
+      key:
+        "ticketTypeId",
+
       fieldName:
         "L’identifiant de la catégorie",
     });
 
   const ticketCategory =
     readRequiredRecordString({
-      record: parsed,
-      key: "ticketCategory",
+      record:
+        parsed,
+
+      key:
+        "ticketCategory",
+
       fieldName:
         "La catégorie du billet",
     });
 
   const unitPrice =
-    normalizeUnitPrice(
-      readRequiredRecordString({
-        record: parsed,
-        key: "unitPrice",
-        fieldName:
-          "Le prix unitaire",
-      }),
-    );
+    readRequiredRecordString({
+      record:
+        parsed,
+
+      key:
+        "unitPrice",
+
+      fieldName:
+        "Le prix unitaire",
+    });
 
   const currency =
-    normalizeCurrency(
-      readRequiredRecordString({
-        record: parsed,
-        key: "currency",
-        fieldName: "La devise",
-      }),
-    );
+    readRequiredRecordString({
+      record:
+        parsed,
+
+      key:
+        "currency",
+
+      fieldName:
+        "La devise",
+    });
 
   const issuedAt =
     readRequiredRecordString({
-      record: parsed,
-      key: "issuedAt",
+      record:
+        parsed,
+
+      key:
+        "issuedAt",
+
       fieldName:
         "La date d’émission",
     });
 
   if (
     Number.isNaN(
-      Date.parse(issuedAt),
+      Date.parse(
+        issuedAt,
+      ),
     )
   ) {
     throw new PaymentValidationError({
-      code: "PAYMENT_INVALID_REQUEST",
+      code:
+        "PAYMENT_INVALID_REQUEST",
 
       message:
         "La date d’émission du QR code est invalide.",
 
-      status: 400,
+      status:
+        400,
     });
   }
 
   const nonce =
     readRequiredRecordString({
-      record: parsed,
-      key: "nonce",
+      record:
+        parsed,
+
+      key:
+        "nonce",
+
       fieldName:
         "Le nonce de sécurité",
     });
 
-  if (nonce.length < 16) {
+  if (
+    nonce.length <
+    16
+  ) {
     throw new PaymentValidationError({
-      code: "PAYMENT_INVALID_REQUEST",
+      code:
+        "PAYMENT_INVALID_REQUEST",
 
       message:
         "Le nonce de sécurité du QR code est invalide.",
 
-      status: 400,
+      status:
+        400,
     });
   }
 
   return {
     version:
-      TICKET_QR_VERSION,
+      LEGACY_TICKET_QR_VERSION,
 
     issuer:
       TICKET_QR_ISSUER,
@@ -580,24 +656,35 @@ function parseUnsignedPayload(
 }
 
 function normalizeQrImageWidth(
-  value: number | undefined,
+  value:
+    | number
+    | undefined,
 ): number {
-  if (value === undefined) {
+  if (
+    value ===
+    undefined
+  ) {
     return DEFAULT_QR_IMAGE_WIDTH;
   }
 
   if (
-    !Number.isInteger(value) ||
-    value < 128 ||
-    value > 2048
+    !Number.isInteger(
+      value,
+    ) ||
+    value <
+      128 ||
+    value >
+      2048
   ) {
     throw new PaymentValidationError({
-      code: "PAYMENT_INVALID_REQUEST",
+      code:
+        "PAYMENT_INVALID_REQUEST",
 
       message:
         "La largeur de l’image QR doit être comprise entre 128 et 2048 pixels.",
 
-      status: 400,
+      status:
+        400,
     });
   }
 
@@ -605,24 +692,35 @@ function normalizeQrImageWidth(
 }
 
 function normalizeQrImageMargin(
-  value: number | undefined,
+  value:
+    | number
+    | undefined,
 ): number {
-  if (value === undefined) {
-    return 3;
+  if (
+    value ===
+    undefined
+  ) {
+    return DEFAULT_QR_IMAGE_MARGIN;
   }
 
   if (
-    !Number.isInteger(value) ||
-    value < 0 ||
-    value > 20
+    !Number.isInteger(
+      value,
+    ) ||
+    value <
+      0 ||
+    value >
+      20
   ) {
     throw new PaymentValidationError({
-      code: "PAYMENT_INVALID_REQUEST",
+      code:
+        "PAYMENT_INVALID_REQUEST",
 
       message:
         "La marge de l’image QR doit être comprise entre 0 et 20.",
 
-      status: 400,
+      status:
+        400,
     });
   }
 
@@ -630,11 +728,14 @@ function normalizeQrImageMargin(
 }
 
 export function generateTicketQr(
-  input: GenerateTicketQrInput,
+  input:
+    GenerateTicketQrInput,
 ): GenerateTicketQrResult {
   const ticketCode =
     normalizeRequiredText({
-      value: input.ticketCode,
+      value:
+        input.ticketCode,
+
       fieldName:
         "Le code du billet",
     });
@@ -643,20 +744,25 @@ export function generateTicketQr(
     normalizeRequiredText({
       value:
         input.orderReference,
+
       fieldName:
         "La référence de commande",
     });
 
   const eventId =
     normalizeRequiredText({
-      value: input.eventId,
+      value:
+        input.eventId,
+
       fieldName:
         "L’identifiant de l’événement",
     });
 
   const eventTitle =
     normalizeRequiredText({
-      value: input.eventTitle,
+      value:
+        input.eventTitle,
+
       fieldName:
         "Le titre de l’événement",
     });
@@ -665,6 +771,7 @@ export function generateTicketQr(
     normalizeRequiredText({
       value:
         input.ticketTypeId,
+
       fieldName:
         "L’identifiant de la catégorie",
     });
@@ -673,19 +780,28 @@ export function generateTicketQr(
     normalizeRequiredText({
       value:
         input.ticketCategory,
+
       fieldName:
         "La catégorie du billet",
     });
 
   const unitPrice =
-    normalizeUnitPrice(
-      input.unitPrice,
-    );
+    normalizeRequiredText({
+      value:
+        input.unitPrice,
+
+      fieldName:
+        "Le prix unitaire du billet",
+    });
 
   const currency =
-    normalizeCurrency(
-      input.currency,
-    );
+    normalizeRequiredText({
+      value:
+        input.currency,
+
+      fieldName:
+        "La devise",
+    }).toUpperCase();
 
   const issuedAt =
     normalizeIssuedAt(
@@ -693,50 +809,39 @@ export function generateTicketQr(
     );
 
   const nonce =
-    randomBytes(24).toString(
+    randomBytes(
+      16,
+    ).toString(
       "base64url",
     );
 
-  const unsignedPayload:
-    TicketQrUnsignedPayload = {
-      version:
-        TICKET_QR_VERSION,
-
-      issuer:
-        TICKET_QR_ISSUER,
-
-      ticketCode,
-      orderReference,
-
-      eventId,
-      eventTitle,
-
-      ticketTypeId,
-      ticketCategory,
-
-      unitPrice,
-      currency,
-
-      issuedAt:
-        issuedAt.toISOString(),
-
-      nonce,
-    };
-
-  const encodedPayload =
-    base64UrlEncode(
-      JSON.stringify(
-        unsignedPayload,
-      ),
+  const issuedAtSeconds =
+    Math.floor(
+      issuedAt.getTime() /
+        1000,
+    ).toString(
+      36,
     );
 
+  const unsignedValue = [
+    TICKET_QR_PREFIX,
+    ticketCode,
+    orderReference,
+    eventId,
+    ticketTypeId,
+    issuedAtSeconds,
+    nonce,
+  ].join(
+    ".",
+  );
+
   const signature =
-    createQrSignature(
-      encodedPayload,
+    createCompactQrSignature(
+      unsignedValue,
     );
 
   const value =
-    `${TICKET_QR_PREFIX}.${encodedPayload}.${signature}`;
+    `${unsignedValue}.${signature}`;
 
   return Object.freeze({
     version:
@@ -745,66 +850,304 @@ export function generateTicketQr(
     value,
 
     tokenHash:
-      hashValue(nonce),
+      hashValue(
+        nonce,
+      ),
 
     payload:
       Object.freeze({
-        ...unsignedPayload,
+        version:
+          TICKET_QR_VERSION,
+
+        issuer:
+          TICKET_QR_ISSUER,
+
+        ticketCode,
+        orderReference,
+
+        eventId,
+
+        /*
+         * Les informations suivantes restent dans la base de données.
+         * Elles ne sont plus encodées dans le QR afin de réduire
+         * fortement sa densité et accélérer le scan.
+         */
+        eventTitle,
+
+        ticketTypeId,
+        ticketCategory,
+
+        unitPrice,
+        currency,
+
+        issuedAt:
+          issuedAt.toISOString(),
+
+        nonce,
         signature,
       }),
   });
 }
 
-export function verifyTicketQr(
-  qrValue: string,
+function verifyCompactTicketQr(
+  normalizedValue: string,
 ): VerifiedTicketQrResult {
-  const normalizedValue =
-    normalizeRequiredText({
-      value: qrValue,
-      fieldName:
-        "Le QR code du billet",
-    });
-
   const parts =
-    normalizedValue.split(".");
+    normalizedValue.split(
+      ".",
+    );
 
   if (
-    parts.length !== 3 ||
-    parts[0] !==
-      TICKET_QR_PREFIX
+    parts.length !==
+    8
   ) {
     throw new PaymentValidationError({
-      code: "PAYMENT_INVALID_REQUEST",
+      code:
+        "PAYMENT_INVALID_REQUEST",
+
+      message:
+        "Le QR code du billet est incomplet.",
+
+      status:
+        400,
+    });
+  }
+
+  const [
+    prefix,
+    ticketCode,
+    orderReference,
+    eventId,
+    ticketTypeId,
+    issuedAtBase36,
+    nonce,
+    receivedSignature,
+  ] =
+    parts;
+
+  if (
+    prefix !==
+      TICKET_QR_PREFIX ||
+    !normalizeText(
+      ticketCode,
+    ) ||
+    !normalizeText(
+      orderReference,
+    ) ||
+    !normalizeText(
+      eventId,
+    ) ||
+    !normalizeText(
+      ticketTypeId,
+    ) ||
+    !normalizeText(
+      issuedAtBase36,
+    ) ||
+    !normalizeText(
+      nonce,
+    ) ||
+    !normalizeText(
+      receivedSignature,
+    )
+  ) {
+    throw new PaymentValidationError({
+      code:
+        "PAYMENT_INVALID_REQUEST",
+
+      message:
+        "Les informations du QR code sont incomplètes.",
+
+      status:
+        400,
+    });
+  }
+
+  const unsignedValue =
+    parts
+      .slice(
+        0,
+        7,
+      )
+      .join(
+        ".",
+      );
+
+  const expectedSignature =
+    createCompactQrSignature(
+      unsignedValue,
+    );
+
+  if (
+    !safeEquals(
+      receivedSignature,
+      expectedSignature,
+    )
+  ) {
+    throw new PaymentValidationError({
+      code:
+        "PAYMENT_FORBIDDEN",
+
+      message:
+        "La signature du QR code du billet est invalide.",
+
+      status:
+        403,
+    });
+  }
+
+  const issuedAtSeconds =
+    Number.parseInt(
+      issuedAtBase36,
+      36,
+    );
+
+  if (
+    !Number.isSafeInteger(
+      issuedAtSeconds,
+    ) ||
+    issuedAtSeconds <=
+      0
+  ) {
+    throw new PaymentValidationError({
+      code:
+        "PAYMENT_INVALID_REQUEST",
+
+      message:
+        "La date du QR code est invalide.",
+
+      status:
+        400,
+    });
+  }
+
+  const issuedAt =
+    new Date(
+      issuedAtSeconds *
+        1000,
+    );
+
+  if (
+    Number.isNaN(
+      issuedAt.getTime(),
+    )
+  ) {
+    throw new PaymentValidationError({
+      code:
+        "PAYMENT_INVALID_REQUEST",
+
+      message:
+        "La date du QR code est invalide.",
+
+      status:
+        400,
+    });
+  }
+
+  return Object.freeze({
+    valid:
+      true,
+
+    value:
+      normalizedValue,
+
+    tokenHash:
+      hashValue(
+        nonce,
+      ),
+
+    payload:
+      Object.freeze({
+        version:
+          TICKET_QR_VERSION,
+
+        issuer:
+          TICKET_QR_ISSUER,
+
+        ticketCode,
+        orderReference,
+
+        eventId,
+
+        /*
+         * Ces valeurs sont volontairement vides dans le format compact.
+         * Les informations complètes doivent être chargées depuis la base.
+         */
+        eventTitle:
+          "",
+
+        ticketTypeId,
+
+        ticketCategory:
+          "",
+
+        unitPrice:
+          "",
+
+        currency:
+          "",
+
+        issuedAt:
+          issuedAt.toISOString(),
+
+        nonce,
+      }),
+  });
+}
+
+function verifyLegacyTicketQr(
+  normalizedValue: string,
+): VerifiedTicketQrResult {
+  const parts =
+    normalizedValue.split(
+      ".",
+    );
+
+  if (
+    parts.length !==
+      3 ||
+    parts[0] !==
+      LEGACY_TICKET_QR_PREFIX
+  ) {
+    throw new PaymentValidationError({
+      code:
+        "PAYMENT_INVALID_REQUEST",
 
       message:
         "Le format du QR code du billet est invalide.",
 
-      status: 400,
+      status:
+        400,
     });
   }
 
   const encodedPayload =
-    normalizeText(parts[1]);
+    normalizeText(
+      parts[1],
+    );
 
   const receivedSignature =
-    normalizeText(parts[2]);
+    normalizeText(
+      parts[2],
+    );
 
   if (
     !encodedPayload ||
     !receivedSignature
   ) {
     throw new PaymentValidationError({
-      code: "PAYMENT_INVALID_REQUEST",
+      code:
+        "PAYMENT_INVALID_REQUEST",
 
       message:
         "Le QR code du billet est incomplet.",
 
-      status: 400,
+      status:
+        400,
     });
   }
 
   const expectedSignature =
-    createQrSignature(
+    createLegacyQrSignature(
       encodedPayload,
     );
 
@@ -815,56 +1158,91 @@ export function verifyTicketQr(
     )
   ) {
     throw new PaymentValidationError({
-      code: "PAYMENT_FORBIDDEN",
+      code:
+        "PAYMENT_FORBIDDEN",
 
       message:
         "La signature du QR code du billet est invalide.",
 
-      status: 403,
+      status:
+        403,
     });
   }
 
   const payload =
-    parseUnsignedPayload(
+    parseLegacyUnsignedPayload(
       encodedPayload,
     );
 
   return Object.freeze({
-    valid: true,
+    valid:
+      true,
 
     value:
       normalizedValue,
 
     tokenHash:
-      hashValue(payload.nonce),
+      hashValue(
+        payload.nonce,
+      ),
 
     payload:
-      Object.freeze(payload),
+      Object.freeze(
+        payload,
+      ),
   });
 }
 
+export function verifyTicketQr(
+  qrValue: string,
+): VerifiedTicketQrResult {
+  const normalizedValue =
+    normalizeRequiredText({
+      value:
+        qrValue,
+
+      fieldName:
+        "Le QR code du billet",
+    });
+
+  if (
+    normalizedValue.startsWith(
+      `${TICKET_QR_PREFIX}.`,
+    )
+  ) {
+    return verifyCompactTicketQr(
+      normalizedValue,
+    );
+  }
+
+  return verifyLegacyTicketQr(
+    normalizedValue,
+  );
+}
+
 /**
- * Alias conservant le nom déjà utilisé dans les fichiers existants.
- *
- * generate-ticket-pdf.ts peut donc importer verifyTicketQrValue()
- * depuis ce nouveau fichier sans modifier sa logique.
+ * Alias conservé pour les fichiers existants.
  */
 export function verifyTicketQrValue(
   qrValue: string,
 ): VerifiedTicketQrResult {
-  return verifyTicketQr(qrValue);
+  return verifyTicketQr(
+    qrValue,
+  );
 }
 
 export async function generateTicketQrImage(
   qrValue: string,
-  options: GenerateTicketQrImageOptions = {},
-): Promise<GeneratedTicketQrImage> {
-  /*
-   * Vérifier le contenu avant de produire l’image empêche la création
-   * d’un PNG à partir d’un QR Tikemia falsifié ou incomplet.
-   */
+  options:
+    GenerateTicketQrImageOptions =
+    {},
+): Promise<
+  GeneratedTicketQrImage
+> {
   const verified =
-    verifyTicketQr(qrValue);
+    verifyTicketQr(
+      qrValue,
+    );
 
   const width =
     normalizeQrImageWidth(
@@ -881,7 +1259,8 @@ export async function generateTicketQrImage(
       await QRCode.toBuffer(
         verified.value,
         {
-          type: "png",
+          type:
+            "png",
 
           width,
           margin,
@@ -890,15 +1269,19 @@ export async function generateTicketQrImage(
             DEFAULT_QR_ERROR_CORRECTION_LEVEL,
 
           color: {
-            dark: "#000000",
-            light: "#FFFFFF",
+            dark:
+              "#000000",
+
+            light:
+              "#FFFFFF",
           },
         },
       );
 
     if (
       !buffer ||
-      buffer.byteLength === 0
+      buffer.byteLength ===
+        0
     ) {
       throw new Error(
         "L’image QR générée est vide.",
@@ -923,9 +1306,15 @@ export async function generateTicketQrImage(
         buffer.byteLength,
 
       checksum:
-        createHash("sha256")
-          .update(buffer)
-          .digest("hex"),
+        createHash(
+          "sha256",
+        )
+          .update(
+            buffer,
+          )
+          .digest(
+            "hex",
+          ),
     });
   } catch (error) {
     if (
@@ -944,13 +1333,17 @@ export async function generateTicketQrImage(
       message:
         "Impossible de générer l’image QR du billet.",
 
-      status: 500,
+      status:
+        500,
 
-      retryable: true,
+      retryable:
+        true,
 
-      exposeMessage: false,
+      exposeMessage:
+        false,
 
-      cause: error,
+      cause:
+        error,
     });
   }
 }
@@ -979,17 +1372,31 @@ export function assertTicketQrMatches({
   qrVersion?: number;
 }): VerifiedTicketQrResult {
   const verified =
-    verifyTicketQr(qrValue);
+    verifyTicketQr(
+      qrValue,
+    );
 
   if (
-    verified.payload.ticketCode !==
-      normalizeText(ticketCode) ||
-    verified.payload.orderReference !==
-      normalizeText(orderReference) ||
-    verified.payload.eventId !==
-      normalizeText(eventId) ||
-    verified.payload.ticketTypeId !==
-      normalizeText(ticketTypeId)
+    verified.payload
+      .ticketCode !==
+      normalizeText(
+        ticketCode,
+      ) ||
+    verified.payload
+      .orderReference !==
+      normalizeText(
+        orderReference,
+      ) ||
+    verified.payload
+      .eventId !==
+      normalizeText(
+        eventId,
+      ) ||
+    verified.payload
+      .ticketTypeId !==
+      normalizeText(
+        ticketTypeId,
+      )
   ) {
     throw new PaymentError({
       code:
@@ -998,11 +1405,14 @@ export function assertTicketQrMatches({
       message:
         "Les informations du QR code ne correspondent pas au billet.",
 
-      status: 500,
+      status:
+        500,
 
-      retryable: false,
+      retryable:
+        false,
 
-      exposeMessage: false,
+      exposeMessage:
+        false,
 
       details: {
         ticketCode,
@@ -1014,8 +1424,10 @@ export function assertTicketQrMatches({
   }
 
   if (
-    qrVersion !== undefined &&
-    verified.payload.version !==
+    qrVersion !==
+      undefined &&
+    verified.payload
+      .version !==
       qrVersion
   ) {
     throw new PaymentError({
@@ -1025,18 +1437,22 @@ export function assertTicketQrMatches({
       message:
         "La version du QR code ne correspond pas au billet.",
 
-      status: 500,
+      status:
+        500,
 
-      retryable: false,
+      retryable:
+        false,
 
-      exposeMessage: false,
+      exposeMessage:
+        false,
 
       details: {
         storedQrVersion:
           qrVersion,
 
         payloadQrVersion:
-          verified.payload.version,
+          verified.payload
+            .version,
       },
     });
   }

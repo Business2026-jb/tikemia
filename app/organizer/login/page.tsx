@@ -20,6 +20,10 @@ type LoginApiResponse = {
   success?: boolean;
   message?: string;
   redirectTo?: string;
+  error?: {
+    code?: string;
+    message?: string;
+  };
 };
 
 export default function OrganizerLoginPage() {
@@ -54,8 +58,11 @@ export default function OrganizerLoginPage() {
     try {
       const response = await fetch("/api/organizer/auth/login", {
         method: "POST",
+        credentials: "include",
+        cache: "no-store",
         headers: {
           "Content-Type": "application/json",
+          Accept: "application/json",
         },
         body: JSON.stringify({
           email: cleanEmail,
@@ -64,23 +71,49 @@ export default function OrganizerLoginPage() {
         }),
       });
 
-      const result = (await response.json()) as LoginApiResponse;
+      const contentType =
+        response.headers.get("content-type") ?? "";
+
+      let result: LoginApiResponse = {};
+
+      if (contentType.includes("application/json")) {
+        result =
+          (await response.json()) as LoginApiResponse;
+      } else {
+        const responseText =
+          await response.text();
+
+        console.error(
+          "[ORGANIZER_LOGIN_NON_JSON_RESPONSE]",
+          {
+            status: response.status,
+            contentType,
+            responsePreview: responseText.slice(0, 200),
+          },
+        );
+
+        throw new Error(
+          "Le service de connexion a renvoyé une réponse invalide. Vérifiez la route API et les journaux du serveur.",
+        );
+      }
 
       if (!response.ok) {
-  if (result.redirectTo) {
-    sessionStorage.setItem(
-      "tikemia_verification_email",
-      cleanEmail,
-    );
+        if (result.redirectTo) {
+          sessionStorage.setItem(
+            "tikemia_verification_email",
+            cleanEmail,
+          );
 
-    router.push(result.redirectTo);
-    return;
-  }
+          router.push(result.redirectTo);
+          return;
+        }
 
-  throw new Error(
-    result.message ?? "Impossible de vous connecter.",
-  );
-}
+        throw new Error(
+          result.error?.message ??
+            result.message ??
+            "Impossible de vous connecter.",
+        );
+      }
 
       router.replace(
         result.redirectTo ?? "/organizer/dashboard",
@@ -415,7 +448,7 @@ export default function OrganizerLoginPage() {
         <footer className="border-t border-white/[0.07] bg-[#030709]/90">
           <div className="mx-auto flex w-full max-w-[1560px] flex-col gap-3 px-5 py-5 text-xs text-neutral-500 sm:flex-row sm:items-center sm:justify-between sm:px-8 lg:px-12 xl:px-16">
             <p>
-              © {new Date().getFullYear()} Tikemia. Tous droits réservés.
+              © 2026 Tikemia. Tous droits réservés.
             </p>
 
             <div className="flex items-center gap-5">

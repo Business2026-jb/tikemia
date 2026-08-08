@@ -10,6 +10,9 @@ import {
   TicketReservationStatus,
 } from "@prisma/client";
 
+import {
+  processEmailDeliveries,
+} from "@/lib/deliveries/process-email-deliveries";
 import { prisma } from "@/lib/prisma";
 import {
   generateOrderTickets,
@@ -824,6 +827,7 @@ type DeliveryCandidate = Readonly<{
   type: DeliveryType;
   recipient: string;
   subject: string | null;
+  attachmentName: string | null;
   metadata: Prisma.InputJsonValue;
 }>;
 
@@ -914,6 +918,9 @@ async function ensureDeliveryLogs({
         subject:
           `Paiement confirmé - ${order.reference}`,
 
+        attachmentName:
+          null,
+
         metadata:
           toJsonValue({
             orderReference:
@@ -945,13 +952,16 @@ async function ensureDeliveryLogs({
         DeliveryChannel.EMAIL,
 
       type:
-        DeliveryType.TICKET_NOTIFICATION,
+        DeliveryType.TICKET_PDF,
 
       recipient:
         holderEmail,
 
       subject:
-        `Votre billet ${ticket.code}`,
+        `Votre billet Tikemia ${ticket.code}`,
+
+      attachmentName:
+        `${ticket.code}.pdf`,
 
       metadata:
         toJsonValue({
@@ -993,6 +1003,9 @@ async function ensureDeliveryLogs({
         subject:
           null,
 
+        attachmentName:
+          `${ticket.code}.pdf`,
+
         metadata:
           toJsonValue({
             ticketCode:
@@ -1020,6 +1033,7 @@ async function ensureDeliveryLogs({
                 DeliveryType.PAYMENT_CONFIRMATION,
                 DeliveryType.ORDER_CONFIRMATION,
                 DeliveryType.TICKET_NOTIFICATION,
+                DeliveryType.TICKET_PDF,
               ],
             },
           },
@@ -1110,6 +1124,9 @@ async function ensureDeliveryLogs({
             subject:
               candidate.subject,
 
+            attachmentName:
+              candidate.attachmentName,
+
             scheduledAt:
               new Date(),
 
@@ -1131,6 +1148,123 @@ async function ensureDeliveryLogs({
 
       timeout:
         30_000,
+    },
+  );
+}
+
+
+async function hasSentTicketEmail({
+  orderId,
+}: {
+  orderId: string;
+}): Promise<boolean> {
+  const sentDelivery =
+    await prisma.deliveryLog.findFirst({
+      where: {
+        orderId,
+
+        channel:
+          DeliveryChannel.EMAIL,
+
+        type:
+          DeliveryType.TICKET_PDF,
+
+        status:
+          DeliveryStatus.SENT,
+
+        providerMessageId: {
+          not:
+            null,
+        },
+      },
+
+      select: {
+        id:
+          true,
+      },
+    });
+
+  return Boolean(
+    sentDelivery,
+  );
+}
+
+async function sendTicketEmailImmediately({
+  orderId,
+  orderReference,
+}: {
+  orderId: string;
+  orderReference: string;
+}): Promise<void> {
+  const result =
+    await processEmailDeliveries({
+      orderId,
+
+      limit:
+        1,
+
+      maxAttempts:
+        5,
+
+      forceResend:
+        false,
+    });
+
+  if (
+    result.sentOrders > 0
+  ) {
+    return;
+  }
+
+  /*
+   * Lors d'un nouvel appel du webhook, l'e-mail peut déjà avoir été envoyé.
+   * Dans ce cas, aucun journal PENDING n'est sélectionné, mais la livraison
+   * réussie existe déjà et il ne faut surtout pas envoyer un doublon.
+   */
+  const alreadySent =
+    await hasSentTicketEmail({
+      orderId,
+    });
+
+  if (alreadySent) {
+    return;
+  }
+
+  const failedItem =
+    result.items.find(
+      (item) =>
+        item.status ===
+        "FAILED",
+    );
+
+  const skippedItem =
+    result.items.find(
+      (item) =>
+        item.status ===
+        "SKIPPED",
+    );
+
+  throw new SuccessfulPaymentCompletionError(
+    failedItem?.errorMessage ||
+      skippedItem?.errorMessage ||
+      "L'e-mail contenant les billets n'a pas été envoyé.",
+    failedItem?.errorCode ||
+      "PAYMENT_EMAIL_DELIVERY_NOT_SENT",
+    {
+      orderId,
+      orderReference,
+      selectedOrders:
+        result.selectedOrders,
+      sentOrders:
+        result.sentOrders,
+      failedOrders:
+        result.failedOrders,
+      skippedOrders:
+        result.skippedOrders,
+      recoveredStaleDeliveries:
+        result.recoveredStaleDeliveries,
+      items:
+        result.items,
     },
   );
 }
@@ -1235,6 +1369,30 @@ export async function completeSuccessfulPayment(
       error,
     );
   }
+
+  /*
+   * L'envoi des billets est vérifié explicitement.
+   *
+   * Avant cette correction, processEmailDeliveries() pouvait retourner
+   * failedOrders = 1 sans lever d'exception. Le résultat était ignoré,
+   * la fonction retournait un succès et les DeliveryLog restaient PENDING
+   * ou FAILED sans que le webhook relance correctement l'envoi.
+   *
+   * Désormais, l'exécution ne se termine avec succès que si :
+   * - un e-mail de billets vient d'être envoyé ; ou
+   * - un e-mail de billets SENT existe déjà pour cette commande.
+   *
+   * En cas d'échec, une erreur est remontée au webhook. Le paiement et les
+   * billets restent confirmés, mais l'appel pourra être rejoué sans double
+   * envoi grâce au contrôle du DeliveryLog déjà SENT.
+   */
+  await sendTicketEmailImmediately({
+    orderId:
+      prepared.orderId,
+
+    orderReference:
+      prepared.orderReference,
+  });
 
   return Object.freeze({
     paymentId,

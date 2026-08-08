@@ -17,69 +17,60 @@ import {
   getPaymentError,
   getPaymentErrorLogContext,
 } from "@/lib/payments/payment-errors";
-import { prisma } from "@/lib/prisma";
+import {
+  prisma,
+} from "@/lib/prisma";
 
-export type ProcessEmailDeliveriesOptions = {
-  limit?: number;
+export type ProcessEmailDeliveriesOptions =
+  Readonly<{
+    limit?: number;
+    maxAttempts?: number;
+    staleProcessingMinutes?: number;
+    orderId?: string;
+    forceResend?: boolean;
+    logoPath?: string;
+    now?: Date;
+  }>;
 
-  maxAttempts?: number;
+export type ProcessedEmailDeliveryItem =
+  Readonly<{
+    orderId: string;
+    orderReference: string | null;
 
-  staleProcessingMinutes?: number;
+    status:
+      | "SENT"
+      | "FAILED"
+      | "SKIPPED";
 
-  orderId?: string;
+    recipient: string | null;
+    providerMessageId: string | null;
+    deliveryLogIds: string[];
+    attachmentsCount: number;
+    errorCode: string | null;
+    errorMessage: string | null;
+  }>;
 
-  forceResend?: boolean;
+export type ProcessEmailDeliveriesResult =
+  Readonly<{
+    startedAt: string;
+    finishedAt: string;
 
-  logoPath?: string;
+    selectedOrders: number;
+    sentOrders: number;
+    failedOrders: number;
+    skippedOrders: number;
 
-  now?: Date;
-};
+    recoveredStaleDeliveries: number;
 
-export type ProcessedEmailDeliveryItem = {
-  orderId: string;
-  orderReference: string | null;
-
-  status:
-    | "SENT"
-    | "FAILED"
-    | "SKIPPED";
-
-  recipient: string | null;
-
-  providerMessageId: string | null;
-
-  deliveryLogIds: string[];
-
-  attachmentsCount: number;
-
-  errorCode: string | null;
-  errorMessage: string | null;
-};
-
-export type ProcessEmailDeliveriesResult = {
-  startedAt: string;
-  finishedAt: string;
-
-  selectedOrders: number;
-
-  sentOrders: number;
-  failedOrders: number;
-  skippedOrders: number;
-
-  recoveredStaleDeliveries: number;
-
-  items: ProcessedEmailDeliveryItem[];
-};
+    items:
+      ProcessedEmailDeliveryItem[];
+  }>;
 
 type DeliveryOrderGroup = {
   orderId: string;
-
   orderReference: string | null;
-
   recipient: string | null;
-
   deliveryLogIds: string[];
-
   attemptCount: number;
 };
 
@@ -101,6 +92,19 @@ const MIN_STALE_PROCESSING_MINUTES =
 const MAX_STALE_PROCESSING_MINUTES =
   180;
 
+/*
+ * TICKET_NOTIFICATION is kept for compatibility with deliveries
+ * already created by the former payment flow.
+ *
+ * TICKET_PDF is the definitive delivery type used for the e-mail
+ * containing the PDF attachments.
+ */
+const EMAIL_TICKET_DELIVERY_TYPES:
+  DeliveryType[] = [
+    DeliveryType.TICKET_NOTIFICATION,
+    DeliveryType.TICKET_PDF,
+  ];
+
 function normalizeText(
   value:
     | string
@@ -117,17 +121,11 @@ function normalizePositiveInteger({
   maximum,
 }: {
   value:
-    number
+    | number
     | undefined;
-
-  fallback:
-    number;
-
-  minimum:
-    number;
-
-  maximum:
-    number;
+  fallback: number;
+  minimum: number;
+  maximum: number;
 }): number {
   if (
     !Number.isInteger(
@@ -146,9 +144,37 @@ function normalizePositiveInteger({
   );
 }
 
+function validateDate(
+  value: Date,
+  field: string,
+): Date {
+  if (
+    !(value instanceof Date) ||
+    Number.isNaN(
+      value.getTime(),
+    )
+  ) {
+    throw new PaymentValidationError({
+      code:
+        "PAYMENT_INVALID_REQUEST",
+
+      message:
+        `${field} est invalide.`,
+
+      status:
+        400,
+
+      details: {
+        field,
+      },
+    });
+  }
+
+  return value;
+}
+
 function truncateErrorMessage(
-  value:
-    string,
+  value: string,
 ): string {
   return value
     .replace(
@@ -162,15 +188,33 @@ function truncateErrorMessage(
     );
 }
 
+function getClaimableStatuses({
+  forceResend,
+}: {
+  forceResend: boolean;
+}): DeliveryStatus[] {
+  if (forceResend) {
+    return [
+      DeliveryStatus.PENDING,
+      DeliveryStatus.FAILED,
+      DeliveryStatus.SENT,
+    ];
+  }
+
+  return [
+    DeliveryStatus.PENDING,
+    DeliveryStatus.FAILED,
+  ];
+}
+
 async function recoverStaleProcessingDeliveries({
   now,
   staleProcessingMinutes,
+  orderId,
 }: {
-  now:
-    Date;
-
-  staleProcessingMinutes:
-    number;
+  now: Date;
+  staleProcessingMinutes: number;
+  orderId: string | null;
 }): Promise<number> {
   const staleBefore =
     new Date(
@@ -185,11 +229,20 @@ async function recoverStaleProcessingDeliveries({
         channel:
           DeliveryChannel.EMAIL,
 
-        type:
-          DeliveryType.TICKET_PDF,
+        type: {
+          in:
+            EMAIL_TICKET_DELIVERY_TYPES,
+        },
 
         status:
           DeliveryStatus.PROCESSING,
+
+        orderId:
+          orderId ??
+          {
+            not:
+              null,
+          },
 
         OR: [
           {
@@ -213,11 +266,14 @@ async function recoverStaleProcessingDeliveries({
         failedAt:
           now,
 
+        sentAt:
+          null,
+
         errorCode:
           "DELIVERY_PROCESSING_INTERRUPTED",
 
         errorMessage:
-          "Traitement e-mail interrompu avant sa finalisation.",
+          "Le traitement de l’e-mail a été interrompu avant sa finalisation.",
       },
     });
 
@@ -228,43 +284,143 @@ async function loadDeliveryGroups({
   limit,
   maxAttempts,
   orderId,
+  forceResend,
 }: {
-  limit:
-    number;
-
-  maxAttempts:
-    number;
-
-  orderId:
-    string | null;
+  limit: number;
+  maxAttempts: number;
+  orderId: string | null;
+  forceResend: boolean;
 }): Promise<DeliveryOrderGroup[]> {
+  const claimableStatuses =
+    getClaimableStatuses({
+      forceResend,
+    });
+
+  /*
+   * On sélectionne d’abord les commandes, puis tous leurs journaux.
+   * Cela évite de récupérer seulement une partie des billets d’une
+   * commande lorsque celle-ci contient plusieurs pièces jointes.
+   */
+  const orderCandidates =
+    await prisma.deliveryLog.findMany({
+      where: {
+        channel:
+          DeliveryChannel.EMAIL,
+
+        type: {
+          in:
+            EMAIL_TICKET_DELIVERY_TYPES,
+        },
+
+        status: {
+          in:
+            claimableStatuses,
+        },
+
+        attempts:
+          forceResend
+            ? undefined
+            : {
+                lt:
+                  maxAttempts,
+              },
+
+        orderId:
+          orderId
+            ? orderId
+            : {
+                not:
+                  null,
+              },
+
+        order: {
+          status:
+            "PAID",
+
+          payment: {
+            status:
+              "SUCCESS",
+          },
+        },
+      },
+
+      orderBy: [
+        {
+          createdAt:
+            "asc",
+        },
+
+        {
+          id:
+            "asc",
+        },
+      ],
+
+      distinct: [
+        "orderId",
+      ],
+
+      select: {
+        orderId:
+          true,
+      },
+
+      take:
+        limit,
+    });
+
+  const selectedOrderIds =
+    orderCandidates
+      .map(
+        (
+          item,
+        ) =>
+          item.orderId,
+      )
+      .filter(
+        (
+          value,
+        ): value is string =>
+          Boolean(
+            value,
+          ),
+      );
+
+  if (
+    selectedOrderIds.length ===
+    0
+  ) {
+    return [];
+  }
+
   const logs =
     await prisma.deliveryLog.findMany({
       where: {
         channel:
           DeliveryChannel.EMAIL,
 
-        type:
-          DeliveryType.TICKET_PDF,
+        type: {
+          in:
+            EMAIL_TICKET_DELIVERY_TYPES,
+        },
 
         status: {
-          in: [
-            DeliveryStatus.PENDING,
-            DeliveryStatus.FAILED,
-          ],
+          in:
+            claimableStatuses,
         },
 
-        attempts: {
-          lt:
-            maxAttempts,
-        },
+        attempts:
+          forceResend
+            ? undefined
+            : {
+                lt:
+                  maxAttempts,
+              },
 
-        orderId: orderId
-          ? orderId
-          : {
-              not:
-                null,
-            },
+        orderId: {
+          in:
+            selectedOrderIds,
+        },
 
         order: {
           status:
@@ -309,10 +465,6 @@ async function loadDeliveryGroups({
           },
         },
       },
-
-      take:
-        limit *
-        20,
     });
 
   const groups =
@@ -322,8 +474,7 @@ async function loadDeliveryGroups({
     >();
 
   for (
-    const log of
-    logs
+    const log of logs
   ) {
     if (
       !log.orderId ||
@@ -332,17 +483,12 @@ async function loadDeliveryGroups({
       continue;
     }
 
-    const currentOrderId =
-      log.orderId;
-
     const existing =
       groups.get(
-        currentOrderId,
+        log.orderId,
       );
 
-    if (
-      existing
-    ) {
+    if (existing) {
       existing.deliveryLogIds.push(
         log.id,
       );
@@ -365,10 +511,10 @@ async function loadDeliveryGroups({
     }
 
     groups.set(
-      currentOrderId,
+      log.orderId,
       {
         orderId:
-          currentOrderId,
+          log.orderId,
 
         orderReference:
           log.order.reference,
@@ -384,34 +530,43 @@ async function loadDeliveryGroups({
           log.attempts,
       },
     );
-
-    if (
-      groups.size >=
-      limit
-    ) {
-      break;
-    }
   }
 
-  return Array.from(
-    groups.values(),
-  );
+  return selectedOrderIds
+    .map(
+      (
+        selectedOrderId,
+      ) =>
+        groups.get(
+          selectedOrderId,
+        ),
+    )
+    .filter(
+      (
+        group,
+      ): group is DeliveryOrderGroup =>
+        Boolean(
+          group,
+        ),
+    );
 }
 
 async function claimDeliveryGroup({
   group,
   now,
   maxAttempts,
+  forceResend,
 }: {
-  group:
-    DeliveryOrderGroup;
-
-  now:
-    Date;
-
-  maxAttempts:
-    number;
+  group: DeliveryOrderGroup;
+  now: Date;
+  maxAttempts: number;
+  forceResend: boolean;
 }): Promise<boolean> {
+  const claimableStatuses =
+    getClaimableStatuses({
+      forceResend,
+    });
+
   return prisma.$transaction(
     async (
       transaction,
@@ -424,23 +579,29 @@ async function claimDeliveryGroup({
                 group.deliveryLogIds,
             },
 
+            orderId:
+              group.orderId,
+
             channel:
               DeliveryChannel.EMAIL,
 
-            type:
-              DeliveryType.TICKET_PDF,
+            type: {
+              in:
+                EMAIL_TICKET_DELIVERY_TYPES,
+            },
 
             status: {
-              in: [
-                DeliveryStatus.PENDING,
-                DeliveryStatus.FAILED,
-              ],
+              in:
+                claimableStatuses,
             },
 
-            attempts: {
-              lt:
-                maxAttempts,
-            },
+            attempts:
+              forceResend
+                ? undefined
+                : {
+                    lt:
+                      maxAttempts,
+                  },
           },
 
           select: {
@@ -450,8 +611,10 @@ async function claimDeliveryGroup({
         });
 
       if (
+        claimableLogs.length ===
+          0 ||
         claimableLogs.length !==
-        group.deliveryLogIds.length
+          group.deliveryLogIds.length
       ) {
         return false;
       }
@@ -469,11 +632,12 @@ async function claimDeliveryGroup({
                 ),
             },
 
+            orderId:
+              group.orderId,
+
             status: {
-              in: [
-                DeliveryStatus.PENDING,
-                DeliveryStatus.FAILED,
-              ],
+              in:
+                claimableStatuses,
             },
           },
 
@@ -484,6 +648,9 @@ async function claimDeliveryGroup({
             lastAttemptAt:
               now,
 
+            sentAt:
+              null,
+
             failedAt:
               null,
 
@@ -492,6 +659,11 @@ async function claimDeliveryGroup({
 
             errorMessage:
               null,
+
+            providerMessageId:
+              forceResend
+                ? null
+                : undefined,
 
             attempts: {
               increment:
@@ -519,19 +691,68 @@ async function claimDeliveryGroup({
   );
 }
 
+async function markDeliveryGroupSent({
+  group,
+  sentAt,
+  providerMessageId,
+}: {
+  group: DeliveryOrderGroup;
+  sentAt: Date;
+  providerMessageId: string;
+}): Promise<void> {
+  await prisma.deliveryLog.updateMany({
+    where: {
+      id: {
+        in:
+          group.deliveryLogIds,
+      },
+
+      orderId:
+        group.orderId,
+
+      channel:
+        DeliveryChannel.EMAIL,
+
+      type: {
+        in:
+          EMAIL_TICKET_DELIVERY_TYPES,
+      },
+
+      status:
+        DeliveryStatus.PROCESSING,
+    },
+
+    data: {
+      status:
+        DeliveryStatus.SENT,
+
+      provider:
+        "RESEND",
+
+      providerMessageId,
+
+      sentAt,
+
+      failedAt:
+        null,
+
+      errorCode:
+        null,
+
+      errorMessage:
+        null,
+    },
+  });
+}
+
 async function markDeliveryGroupFailed({
   group,
   now,
   error,
 }: {
-  group:
-    DeliveryOrderGroup;
-
-  now:
-    Date;
-
-  error:
-    unknown;
+  group: DeliveryOrderGroup;
+  now: Date;
+  error: unknown;
 }): Promise<void> {
   const paymentError =
     getPaymentError(
@@ -561,6 +782,17 @@ async function markDeliveryGroupFailed({
           group.deliveryLogIds,
       },
 
+      orderId:
+        group.orderId,
+
+      channel:
+        DeliveryChannel.EMAIL,
+
+      type: {
+        in:
+          EMAIL_TICKET_DELIVERY_TYPES,
+      },
+
       status:
         DeliveryStatus.PROCESSING,
     },
@@ -571,6 +803,9 @@ async function markDeliveryGroupFailed({
 
       failedAt:
         now,
+
+      sentAt:
+        null,
 
       errorCode:
         paymentError.code,
@@ -587,11 +822,8 @@ function mapSentResult({
   group,
   result,
 }: {
-  group:
-    DeliveryOrderGroup;
-
-  result:
-    SendTicketEmailResult;
+  group: DeliveryOrderGroup;
+  result: SendTicketEmailResult;
 }): ProcessedEmailDeliveryItem {
   return {
     orderId:
@@ -634,8 +866,11 @@ export async function processEmailDeliveries(
   ProcessEmailDeliveriesResult
 > {
   const startedAt =
-    options.now ??
-    new Date();
+    validateDate(
+      options.now ??
+        new Date(),
+      "now",
+    );
 
   const limit =
     normalizePositiveInteger({
@@ -688,12 +923,43 @@ export async function processEmailDeliveries(
     ) ||
     null;
 
+  const forceResend =
+    options.forceResend ===
+    true;
+
+  /*
+   * Un renvoi forcé doit toujours viser une commande précise.
+   * Cette protection empêche un renvoi massif accidentel.
+   */
+  if (
+    forceResend &&
+    !orderId
+  ) {
+    throw new PaymentValidationError({
+      code:
+        "PAYMENT_INVALID_REQUEST",
+
+      message:
+        "orderId est obligatoire pour forcer le renvoi d’un e-mail.",
+
+      status:
+        400,
+
+      details: {
+        field:
+          "orderId",
+      },
+    });
+  }
+
   const recoveredStaleDeliveries =
     await recoverStaleProcessingDeliveries({
       now:
         startedAt,
 
       staleProcessingMinutes,
+
+      orderId,
     });
 
   const groups =
@@ -701,6 +967,7 @@ export async function processEmailDeliveries(
       limit,
       maxAttempts,
       orderId,
+      forceResend,
     });
 
   const items:
@@ -717,26 +984,28 @@ export async function processEmailDeliveries(
     0;
 
   for (
-    const group of
-    groups
+    const group of groups
   ) {
     let claimed =
       false;
 
     try {
+      const claimTime =
+        new Date();
+
       claimed =
         await claimDeliveryGroup({
           group,
 
           now:
-            new Date(),
+            claimTime,
 
           maxAttempts,
+
+          forceResend,
         });
 
-      if (
-        !claimed
-      ) {
+      if (!claimed) {
         skippedOrders +=
           1;
 
@@ -777,9 +1046,7 @@ export async function processEmailDeliveries(
           orderId:
             group.orderId,
 
-          forceResend:
-            options.forceResend ??
-            false,
+          forceResend,
 
           logoPath:
             options.logoPath,
@@ -787,6 +1054,68 @@ export async function processEmailDeliveries(
           generatedAt:
             new Date(),
         });
+
+      if (
+        result.orderId !==
+        group.orderId
+      ) {
+        throw new PaymentError({
+          code:
+            "PAYMENT_TICKET_ISSUANCE_FAILED",
+
+          message:
+            "Le résultat de l’envoi ne correspond pas à la commande traitée.",
+
+          status:
+            500,
+
+          retryable:
+            true,
+
+          exposeMessage:
+            false,
+
+          orderId:
+            group.orderId,
+        });
+      }
+
+      if (
+        result.attachmentsCount <=
+        0
+      ) {
+        throw new PaymentError({
+          code:
+            "PAYMENT_TICKET_ISSUANCE_FAILED",
+
+          message:
+            "Aucun billet PDF n’a été joint à l’e-mail.",
+
+          status:
+            500,
+
+          retryable:
+            true,
+
+          exposeMessage:
+            false,
+
+          orderId:
+            group.orderId,
+        });
+      }
+
+      await markDeliveryGroupSent({
+        group,
+
+        sentAt:
+          new Date(
+            result.sentAt,
+          ),
+
+        providerMessageId:
+          result.providerMessageId,
+      });
 
       sentOrders +=
         1;
@@ -805,14 +1134,23 @@ export async function processEmailDeliveries(
 
       console.error(
         "[PROCESS_EMAIL_DELIVERY_ERROR]",
-        getPaymentErrorLogContext(
-          error,
-        ),
+        {
+          orderId:
+            group.orderId,
+
+          orderReference:
+            group.orderReference,
+
+          deliveryLogIds:
+            group.deliveryLogIds,
+
+          ...getPaymentErrorLogContext(
+            error,
+          ),
+        },
       );
 
-      if (
-        claimed
-      ) {
+      if (claimed) {
         await markDeliveryGroupFailed({
           group,
 
@@ -826,9 +1164,17 @@ export async function processEmailDeliveries(
           ) => {
             console.error(
               "[PROCESS_EMAIL_DELIVERY_FAILURE_PERSIST_ERROR]",
-              getPaymentErrorLogContext(
-                persistenceError,
-              ),
+              {
+                orderId:
+                  group.orderId,
+
+                deliveryLogIds:
+                  group.deliveryLogIds,
+
+                ...getPaymentErrorLogContext(
+                  persistenceError,
+                ),
+              },
             );
           },
         );
@@ -949,15 +1295,15 @@ export async function processSingleOrderTicketEmail({
   const item =
     result.items[0];
 
-  if (
-    !item
-  ) {
+  if (!item) {
     throw new PaymentError({
       code:
         "PAYMENT_TICKET_ISSUANCE_FAILED",
 
       message:
-        "Aucune livraison e-mail en attente n’a été trouvée pour cette commande.",
+        forceResend
+          ? "Aucun billet e-mail n’a été trouvé pour cette commande."
+          : "Aucune livraison de billet par e-mail en attente n’a été trouvée pour cette commande.",
 
       status:
         404,

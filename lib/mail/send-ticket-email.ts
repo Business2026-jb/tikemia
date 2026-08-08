@@ -1,6 +1,8 @@
 import "server-only";
 
-import { createHash } from "node:crypto";
+import {
+  createHash,
+} from "node:crypto";
 
 import {
   DeliveryChannel,
@@ -12,13 +14,17 @@ import {
   TicketDocumentStatus,
   TicketDocumentType,
 } from "@prisma/client";
-import { Resend } from "resend";
+import {
+  Resend,
+} from "resend";
 
 import {
   PaymentError,
   PaymentValidationError,
 } from "@/lib/payments/payment-errors";
-import { prisma } from "@/lib/prisma";
+import {
+  prisma,
+} from "@/lib/prisma";
 import {
   generateOrderTicketPdfs,
   type GeneratedTicketPdf,
@@ -28,31 +34,28 @@ type DatabaseClient =
   | Prisma.TransactionClient
   | typeof prisma;
 
-export type SendTicketEmailOptions = {
-  orderId: string;
-  transaction?: Prisma.TransactionClient;
-  forceResend?: boolean;
-  replyTo?: string | null;
-  logoPath?: string;
-  generatedAt?: Date;
-};
+export type SendTicketEmailOptions =
+  Readonly<{
+    orderId: string;
+    transaction?: Prisma.TransactionClient;
+    forceResend?: boolean;
+    replyTo?: string | null;
+    logoPath?: string;
+    generatedAt?: Date;
+  }>;
 
-export type SendTicketEmailResult = {
-  orderId: string;
-  orderReference: string;
-
-  recipient: string;
-
-  provider: "RESEND";
-  providerMessageId: string;
-
-  attachmentsCount: number;
-  totalAttachmentsSize: number;
-
-  deliveryLogIds: string[];
-
-  sentAt: string;
-};
+export type SendTicketEmailResult =
+  Readonly<{
+    orderId: string;
+    orderReference: string;
+    recipient: string;
+    provider: "RESEND";
+    providerMessageId: string;
+    attachmentsCount: number;
+    totalAttachmentsSize: number;
+    deliveryLogIds: string[];
+    sentAt: string;
+  }>;
 
 type OrderEmailData = {
   id: string;
@@ -73,12 +76,10 @@ type OrderEmailData = {
     id: string;
     title: string;
     slug: string;
-
     venueName: string;
     address: string;
     city: string;
     country: string;
-
     startsAt: Date;
     endsAt: Date | null;
   };
@@ -86,7 +87,6 @@ type OrderEmailData = {
   items: Array<{
     id: string;
     quantity: number;
-
     unitPrice: Prisma.Decimal;
     platformFee: Prisma.Decimal;
     total: Prisma.Decimal;
@@ -109,23 +109,37 @@ type TicketDeliveryTarget = {
   ticketCode: string;
 };
 
-const PROVIDER = "RESEND" as const;
+const PROVIDER =
+  "RESEND" as const;
 
 const MAX_ATTACHMENTS_BYTES =
   38 * 1024 * 1024;
 
-const MAX_EMAIL_RECIPIENT_LENGTH = 320;
+const MAX_EMAIL_RECIPIENT_LENGTH =
+  320;
 
-let resendClient: Resend | null = null;
-let resendClientApiKey: string | null = null;
+let resendClient:
+  Resend | null =
+  null;
+
+let resendClientApiKey:
+  string | null =
+  null;
 
 function normalizeText(
-  value: string | null | undefined,
+  value:
+    | string
+    | null
+    | undefined,
 ): string {
   return (
     value
-      ?.replace(/\s+/g, " ")
-      .trim() ?? ""
+      ?.replace(
+        /\s+/g,
+        " ",
+      )
+      .trim() ??
+    ""
   );
 }
 
@@ -137,7 +151,9 @@ function normalizeIdentifier({
   field: string;
 }): string {
   const normalized =
-    normalizeText(value);
+    normalizeText(
+      value,
+    );
 
   if (!normalized) {
     throw new PaymentValidationError({
@@ -147,7 +163,8 @@ function normalizeIdentifier({
       message:
         `${field} est obligatoire.`,
 
-      status: 400,
+      status:
+        400,
 
       details: {
         field,
@@ -163,7 +180,9 @@ function normalizeGeneratedAt(
 ): Date {
   if (
     !(value instanceof Date) ||
-    Number.isNaN(value.getTime())
+    Number.isNaN(
+      value.getTime(),
+    )
   ) {
     throw new PaymentValidationError({
       code:
@@ -172,7 +191,8 @@ function normalizeGeneratedAt(
       message:
         "La date de génération des billets est invalide.",
 
-      status: 400,
+      status:
+        400,
     });
   }
 
@@ -184,7 +204,9 @@ function normalizeEmail(
   fieldName: string,
 ): string {
   const normalized =
-    normalizeText(value).toLowerCase();
+    normalizeText(
+      value,
+    ).toLowerCase();
 
   if (
     !normalized ||
@@ -201,7 +223,8 @@ function normalizeEmail(
       message:
         `${fieldName} est invalide.`,
 
-      status: 409,
+      status:
+        409,
 
       details: {
         fieldName,
@@ -213,14 +236,34 @@ function normalizeEmail(
 }
 
 function escapeHtml(
-  value: string | null | undefined,
+  value:
+    | string
+    | null
+    | undefined,
 ): string {
-  return normalizeText(value)
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;")
-    .replace(/'/g, "&#039;");
+  return normalizeText(
+    value,
+  )
+    .replace(
+      /&/g,
+      "&amp;",
+    )
+    .replace(
+      /</g,
+      "&lt;",
+    )
+    .replace(
+      />/g,
+      "&gt;",
+    )
+    .replace(
+      /"/g,
+      "&quot;",
+    )
+    .replace(
+      /'/g,
+      "&#039;",
+    );
 }
 
 function decimalToFixed(
@@ -229,9 +272,12 @@ function decimalToFixed(
   return value
     .toDecimalPlaces(
       2,
-      Prisma.Decimal.ROUND_HALF_UP,
+      Prisma.Decimal
+        .ROUND_HALF_UP,
     )
-    .toFixed(2);
+    .toFixed(
+      2,
+    );
 }
 
 function divideAmount({
@@ -246,7 +292,9 @@ function divideAmount({
   orderItemId: string;
 }): Prisma.Decimal {
   if (
-    !Number.isInteger(quantity) ||
+    !Number.isInteger(
+      quantity,
+    ) ||
     quantity <= 0
   ) {
     throw new PaymentError({
@@ -256,11 +304,14 @@ function divideAmount({
       message:
         "Une quantité de billets est invalide.",
 
-      status: 500,
+      status:
+        500,
 
-      retryable: false,
+      retryable:
+        false,
 
-      exposeMessage: false,
+      exposeMessage:
+        false,
 
       orderId,
 
@@ -272,10 +323,13 @@ function divideAmount({
   }
 
   return amount
-    .div(quantity)
+    .div(
+      quantity,
+    )
     .toDecimalPlaces(
       2,
-      Prisma.Decimal.ROUND_HALF_UP,
+      Prisma.Decimal
+        .ROUND_HALF_UP,
     );
 }
 
@@ -287,33 +341,42 @@ function formatMoney({
   currency: string;
 }): string {
   const numericAmount =
-    Number.parseFloat(amount);
+    Number.parseFloat(
+      amount,
+    );
 
   const normalizedCurrency =
-    normalizeText(currency)
-      .toUpperCase() || "XOF";
+    normalizeText(
+      currency,
+    ).toUpperCase() ||
+    "XOF";
 
   try {
     return new Intl.NumberFormat(
       "fr-FR",
       {
-        style: "currency",
+        style:
+          "currency",
 
         currency:
           normalizedCurrency,
 
         minimumFractionDigits:
-          normalizedCurrency === "XOF"
+          normalizedCurrency ===
+          "XOF"
             ? 0
             : 2,
 
         maximumFractionDigits:
-          normalizedCurrency === "XOF"
+          normalizedCurrency ===
+          "XOF"
             ? 0
             : 2,
       },
     ).format(
-      Number.isFinite(numericAmount)
+      Number.isFinite(
+        numericAmount,
+      )
         ? numericAmount
         : 0,
     );
@@ -327,7 +390,9 @@ function formatDateTime(
 ): string {
   if (
     !(value instanceof Date) ||
-    Number.isNaN(value.getTime())
+    Number.isNaN(
+      value.getTime(),
+    )
   ) {
     return "Date indisponible";
   }
@@ -335,20 +400,35 @@ function formatDateTime(
   return new Intl.DateTimeFormat(
     "fr-FR",
     {
-      weekday: "long",
-      day: "2-digit",
-      month: "long",
-      year: "numeric",
-      hour: "2-digit",
-      minute: "2-digit",
+      weekday:
+        "long",
+
+      day:
+        "2-digit",
+
+      month:
+        "long",
+
+      year:
+        "numeric",
+
+      hour:
+        "2-digit",
+
+      minute:
+        "2-digit",
     },
-  ).format(value);
+  ).format(
+    value,
+  );
 }
 
-function getApplicationUrl(): string {
+function getApplicationUrl():
+  string {
   const value =
     normalizeText(
-      process.env.NEXT_PUBLIC_APP_URL,
+      process.env
+        .NEXT_PUBLIC_APP_URL,
     ) ||
     normalizeText(
       process.env.APP_URL,
@@ -362,18 +442,25 @@ function getApplicationUrl(): string {
       message:
         "L’URL publique de Tikemia est absente.",
 
-      status: 500,
+      status:
+        500,
 
-      retryable: false,
+      retryable:
+        false,
 
-      exposeMessage: false,
+      exposeMessage:
+        false,
     });
   }
 
-  let url: URL;
+  let url:
+    URL;
 
   try {
-    url = new URL(value);
+    url =
+      new URL(
+        value,
+      );
   } catch {
     throw new PaymentError({
       code:
@@ -382,18 +469,22 @@ function getApplicationUrl(): string {
       message:
         "L’URL publique de Tikemia est invalide.",
 
-      status: 500,
+      status:
+        500,
 
-      retryable: false,
+      retryable:
+        false,
 
-      exposeMessage: false,
+      exposeMessage:
+        false,
     });
   }
 
   if (
     process.env.NODE_ENV ===
       "production" &&
-    url.protocol !== "https:"
+    url.protocol !==
+      "https:"
   ) {
     throw new PaymentError({
       code:
@@ -402,17 +493,23 @@ function getApplicationUrl(): string {
       message:
         "L’URL publique de Tikemia doit utiliser HTTPS en production.",
 
-      status: 500,
+      status:
+        500,
 
-      retryable: false,
+      retryable:
+        false,
 
-      exposeMessage: false,
+      exposeMessage:
+        false,
     });
   }
 
   return url
     .toString()
-    .replace(/\/$/, "");
+    .replace(
+      /\/$/,
+      "",
+    );
 }
 
 function getEmailConfiguration(): {
@@ -422,12 +519,14 @@ function getEmailConfiguration(): {
 } {
   const apiKey =
     normalizeText(
-      process.env.RESEND_API_KEY,
+      process.env
+        .RESEND_API_KEY,
     );
 
   const from =
     normalizeText(
-      process.env.MAIL_FROM_TICKETS,
+      process.env
+        .MAIL_FROM_TICKETS,
     ) ||
     normalizeText(
       process.env.MAIL_FROM,
@@ -435,10 +534,15 @@ function getEmailConfiguration(): {
 
   const replyTo =
     normalizeText(
-      process.env.MAIL_REPLY_TO_SUPPORT,
-    ) || null;
+      process.env
+        .MAIL_REPLY_TO_SUPPORT,
+    ) ||
+    null;
 
-  if (!apiKey || !from) {
+  if (
+    !apiKey ||
+    !from
+  ) {
     throw new PaymentError({
       code:
         "PAYMENT_CONFIGURATION_ERROR",
@@ -446,11 +550,14 @@ function getEmailConfiguration(): {
       message:
         "La configuration d’envoi des billets est incomplète.",
 
-      status: 500,
+      status:
+        500,
 
-      retryable: false,
+      retryable:
+        false,
 
-      exposeMessage: false,
+      exposeMessage:
+        false,
     });
   }
 
@@ -466,13 +573,16 @@ function getResendClient(
 ): Resend {
   if (
     resendClient &&
-    resendClientApiKey === apiKey
+    resendClientApiKey ===
+      apiKey
   ) {
     return resendClient;
   }
 
   resendClient =
-    new Resend(apiKey);
+    new Resend(
+      apiKey,
+    );
 
   resendClientApiKey =
     apiKey;
@@ -483,16 +593,29 @@ function getResendClient(
 function getEmailIdempotencyKey({
   orderId,
   recipient,
+  forceResend,
+  generatedAt,
 }: {
   orderId: string;
   recipient: string;
+  forceResend: boolean;
+  generatedAt: Date;
 }): string {
-  return createHash("sha256")
+  const resendScope =
+    forceResend
+      ? `force:${generatedAt.toISOString()}`
+      : "initial";
+
+  return createHash(
+    "sha256",
+  )
     .update(
-      `tikemia:ticket-email:${orderId}:${recipient.toLowerCase()}`,
+      `tikemia:ticket-email:${orderId}:${recipient.toLowerCase()}:${resendScope}`,
       "utf8",
     )
-    .digest("hex");
+    .digest(
+      "hex",
+    );
 }
 
 async function getOrderEmailData({
@@ -505,68 +628,120 @@ async function getOrderEmailData({
   const order =
     await database.order.findUnique({
       where: {
-        id: orderId,
+        id:
+          orderId,
       },
 
       select: {
-        id: true,
-        reference: true,
-        status: true,
-        currency: true,
+        id:
+          true,
 
-        customerId: true,
-        customerName: true,
-        customerEmail: true,
-        customerPhone: true,
+        reference:
+          true,
+
+        status:
+          true,
+
+        currency:
+          true,
+
+        customerId:
+          true,
+
+        customerName:
+          true,
+
+        customerEmail:
+          true,
+
+        customerPhone:
+          true,
 
         payment: {
           select: {
-            status: true,
+            status:
+              true,
           },
         },
 
         event: {
           select: {
-            id: true,
-            title: true,
-            slug: true,
-            venueName: true,
-            address: true,
-            city: true,
-            country: true,
-            startsAt: true,
-            endsAt: true,
+            id:
+              true,
+
+            title:
+              true,
+
+            slug:
+              true,
+
+            venueName:
+              true,
+
+            address:
+              true,
+
+            city:
+              true,
+
+            country:
+              true,
+
+            startsAt:
+              true,
+
+            endsAt:
+              true,
           },
         },
 
         items: {
           orderBy: {
-            id: "asc",
+            id:
+              "asc",
           },
 
           select: {
-            id: true,
-            quantity: true,
-            unitPrice: true,
-            platformFee: true,
-            total: true,
+            id:
+              true,
+
+            quantity:
+              true,
+
+            unitPrice:
+              true,
+
+            platformFee:
+              true,
+
+            total:
+              true,
 
             ticketType: {
               select: {
-                id: true,
-                name: true,
-                description: true,
+                id:
+                  true,
+
+                name:
+                  true,
+
+                description:
+                  true,
               },
             },
 
             tickets: {
               orderBy: {
-                createdAt: "asc",
+                createdAt:
+                  "asc",
               },
 
               select: {
-                id: true,
-                code: true,
+                id:
+                  true,
+
+                code:
+                  true,
               },
             },
           },
@@ -582,7 +757,8 @@ async function getOrderEmailData({
       message:
         "La commande est introuvable.",
 
-      status: 404,
+      status:
+        404,
 
       orderId,
     });
@@ -601,14 +777,18 @@ async function getOrderEmailData({
       message:
         "Les billets ne peuvent être envoyés qu’après confirmation du paiement.",
 
-      status: 409,
+      status:
+        409,
 
       orderId:
         order.id,
     });
   }
 
-  if (order.items.length === 0) {
+  if (
+    order.items.length ===
+    0
+  ) {
     throw new PaymentError({
       code:
         "PAYMENT_TICKET_ISSUANCE_FAILED",
@@ -616,11 +796,14 @@ async function getOrderEmailData({
       message:
         "La commande ne contient aucun billet.",
 
-      status: 500,
+      status:
+        500,
 
-      retryable: false,
+      retryable:
+        false,
 
-      exposeMessage: false,
+      exposeMessage:
+        false,
 
       orderId:
         order.id,
@@ -629,12 +812,16 @@ async function getOrderEmailData({
 
   const expectedTickets =
     order.items.reduce(
-      (total, item) => {
+      (
+        total,
+        item,
+      ) => {
         if (
           !Number.isInteger(
             item.quantity,
           ) ||
-          item.quantity <= 0
+          item.quantity <=
+            0
         ) {
           throw new PaymentError({
             code:
@@ -643,11 +830,14 @@ async function getOrderEmailData({
             message:
               "Une quantité de billets de la commande est invalide.",
 
-            status: 500,
+            status:
+              500,
 
-            retryable: false,
+            retryable:
+              false,
 
-            exposeMessage: false,
+            exposeMessage:
+              false,
 
             orderId:
               order.id,
@@ -673,11 +863,14 @@ async function getOrderEmailData({
             message:
               "Le nombre de billets dépasse la quantité commandée.",
 
-            status: 500,
+            status:
+              500,
 
-            retryable: false,
+            retryable:
+              false,
 
-            exposeMessage: false,
+            exposeMessage:
+              false,
 
             orderId:
               order.id,
@@ -705,7 +898,10 @@ async function getOrderEmailData({
 
   const availableTickets =
     order.items.reduce(
-      (total, item) =>
+      (
+        total,
+        item,
+      ) =>
         total +
         item.tickets.length,
       0,
@@ -723,11 +919,14 @@ async function getOrderEmailData({
       message:
         "Tous les billets de la commande ne sont pas encore disponibles.",
 
-      status: 409,
+      status:
+        409,
 
-      retryable: true,
+      retryable:
+        true,
 
-      exposeMessage: false,
+      exposeMessage:
+        false,
 
       orderId:
         order.id,
@@ -753,122 +952,132 @@ function buildTicketRows({
   order: OrderEmailData;
 }): string {
   return order.items
-    .map((item) => {
-      const feePerTicket =
-        divideAmount({
-          amount:
-            item.platformFee,
+    .map(
+      (
+        item,
+      ) => {
+        const feePerTicket =
+          divideAmount({
+            amount:
+              item.platformFee,
 
-          quantity:
-            item.quantity,
+            quantity:
+              item.quantity,
 
-          orderId:
-            order.id,
+            orderId:
+              order.id,
 
-          orderItemId:
-            item.id,
-        });
+            orderItemId:
+              item.id,
+          });
 
-      const totalPerTicket =
-        divideAmount({
-          amount:
-            item.total,
+        const totalPerTicket =
+          divideAmount({
+            amount:
+              item.total,
 
-          quantity:
-            item.quantity,
+            quantity:
+              item.quantity,
 
-          orderId:
-            order.id,
+            orderId:
+              order.id,
 
-          orderItemId:
-            item.id,
-        });
+            orderItemId:
+              item.id,
+          });
 
-      const ticketCodes =
-        item.tickets
-          .map(
-            (ticket) =>
-              escapeHtml(
-                ticket.code,
-              ),
-          )
-          .join("<br />");
+        const ticketCodes =
+          item.tickets
+            .map(
+              (
+                ticket,
+              ) =>
+                escapeHtml(
+                  ticket.code,
+                ),
+            )
+            .join(
+              "<br />",
+            );
 
-      return `
-        <tr>
-          <td style="padding:14px;border-bottom:1px solid #e8ecef;vertical-align:top;">
-            <div style="font-weight:800;color:#101416;">
+        return `
+          <tr>
+            <td style="padding:14px;border-bottom:1px solid #e8ecef;vertical-align:top;">
+              <div style="font-weight:800;color:#101416;">
+                ${escapeHtml(
+                  item.ticketType.name,
+                )}
+              </div>
+
+              ${
+                item.ticketType.description
+                  ? `
+                    <div style="margin-top:4px;font-size:12px;line-height:18px;color:#6b7378;">
+                      ${escapeHtml(
+                        item.ticketType.description,
+                      )}
+                    </div>
+                  `
+                  : ""
+              }
+            </td>
+
+            <td style="padding:14px;border-bottom:1px solid #e8ecef;text-align:center;vertical-align:top;font-weight:800;color:#101416;">
+              ${item.quantity}
+            </td>
+
+            <td style="padding:14px;border-bottom:1px solid #e8ecef;text-align:right;vertical-align:top;font-weight:700;color:#101416;">
               ${escapeHtml(
-                item.ticketType.name,
+                formatMoney({
+                  amount:
+                    decimalToFixed(
+                      item.unitPrice,
+                    ),
+
+                  currency:
+                    order.currency,
+                }),
               )}
-            </div>
+            </td>
 
-            ${
-              item.ticketType.description
-                ? `
-                  <div style="margin-top:4px;font-size:12px;line-height:18px;color:#6b7378;">
-                    ${escapeHtml(
-                      item.ticketType.description,
-                    )}
-                  </div>
-                `
-                : ""
-            }
-          </td>
+            <td style="padding:14px;border-bottom:1px solid #e8ecef;text-align:right;vertical-align:top;font-weight:700;color:#101416;">
+              ${escapeHtml(
+                formatMoney({
+                  amount:
+                    decimalToFixed(
+                      feePerTicket,
+                    ),
 
-          <td style="padding:14px;border-bottom:1px solid #e8ecef;text-align:center;vertical-align:top;font-weight:800;color:#101416;">
-            ${item.quantity}
-          </td>
+                  currency:
+                    order.currency,
+                }),
+              )}
+            </td>
 
-          <td style="padding:14px;border-bottom:1px solid #e8ecef;text-align:right;vertical-align:top;font-weight:700;color:#101416;">
-            ${escapeHtml(
-              formatMoney({
-                amount:
-                  decimalToFixed(
-                    item.unitPrice,
-                  ),
+            <td style="padding:14px;border-bottom:1px solid #e8ecef;text-align:right;vertical-align:top;font-weight:900;color:#17894b;">
+              ${escapeHtml(
+                formatMoney({
+                  amount:
+                    decimalToFixed(
+                      totalPerTicket,
+                    ),
 
-                currency:
-                  order.currency,
-              }),
-            )}
-          </td>
+                  currency:
+                    order.currency,
+                }),
+              )}
+            </td>
 
-          <td style="padding:14px;border-bottom:1px solid #e8ecef;text-align:right;vertical-align:top;font-weight:700;color:#101416;">
-            ${escapeHtml(
-              formatMoney({
-                amount:
-                  decimalToFixed(
-                    feePerTicket,
-                  ),
-
-                currency:
-                  order.currency,
-              }),
-            )}
-          </td>
-
-          <td style="padding:14px;border-bottom:1px solid #e8ecef;text-align:right;vertical-align:top;font-weight:900;color:#17894b;">
-            ${escapeHtml(
-              formatMoney({
-                amount:
-                  decimalToFixed(
-                    totalPerTicket,
-                  ),
-
-                currency:
-                  order.currency,
-              }),
-            )}
-          </td>
-
-          <td style="padding:14px;border-bottom:1px solid #e8ecef;vertical-align:top;font-family:monospace;font-size:11px;line-height:17px;color:#4f575c;">
-            ${ticketCodes}
-          </td>
-        </tr>
-      `;
-    })
-    .join("");
+            <td style="padding:14px;border-bottom:1px solid #e8ecef;vertical-align:top;font-family:monospace;font-size:11px;line-height:17px;color:#4f575c;">
+              ${ticketCodes}
+            </td>
+          </tr>
+        `;
+      },
+    )
+    .join(
+      "",
+    );
 }
 
 function buildEmailHtml({
@@ -892,7 +1101,10 @@ function buildEmailHtml({
 
   const totalTickets =
     order.items.reduce(
-      (total, item) =>
+      (
+        total,
+        item,
+      ) =>
         total +
         item.quantity,
       0,
@@ -900,10 +1112,17 @@ function buildEmailHtml({
 
   const orderTotal =
     order.items.reduce(
-      (total, item) =>
-        total.plus(item.total),
+      (
+        total,
+        item,
+      ) =>
+        total.plus(
+          item.total,
+        ),
 
-      new Prisma.Decimal(0),
+      new Prisma.Decimal(
+        0,
+      ),
     );
 
   return `<!doctype html>
@@ -986,8 +1205,12 @@ function buildEmailHtml({
                             order.event.city,
                             order.event.country,
                           ]
-                            .filter(Boolean)
-                            .join(", "),
+                            .filter(
+                              Boolean,
+                            )
+                            .join(
+                              ", ",
+                            ),
                         )}
                       </div>
                     </td>
@@ -1127,13 +1350,20 @@ function buildEmailText({
       order.event.city,
       order.event.country,
     ]
-      .filter(Boolean)
-      .join(", ")}`,
+      .filter(
+        Boolean,
+      )
+      .join(
+        ", ",
+      )}`,
     "",
     "Billets :",
   ];
 
-  for (const item of order.items) {
+  for (
+    const item of
+    order.items
+  ) {
     const feePerTicket =
       divideAmount({
         amount:
@@ -1192,7 +1422,10 @@ function buildEmailText({
       })}`,
     );
 
-    for (const ticket of item.tickets) {
+    for (
+      const ticket of
+      item.tickets
+    ) {
       lines.push(
         `  Code : ${ticket.code}`,
       );
@@ -1205,17 +1438,21 @@ function buildEmailText({
     "Ne partagez pas vos billets ni leurs QR codes avant le contrôle d’accès.",
   );
 
-  return lines.join("\n");
+  return lines.join(
+    "\n",
+  );
 }
 
 function buildAttachments(
-  generatedPdfs: GeneratedTicketPdf[],
+  generatedPdfs:
+    GeneratedTicketPdf[],
 ): Array<{
   filename: string;
   content: Buffer;
 }> {
   if (
-    generatedPdfs.length === 0
+    generatedPdfs.length ===
+    0
   ) {
     throw new PaymentError({
       code:
@@ -1224,20 +1461,27 @@ function buildAttachments(
       message:
         "Aucun billet PDF n’a été généré.",
 
-      status: 500,
+      status:
+        500,
 
-      retryable: true,
+      retryable:
+        true,
 
-      exposeMessage: false,
+      exposeMessage:
+        false,
     });
   }
 
   const totalSize =
     generatedPdfs.reduce(
-      (total, pdf) => {
+      (
+        total,
+        pdf,
+      ) => {
         if (
           !pdf.buffer ||
-          pdf.fileSize <= 0 ||
+          pdf.fileSize <=
+            0 ||
           pdf.buffer.byteLength !==
             pdf.fileSize
         ) {
@@ -1248,11 +1492,14 @@ function buildAttachments(
             message:
               "Un fichier PDF de billet est invalide.",
 
-            status: 500,
+            status:
+              500,
 
-            retryable: true,
+            retryable:
+              true,
 
-            exposeMessage: false,
+            exposeMessage:
+              false,
 
             details: {
               ticketId:
@@ -1262,7 +1509,8 @@ function buildAttachments(
                 pdf.fileSize,
 
               bufferSize:
-                pdf.buffer?.byteLength ??
+                pdf.buffer
+                  ?.byteLength ??
                 0,
             },
           });
@@ -1287,11 +1535,14 @@ function buildAttachments(
       message:
         "La taille totale des billets dépasse la limite d’envoi par e-mail.",
 
-      status: 413,
+      status:
+        413,
 
-      retryable: false,
+      retryable:
+        false,
 
-      exposeMessage: false,
+      exposeMessage:
+        false,
 
       details: {
         totalSize,
@@ -1303,7 +1554,9 @@ function buildAttachments(
   }
 
   return generatedPdfs.map(
-    (pdf) => ({
+    (
+      pdf,
+    ) => ({
       filename:
         pdf.fileName,
 
@@ -1314,12 +1567,17 @@ function buildAttachments(
 }
 
 function getTicketDeliveryTargets(
-  order: OrderEmailData,
+  order:
+    OrderEmailData,
 ): TicketDeliveryTarget[] {
   return order.items.flatMap(
-    (item) =>
+    (
+      item,
+    ) =>
       item.tickets.map(
-        (ticket) => ({
+        (
+          ticket,
+        ) => ({
           ticketId:
             ticket.id,
 
@@ -1361,18 +1619,25 @@ async function findExistingSuccessfulDelivery({
       },
 
       providerMessageId: {
-        not: null,
+        not:
+          null,
       },
     },
 
     orderBy: {
-      sentAt: "desc",
+      sentAt:
+        "desc",
     },
 
     select: {
-      id: true,
-      providerMessageId: true,
-      sentAt: true,
+      id:
+        true,
+
+      providerMessageId:
+        true,
+
+      sentAt:
+        true,
     },
   });
 }
@@ -1387,7 +1652,34 @@ async function ensurePendingDeliveryLogs({
   recipient: string;
 }): Promise<string[]> {
   const targets =
-    getTicketDeliveryTargets(order);
+    getTicketDeliveryTargets(
+      order,
+    );
+
+  if (
+    targets.length ===
+    0
+  ) {
+    throw new PaymentError({
+      code:
+        "PAYMENT_TICKET_ISSUANCE_FAILED",
+
+      message:
+        "Aucun billet n’est disponible pour préparer l’envoi.",
+
+      status:
+        409,
+
+      retryable:
+        true,
+
+      exposeMessage:
+        false,
+
+      orderId:
+        order.id,
+    });
+  }
 
   const existingLogs =
     await database.deliveryLog.findMany({
@@ -1412,30 +1704,43 @@ async function ensurePendingDeliveryLogs({
         ticketId: {
           in:
             targets.map(
-              (target) =>
+              (
+                target,
+              ) =>
                 target.ticketId,
             ),
         },
       },
 
       select: {
-        id: true,
-        ticketId: true,
+        id:
+          true,
+
+        ticketId:
+          true,
       },
     });
 
   const existingByTicketId =
     new Map(
       existingLogs.map(
-        (log) => [
+        (
+          log,
+        ) => [
           log.ticketId,
           log.id,
-        ]),
+        ],
+      ),
     );
 
-  const deliveryLogIds: string[] = [];
+  const deliveryLogIds:
+    string[] =
+    [];
 
-  for (const target of targets) {
+  for (
+    const target of
+    targets
+  ) {
     const existingId =
       existingByTicketId.get(
         target.ticketId,
@@ -1487,11 +1792,15 @@ async function ensurePendingDeliveryLogs({
 
             eventTitle:
               order.event.title,
+
+            attachmentName:
+              `${target.ticketCode}.pdf`,
           },
         },
 
         select: {
-          id: true,
+          id:
+            true,
         },
       });
 
@@ -1503,7 +1812,13 @@ async function ensurePendingDeliveryLogs({
   return deliveryLogIds;
 }
 
-async function markDeliveriesProcessing({
+/*
+ * Cette fonction ne réincrémente pas les tentatives lorsque les
+ * journaux sont déjà en PROCESSING. Le processeur de livraisons les
+ * a déjà réclamés. Cela évite de compter deux tentatives pour un
+ * seul envoi.
+ */
+async function markPendingDeliveriesProcessing({
   database,
   deliveryLogIds,
   attemptedAt,
@@ -1513,7 +1828,8 @@ async function markDeliveriesProcessing({
   attemptedAt: Date;
 }): Promise<void> {
   if (
-    deliveryLogIds.length === 0
+    deliveryLogIds.length ===
+    0
   ) {
     return;
   }
@@ -1521,14 +1837,14 @@ async function markDeliveriesProcessing({
   await database.deliveryLog.updateMany({
     where: {
       id: {
-        in: deliveryLogIds,
+        in:
+          deliveryLogIds,
       },
 
       status: {
         in: [
           DeliveryStatus.PENDING,
           DeliveryStatus.FAILED,
-          DeliveryStatus.PROCESSING,
         ],
       },
     },
@@ -1539,6 +1855,9 @@ async function markDeliveriesProcessing({
 
       provider:
         PROVIDER,
+
+      sentAt:
+        null,
 
       failedAt:
         null,
@@ -1553,7 +1872,8 @@ async function markDeliveriesProcessing({
         attemptedAt,
 
       attempts: {
-        increment: 1,
+        increment:
+          1,
       },
     },
   });
@@ -1573,7 +1893,8 @@ async function markDeliveriesFailed({
   errorMessage: string;
 }): Promise<void> {
   if (
-    deliveryLogIds.length === 0
+    deliveryLogIds.length ===
+    0
   ) {
     return;
   }
@@ -1585,6 +1906,9 @@ async function markDeliveriesFailed({
           in:
             deliveryLogIds,
         },
+
+        status:
+          DeliveryStatus.PROCESSING,
       },
 
       data: {
@@ -1594,42 +1918,57 @@ async function markDeliveriesFailed({
         provider:
           PROVIDER,
 
+        sentAt:
+          null,
+
         failedAt,
 
         errorCode:
-          errorCode.slice(
-            0,
-            255,
-          ),
+          errorCode
+            .slice(
+              0,
+              255,
+            ),
 
         errorMessage:
-          errorMessage.slice(
-            0,
-            2_000,
-          ),
+          errorMessage
+            .replace(
+              /\s+/g,
+              " ",
+            )
+            .trim()
+            .slice(
+              0,
+              2_000,
+            ),
       },
     })
-    .catch((persistenceError) => {
-      console.error(
-        "[TICKET_EMAIL_DELIVERY_FAILURE_LOG_ERROR]",
-        {
-          deliveryLogIds,
+    .catch(
+      (
+        persistenceError,
+      ) => {
+        console.error(
+          "[TICKET_EMAIL_DELIVERY_FAILURE_LOG_ERROR]",
+          {
+            deliveryLogIds,
 
-          error:
-            persistenceError instanceof Error
-              ? {
-                  name:
-                    persistenceError.name,
+            error:
+              persistenceError instanceof
+              Error
+                ? {
+                    name:
+                      persistenceError.name,
 
-                  message:
-                    persistenceError.message,
-                }
-              : String(
-                  persistenceError,
-                ),
-        },
-      );
-    });
+                    message:
+                      persistenceError.message,
+                  }
+                : String(
+                    persistenceError,
+                  ),
+          },
+        );
+      },
+    );
 }
 
 async function markDeliveriesSent({
@@ -1644,42 +1983,78 @@ async function markDeliveriesSent({
   sentAt: Date;
 }): Promise<void> {
   if (
-    deliveryLogIds.length === 0
+    deliveryLogIds.length ===
+    0
   ) {
     return;
   }
 
-  await database.deliveryLog.updateMany({
-    where: {
-      id: {
-        in: deliveryLogIds,
+  const result =
+    await database.deliveryLog.updateMany({
+      where: {
+        id: {
+          in:
+            deliveryLogIds,
+        },
+
+        status:
+          DeliveryStatus.PROCESSING,
       },
-    },
 
-    data: {
+      data: {
+        status:
+          DeliveryStatus.SENT,
+
+        provider:
+          PROVIDER,
+
+        providerMessageId,
+
+        sentAt,
+
+        deliveredAt:
+          null,
+
+        failedAt:
+          null,
+
+        errorCode:
+          null,
+
+        errorMessage:
+          null,
+      },
+    });
+
+  if (
+    result.count !==
+    deliveryLogIds.length
+  ) {
+    throw new PaymentError({
+      code:
+        "PAYMENT_TICKET_ISSUANCE_FAILED",
+
+      message:
+        "Tous les journaux de livraison n’ont pas pu être confirmés.",
+
       status:
-        DeliveryStatus.SENT,
+        500,
 
-      provider:
-        PROVIDER,
+      retryable:
+        true,
 
-      providerMessageId,
+      exposeMessage:
+        false,
 
-      sentAt,
+      details: {
+        expected:
+          deliveryLogIds.length,
 
-      deliveredAt:
-        null,
-
-      failedAt:
-        null,
-
-      errorCode:
-        null,
-
-      errorMessage:
-        null,
-    },
-  });
+        updated:
+          result.count,
+      },
+    });
+  }
 }
 
 async function saveTicketPdfDocuments({
@@ -1688,10 +2063,14 @@ async function saveTicketPdfDocuments({
   generatedAt,
 }: {
   database: DatabaseClient;
-  generatedPdfs: GeneratedTicketPdf[];
+  generatedPdfs:
+    GeneratedTicketPdf[];
   generatedAt: Date;
 }): Promise<void> {
-  for (const pdf of generatedPdfs) {
+  for (
+    const pdf of
+    generatedPdfs
+  ) {
     await database.ticketDocument.upsert({
       where: {
         ticketId_type: {
@@ -1772,9 +2151,7 @@ export async function sendTicketEmail({
   replyTo,
   logoPath,
   generatedAt = new Date(),
-}: SendTicketEmailOptions): Promise<
-  SendTicketEmailResult
-> {
+}: SendTicketEmailOptions): Promise<SendTicketEmailResult> {
   const orderId =
     normalizeIdentifier({
       value:
@@ -1789,8 +2166,10 @@ export async function sendTicketEmail({
       generatedAt,
     );
 
-  const database: DatabaseClient =
-    transaction ?? prisma;
+  const database:
+    DatabaseClient =
+    transaction ??
+    prisma;
 
   const order =
     await getOrderEmailData({
@@ -1817,7 +2196,8 @@ export async function sendTicketEmail({
   if (
     existingDelivery &&
     !forceResend &&
-    existingDelivery.providerMessageId
+    existingDelivery
+      .providerMessageId
   ) {
     return {
       orderId:
@@ -1832,7 +2212,8 @@ export async function sendTicketEmail({
         PROVIDER,
 
       providerMessageId:
-        existingDelivery.providerMessageId,
+        existingDelivery
+          .providerMessageId,
 
       attachmentsCount:
         getTicketDeliveryTargets(
@@ -1848,7 +2229,8 @@ export async function sendTicketEmail({
 
       sentAt:
         (
-          existingDelivery.sentAt ??
+          existingDelivery
+            .sentAt ??
           validGeneratedAt
         ).toISOString(),
     };
@@ -1874,7 +2256,10 @@ export async function sendTicketEmail({
 
   const totalAttachmentsSize =
     generatedPdfs.tickets.reduce(
-      (total, pdf) =>
+      (
+        total,
+        pdf,
+      ) =>
         total +
         pdf.fileSize,
       0,
@@ -1887,13 +2272,13 @@ export async function sendTicketEmail({
       recipient,
     });
 
-  const attemptedAt =
-    new Date();
-
-  await markDeliveriesProcessing({
+  await markPendingDeliveriesProcessing({
     database,
+
     deliveryLogIds,
-    attemptedAt,
+
+    attemptedAt:
+      new Date(),
   });
 
   const configuration =
@@ -1910,12 +2295,18 @@ export async function sendTicketEmail({
         order.id,
 
       recipient,
+
+      forceResend,
+
+      generatedAt:
+        validGeneratedAt,
     });
 
   let response:
     Awaited<
       ReturnType<
-        typeof resend.emails.send
+        typeof resend
+          .emails.send
       >
     >;
 
@@ -1946,7 +2337,9 @@ export async function sendTicketEmail({
           attachments,
 
           replyTo:
-            normalizeText(replyTo) ||
+            normalizeText(
+              replyTo,
+            ) ||
             configuration.replyTo ||
             undefined,
 
@@ -2013,11 +2406,14 @@ export async function sendTicketEmail({
       message:
         "Impossible d’envoyer les billets par e-mail.",
 
-      status: 502,
+      status:
+        502,
 
-      retryable: true,
+      retryable:
+        true,
 
-      exposeMessage: false,
+      exposeMessage:
+        false,
 
       orderId:
         order.id,
@@ -2062,11 +2458,14 @@ export async function sendTicketEmail({
       message:
         "Impossible d’envoyer les billets par e-mail.",
 
-      status: 502,
+      status:
+        502,
 
-      retryable: true,
+      retryable:
+        true,
 
-      exposeMessage: false,
+      exposeMessage:
+        false,
 
       orderId:
         order.id,
@@ -2114,9 +2513,8 @@ export async function sendTicketEmail({
     });
   } catch (error) {
     /*
-     * L’e-mail est déjà parti.
-     * On journalise seulement l’échec d’enregistrement du document
-     * pour éviter un second envoi automatique au client.
+     * L’e-mail est déjà parti. On journalise l’échec
+     * sans relancer automatiquement un second envoi.
      */
     console.error(
       "[TICKET_PDF_DOCUMENT_PERSIST_ERROR]",
@@ -2136,7 +2534,9 @@ export async function sendTicketEmail({
                 message:
                   error.message,
               }
-            : String(error),
+            : String(
+                error,
+              ),
       },
     );
   }

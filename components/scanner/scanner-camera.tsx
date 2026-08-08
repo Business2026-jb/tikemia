@@ -41,7 +41,14 @@ type Html5QrCodeInstance = {
         | {
             width: number;
             height: number;
-          };
+          }
+        | ((
+            viewfinderWidth: number,
+            viewfinderHeight: number,
+          ) => {
+            width: number;
+            height: number;
+          });
       aspectRatio?: number;
       disableFlip?: boolean;
     },
@@ -67,6 +74,15 @@ type Html5QrCodeInstance = {
   };
 };
 
+const CAMERA_FPS =
+  24;
+
+const MIN_QR_BOX_SIZE =
+  220;
+
+const MAX_QR_BOX_SIZE =
+  380;
+
 function normalizeText(
   value:
     | string
@@ -74,6 +90,43 @@ function normalizeText(
     | undefined,
 ): string {
   return value?.trim() ?? "";
+}
+
+function getQrBoxSize(
+  viewfinderWidth: number,
+  viewfinderHeight: number,
+): {
+  width: number;
+  height: number;
+} {
+  const shortestSide =
+    Math.min(
+      viewfinderWidth,
+      viewfinderHeight,
+    );
+
+  const calculatedSize =
+    Math.floor(
+      shortestSide *
+        0.72,
+    );
+
+  const size =
+    Math.min(
+      Math.max(
+        calculatedSize,
+        MIN_QR_BOX_SIZE,
+      ),
+      MAX_QR_BOX_SIZE,
+    );
+
+  return {
+    width:
+      size,
+
+    height:
+      size,
+  };
 }
 
 function getReadableCameraError(
@@ -395,21 +448,16 @@ export default function ScannerCamera({
             },
             {
               fps:
-                15,
+                CAMERA_FPS,
 
-              qrbox: {
-                width:
-                  280,
-
-                height:
-                  280,
-              },
+              qrbox:
+                getQrBoxSize,
 
               aspectRatio:
                 1,
 
               disableFlip:
-                false,
+                true,
             },
             (
               decodedText,
@@ -704,7 +752,7 @@ export default function ScannerCamera({
           </p>
 
           <p className="mt-1 truncate text-[11px] text-neutral-600">
-            Cadrez complètement le QR code Tikemia
+            Placez entièrement le QR code dans le cadre
           </p>
         </div>
 

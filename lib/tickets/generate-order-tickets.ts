@@ -23,12 +23,18 @@ import {
 } from "@/lib/payments/payment-errors";
 import { prisma } from "@/lib/prisma";
 
-const QR_VERSION = 1;
+const QR_VERSION = 2;
+
+const LEGACY_QR_VERSION = 1;
+
+const QR_PREFIX = "TKM2";
+
+const COMPACT_SIGNATURE_BYTES = 16;
 
 const QR_ERROR_CORRECTION_LEVEL =
-  "M" as const;
+  "L" as const;
 
-const QR_IMAGE_WIDTH = 640;
+const QR_IMAGE_WIDTH = 720;
 
 const MAX_TICKET_CREATION_ATTEMPTS = 10;
 
@@ -278,15 +284,6 @@ function getTicketQrSecret(): string {
   return secret;
 }
 
-function base64UrlEncode(
-  value: string,
-): string {
-  return Buffer.from(
-    value,
-    "utf8",
-  ).toString("base64url");
-}
-
 function base64UrlDecode(
   value: string,
 ): string {
@@ -316,6 +313,27 @@ function createSignature(
       "utf8",
     )
     .digest("base64url");
+}
+
+function createCompactSignature(
+  value: string,
+): string {
+  return createHmac(
+    "sha256",
+    getTicketQrSecret(),
+  )
+    .update(
+      value,
+      "utf8",
+    )
+    .digest()
+    .subarray(
+      0,
+      COMPACT_SIGNATURE_BYTES,
+    )
+    .toString(
+      "base64url",
+    );
 }
 
 function safeEquals(
@@ -413,11 +431,11 @@ function createSignedQrValue({
   ticketCode,
   orderReference,
   eventId,
-  eventTitle,
+  eventTitle: _eventTitle,
   ticketTypeId,
-  ticketCategory,
-  unitPrice,
-  currency,
+  ticketCategory: _ticketCategory,
+  unitPrice: _unitPrice,
+  currency: _currency,
   issuedAt,
 }: {
   ticketCode: string;
@@ -435,62 +453,75 @@ function createSignedQrValue({
   payload: TicketQrPayload;
 } {
   const nonce =
-    randomBytes(24).toString(
+    randomBytes(16).toString(
       "base64url",
     );
 
-  const unsignedPayload = {
-    version:
-      QR_VERSION,
-
-    issuer:
-      "TIKEMIA" as const,
-
-    ticketCode,
-
-    orderReference,
-
-    eventId,
-
-    eventTitle,
-
-    ticketTypeId,
-
-    ticketCategory,
-
-    unitPrice,
-
-    currency,
-
-    issuedAt:
-      issuedAt.toISOString(),
-
-    nonce,
-  };
-
-  const encodedPayload =
-    base64UrlEncode(
-      JSON.stringify(
-        unsignedPayload,
-      ),
+  const issuedAtSeconds =
+    Math.floor(
+      issuedAt.getTime() /
+        1000,
+    ).toString(
+      36,
     );
 
+  const unsignedValue = [
+    QR_PREFIX,
+    ticketCode,
+    orderReference,
+    eventId,
+    ticketTypeId,
+    issuedAtSeconds,
+    nonce,
+  ].join(
+    ".",
+  );
+
   const signature =
-    createSignature(
-      encodedPayload,
+    createCompactSignature(
+      unsignedValue,
     );
 
   const value =
-    `TIKEMIA.${encodedPayload}.${signature}`;
+    `${unsignedValue}.${signature}`;
 
   return {
     value,
 
     tokenHash:
-      hashValue(nonce),
+      hashValue(
+        nonce,
+      ),
 
     payload: {
-      ...unsignedPayload,
+      version:
+        QR_VERSION,
+
+      issuer:
+        "TIKEMIA",
+
+      ticketCode,
+      orderReference,
+      eventId,
+
+      eventTitle:
+        "",
+
+      ticketTypeId,
+
+      ticketCategory:
+        "",
+
+      unitPrice:
+        "",
+
+      currency:
+        "",
+
+      issuedAt:
+        issuedAt.toISOString(),
+
+      nonce,
       signature,
     },
   };
@@ -516,7 +547,7 @@ async function generateQrImage(
           width:
             QR_IMAGE_WIDTH,
 
-          margin: 3,
+          margin: 4,
 
           color: {
             dark: "#000000",
@@ -605,6 +636,186 @@ export function verifyTicketQrValue(
   const normalized =
     normalizeText(qrValue);
 
+  /*
+   * Nouveau format compact :
+   * TKM2.ticketCode.orderReference.eventId.ticketTypeId.issuedAtBase36.nonce.signature
+   */
+  if (
+    normalized.startsWith(
+      `${QR_PREFIX}.`,
+    )
+  ) {
+    const parts =
+      normalized.split(".");
+
+    if (
+      parts.length !== 8
+    ) {
+      throw new PaymentValidationError({
+        code:
+          "PAYMENT_INVALID_REQUEST",
+
+        message:
+          "Le QR code du billet est incomplet.",
+
+        status:
+          400,
+      });
+    }
+
+    const [
+      prefix,
+      ticketCode,
+      orderReference,
+      eventId,
+      ticketTypeId,
+      issuedAtBase36,
+      nonce,
+      receivedSignature,
+    ] =
+      parts;
+
+    if (
+      prefix !== QR_PREFIX ||
+      !normalizeText(ticketCode) ||
+      !normalizeText(orderReference) ||
+      !normalizeText(eventId) ||
+      !normalizeText(ticketTypeId) ||
+      !normalizeText(issuedAtBase36) ||
+      !normalizeText(nonce) ||
+      !normalizeText(receivedSignature)
+    ) {
+      throw new PaymentValidationError({
+        code:
+          "PAYMENT_INVALID_REQUEST",
+
+        message:
+          "Les informations du QR code sont incomplètes.",
+
+        status:
+          400,
+      });
+    }
+
+    const unsignedValue =
+      parts
+        .slice(
+          0,
+          7,
+        )
+        .join(".");
+
+    const expectedSignature =
+      createCompactSignature(
+        unsignedValue,
+      );
+
+    if (
+      !safeEquals(
+        receivedSignature,
+        expectedSignature,
+      )
+    ) {
+      throw new PaymentValidationError({
+        code:
+          "PAYMENT_FORBIDDEN",
+
+        message:
+          "La signature du QR code est invalide.",
+
+        status:
+          403,
+      });
+    }
+
+    const issuedAtSeconds =
+      Number.parseInt(
+        issuedAtBase36,
+        36,
+      );
+
+    if (
+      !Number.isSafeInteger(
+        issuedAtSeconds,
+      ) ||
+      issuedAtSeconds <= 0
+    ) {
+      throw new PaymentValidationError({
+        code:
+          "PAYMENT_INVALID_REQUEST",
+
+        message:
+          "La date du QR code est invalide.",
+
+        status:
+          400,
+      });
+    }
+
+    const issuedAt =
+      new Date(
+        issuedAtSeconds *
+          1000,
+      );
+
+    if (
+      Number.isNaN(
+        issuedAt.getTime(),
+      )
+    ) {
+      throw new PaymentValidationError({
+        code:
+          "PAYMENT_INVALID_REQUEST",
+
+        message:
+          "La date du QR code est invalide.",
+
+        status:
+          400,
+      });
+    }
+
+    return {
+      valid:
+        true,
+
+      payload: {
+        version:
+          QR_VERSION,
+
+        issuer:
+          "TIKEMIA",
+
+        ticketCode,
+        orderReference,
+        eventId,
+
+        eventTitle:
+          "",
+
+        ticketTypeId,
+
+        ticketCategory:
+          "",
+
+        unitPrice:
+          "",
+
+        currency:
+          "",
+
+        issuedAt:
+          issuedAt.toISOString(),
+
+        nonce,
+      },
+    };
+  }
+
+  /*
+   * Compatibilité avec les billets déjà émis en version 1.
+   * Ils restent totalement valides et peuvent toujours être scannés.
+   */
   const parts =
     normalized.split(".");
 
@@ -619,7 +830,8 @@ export function verifyTicketQrValue(
       message:
         "Le QR code du billet est invalide.",
 
-      status: 400,
+      status:
+        400,
     });
   }
 
@@ -640,7 +852,8 @@ export function verifyTicketQrValue(
       message:
         "Le QR code du billet est incomplet.",
 
-      status: 400,
+      status:
+        400,
     });
   }
 
@@ -662,7 +875,8 @@ export function verifyTicketQrValue(
       message:
         "La signature du QR code est invalide.",
 
-      status: 403,
+      status:
+        403,
     });
   }
 
@@ -683,7 +897,8 @@ export function verifyTicketQrValue(
       message:
         "Le contenu du QR code est invalide.",
 
-      status: 400,
+      status:
+        400,
     });
   }
 
@@ -699,7 +914,8 @@ export function verifyTicketQrValue(
       message:
         "Le contenu du QR code est invalide.",
 
-      status: 400,
+      status:
+        400,
     });
   }
 
@@ -710,8 +926,10 @@ export function verifyTicketQrValue(
     >;
 
   if (
-    payload.version !== QR_VERSION ||
-    payload.issuer !== "TIKEMIA" ||
+    payload.version !==
+      LEGACY_QR_VERSION ||
+    payload.issuer !==
+      "TIKEMIA" ||
     !normalizeText(
       payload.ticketCode,
     ) ||
@@ -750,13 +968,16 @@ export function verifyTicketQrValue(
       message:
         "Les informations du QR code sont incomplètes.",
 
-      status: 400,
+      status:
+        400,
     });
   }
 
   if (
     Number.isNaN(
-      Date.parse(payload.issuedAt),
+      Date.parse(
+        payload.issuedAt,
+      ),
     )
   ) {
     throw new PaymentValidationError({
@@ -766,12 +987,15 @@ export function verifyTicketQrValue(
       message:
         "La date du QR code est invalide.",
 
-      status: 400,
+      status:
+        400,
     });
   }
 
   return {
-    valid: true,
+    valid:
+      true,
+
     payload,
   };
 }
@@ -1171,10 +1395,9 @@ function buildTicketResultBase({
         item.quantity,
     });
 
-  const verified =
-    verifyTicketQrValue(
-      qrValue,
-    );
+  verifyTicketQrValue(
+    qrValue,
+  );
 
   return {
     id,
@@ -1233,7 +1456,9 @@ function buildTicketResultBase({
 
     pricing: {
       unitPrice:
-        verified.payload.unitPrice,
+        decimalToFixed(
+          item.unitPrice,
+        ),
 
       platformFeePerTicket:
         decimalToFixed(

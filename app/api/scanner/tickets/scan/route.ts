@@ -136,7 +136,9 @@ function getClientIpAddress(
   if (forwardedFor) {
     return (
       forwardedFor
-        .split(",")[0]
+        .split(
+          ",",
+        )[0]
         ?.trim() ||
       null
     );
@@ -176,6 +178,9 @@ function jsonResponse(
         Expires:
           "0",
 
+        "Content-Type":
+          "application/json; charset=utf-8",
+
         "X-Content-Type-Options":
           "nosniff",
       },
@@ -186,6 +191,34 @@ function jsonResponse(
 async function readJsonBody(
   request: Request,
 ): Promise<unknown> {
+  const contentType =
+    request.headers.get(
+      "content-type",
+    ) ??
+    "";
+
+  if (
+    !contentType
+      .toLowerCase()
+      .includes(
+        "application/json",
+      )
+  ) {
+    throw new ScannerError({
+      code:
+        "SCANNER_QR_INVALID",
+
+      message:
+        "Le format de la requête est invalide.",
+
+      status:
+        415,
+
+      retryable:
+        false,
+    });
+  }
+
   try {
     return await request.json();
   } catch {
@@ -241,7 +274,8 @@ function toPrismaJsonValue(
     )
   ) {
     const items:
-      Prisma.InputJsonValue[] = [];
+      Prisma.InputJsonValue[] =
+      [];
 
     for (
       const item of value
@@ -272,7 +306,8 @@ function toPrismaJsonValue(
       Record<
         string,
         Prisma.InputJsonValue
-      > = {};
+      > =
+      {};
 
     for (
       const [
@@ -319,13 +354,16 @@ export async function POST(
         body,
       );
 
-    if (!parsed.success) {
+    if (
+      !parsed.success
+    ) {
       throw new ScannerError({
         code:
           "SCANNER_QR_INVALID",
 
         message:
-          parsed.error.issues[0]
+          parsed.error
+            .issues[0]
             ?.message ??
           "Les informations du scan sont invalides.",
 
@@ -337,7 +375,8 @@ export async function POST(
 
         details: {
           fields:
-            parsed.error.flatten()
+            parsed.error
+              .flatten()
               .fieldErrors,
         },
       });
@@ -396,16 +435,21 @@ export async function POST(
         metadata,
       });
 
-    return jsonResponse({
-      success:
-        true,
+    return jsonResponse(
+      {
+        success:
+          true,
 
-      message:
-        scan.message,
+        message:
+          scan.message,
 
-      scan,
-    });
-  } catch (error) {
+        scan,
+      },
+      200,
+    );
+  } catch (
+    error
+  ) {
     console.error(
       "[SCANNER_TICKET_SCAN_ERROR]",
       error instanceof Error

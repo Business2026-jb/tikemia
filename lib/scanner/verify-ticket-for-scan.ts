@@ -17,12 +17,101 @@ import {
   assertScannerCanAccessEvent,
   type ScannerEventPermission,
 } from "@/lib/scanner/scanner-permissions";
+import {
+  verifyTicketQrValue,
+  type VerifiedTicketQrResult,
+} from "@/lib/tickets/generate-ticket-qr";
 
 type ScanVerificationDatabase =
   Pick<
     Prisma.TransactionClient,
     "ticket"
   >;
+
+const ticketSelect = {
+  id:
+    true,
+
+  code:
+    true,
+
+  qrCodeValue:
+    true,
+
+  qrTokenHash:
+    true,
+
+  qrVersion:
+    true,
+
+  status:
+    true,
+
+  holderName:
+    true,
+
+  holderEmail:
+    true,
+
+  holderPhone:
+    true,
+
+  usedAt:
+    true,
+
+  scannedAt:
+    true,
+
+  event: {
+    select: {
+      id:
+        true,
+
+      title:
+        true,
+
+      slug:
+        true,
+
+      startsAt:
+        true,
+
+      endsAt:
+        true,
+
+      venueName:
+        true,
+
+      city:
+        true,
+
+      country:
+        true,
+
+      timezone:
+        true,
+    },
+  },
+
+  ticketType: {
+    select: {
+      id:
+        true,
+
+      name:
+        true,
+
+      description:
+        true,
+    },
+  },
+} satisfies Prisma.TicketSelect;
+
+type TicketLookupResult =
+  Prisma.TicketGetPayload<{
+    select:
+      typeof ticketSelect;
+  }>;
 
 export type VerifiedTicketInformation =
   Readonly<{
@@ -35,6 +124,7 @@ export type VerifiedTicketInformation =
     holderPhone: string | null;
     usedAt: Date | null;
     scannedAt: Date | null;
+
     event: Readonly<{
       id: string;
       title: string;
@@ -46,6 +136,7 @@ export type VerifiedTicketInformation =
       country: string;
       timezone: string;
     }>;
+
     ticketType: Readonly<{
       id: string;
       name: string;
@@ -56,13 +147,16 @@ export type VerifiedTicketInformation =
 export type TicketAuthenticity =
   Readonly<{
     verified: boolean;
+
     label:
       | "Signature Tikemia vérifiée"
       | "Code Tikemia vérifié";
+
     verificationMode:
       | "SIGNED_QR"
       | "DATABASE_QR"
       | "MANUAL_CODE";
+
     qrVersion: number;
     fingerprint: string;
   }>;
@@ -123,6 +217,19 @@ function getDatabase(
   ) as ScanVerificationDatabase;
 }
 
+function isSignedQrValue(
+  value: string,
+): boolean {
+  return (
+    value.startsWith(
+      "TKM2.",
+    ) ||
+    value.startsWith(
+      "TIKEMIA.",
+    )
+  );
+}
+
 function mapTicketStatusToScanResult(
   status: TicketStatus,
 ): TicketScanResult {
@@ -173,6 +280,238 @@ function getTicketStatusMessage(
   }
 }
 
+function buildTicketInformation(
+  ticket: TicketLookupResult,
+): VerifiedTicketInformation {
+  return {
+    id:
+      ticket.id,
+
+    code:
+      ticket.code,
+
+    qrVersion:
+      ticket.qrVersion,
+
+    status:
+      ticket.status,
+
+    holderName:
+      ticket.holderName,
+
+    holderEmail:
+      ticket.holderEmail,
+
+    holderPhone:
+      ticket.holderPhone,
+
+    usedAt:
+      ticket.usedAt,
+
+    scannedAt:
+      ticket.scannedAt,
+
+    event: {
+      id:
+        ticket.event.id,
+
+      title:
+        ticket.event.title,
+
+      slug:
+        ticket.event.slug,
+
+      startsAt:
+        ticket.event.startsAt,
+
+      endsAt:
+        ticket.event.endsAt,
+
+      venueName:
+        ticket.event.venueName,
+
+      city:
+        ticket.event.city,
+
+      country:
+        ticket.event.country,
+
+      timezone:
+        ticket.event.timezone,
+    },
+
+    ticketType: {
+      id:
+        ticket.ticketType.id,
+
+      name:
+        ticket.ticketType.name,
+
+      description:
+        ticket.ticketType.description,
+    },
+  };
+}
+
+function buildSignedQrAuthenticity({
+  verifiedQr,
+  qrValue,
+}: {
+  verifiedQr: VerifiedTicketQrResult;
+  qrValue: string;
+}): TicketAuthenticity {
+  return {
+    verified:
+      true,
+
+    label:
+      "Signature Tikemia vérifiée",
+
+    verificationMode:
+      "SIGNED_QR",
+
+    qrVersion:
+      verifiedQr.payload.version,
+
+    fingerprint:
+      buildFingerprint(
+        qrValue,
+      ),
+  };
+}
+
+function buildDatabaseAuthenticity({
+  qrVersion,
+  qrValue,
+}: {
+  qrVersion: number;
+  qrValue: string;
+}): TicketAuthenticity {
+  return {
+    verified:
+      true,
+
+    label:
+      "Code Tikemia vérifié",
+
+    verificationMode:
+      "DATABASE_QR",
+
+    qrVersion,
+
+    fingerprint:
+      buildFingerprint(
+        qrValue,
+      ),
+  };
+}
+
+function buildManualCodeAuthenticity({
+  qrVersion,
+  qrValue,
+}: {
+  qrVersion: number;
+  qrValue: string;
+}): TicketAuthenticity {
+  return {
+    verified:
+      true,
+
+    label:
+      "Code Tikemia vérifié",
+
+    verificationMode:
+      "MANUAL_CODE",
+
+    qrVersion,
+
+    fingerprint:
+      buildFingerprint(
+        qrValue,
+      ),
+  };
+}
+
+function signedQrMatchesTicket({
+  verifiedQr,
+  ticket,
+}: {
+  verifiedQr: VerifiedTicketQrResult;
+  ticket: TicketLookupResult;
+}): boolean {
+  if (!ticket.qrTokenHash) {
+    return false;
+  }
+
+  return (
+    verifiedQr.payload.ticketCode ===
+      ticket.code &&
+    verifiedQr.payload.eventId ===
+      ticket.event.id &&
+    verifiedQr.payload.ticketTypeId ===
+      ticket.ticketType.id &&
+    verifiedQr.payload.version ===
+      ticket.qrVersion &&
+    verifiedQr.tokenHash ===
+      ticket.qrTokenHash
+  );
+}
+
+async function findTicket({
+  database,
+  normalizedQrValue,
+  verifiedQr,
+}: {
+  database: ScanVerificationDatabase;
+  normalizedQrValue: string;
+  verifiedQr: VerifiedTicketQrResult | null;
+}): Promise<TicketLookupResult | null> {
+  if (verifiedQr) {
+    return database.ticket.findFirst({
+      where: {
+        OR: [
+          {
+            qrTokenHash:
+              verifiedQr.tokenHash,
+          },
+
+          {
+            qrCodeValue:
+              normalizedQrValue,
+          },
+
+          {
+            code:
+              verifiedQr.payload.ticketCode,
+          },
+        ],
+      },
+
+      select:
+        ticketSelect,
+    });
+  }
+
+  return database.ticket.findFirst({
+    where: {
+      OR: [
+        {
+          qrCodeValue:
+            normalizedQrValue,
+        },
+
+        {
+          code:
+            normalizedQrValue,
+        },
+      ],
+    },
+
+    select:
+      ticketSelect,
+  });
+}
+
 export async function verifyTicketForScan({
   scannerId,
   eventId,
@@ -202,167 +541,159 @@ export async function verifyTicketForScan({
     return {
       valid:
         false,
+
       result:
         TicketScanResult.INVALID,
+
       message:
         "Le QR code ou le code du billet est vide.",
+
       permission,
+
       ticket:
         null,
+
       authenticity:
         null,
     };
   }
 
-  const db =
+  const database =
     getDatabase(
       transaction,
     );
 
+  let verifiedQr:
+    VerifiedTicketQrResult | null =
+    null;
+
+  if (
+    isSignedQrValue(
+      normalizedQrValue,
+    )
+  ) {
+    try {
+      verifiedQr =
+        verifyTicketQrValue(
+          normalizedQrValue,
+        );
+    } catch {
+      return {
+        valid:
+          false,
+
+        result:
+          TicketScanResult.INVALID,
+
+        message:
+          "La signature du QR code Tikemia est invalide.",
+
+        permission,
+
+        ticket:
+          null,
+
+        authenticity:
+          null,
+      };
+    }
+  }
+
   const ticket =
-    await db.ticket.findFirst({
-      where: {
-        OR: [
-          {
-            qrCodeValue:
-              normalizedQrValue,
-          },
-          {
-            code:
-              normalizedQrValue,
-          },
-        ],
-      },
+    await findTicket({
+      database,
 
-      select: {
-        id:
-          true,
-        code:
-          true,
-        qrCodeValue:
-          true,
-        qrTokenHash:
-          true,
-        qrVersion:
-          true,
-        status:
-          true,
-        holderName:
-          true,
-        holderEmail:
-          true,
-        holderPhone:
-          true,
-        usedAt:
-          true,
-        scannedAt:
-          true,
+      normalizedQrValue,
 
-        event: {
-          select: {
-            id:
-              true,
-            title:
-              true,
-            slug:
-              true,
-            startsAt:
-              true,
-            endsAt:
-              true,
-            venueName:
-              true,
-            city:
-              true,
-            country:
-              true,
-            timezone:
-              true,
-          },
-        },
-
-        ticketType: {
-          select: {
-            id:
-              true,
-            name:
-              true,
-            description:
-              true,
-          },
-        },
-      },
+      verifiedQr,
     });
 
   if (!ticket) {
     return {
       valid:
         false,
+
       result:
         TicketScanResult.INVALID,
+
       message:
         "Ce QR code n’appartient à aucun billet Tikemia.",
+
       permission,
+
       ticket:
         null,
+
       authenticity:
         null,
     };
   }
 
-  const verificationMode =
+  const ticketInformation =
+    buildTicketInformation(
+      ticket,
+    );
+
+  if (
+    verifiedQr &&
+    !signedQrMatchesTicket({
+      verifiedQr,
+      ticket,
+    })
+  ) {
+    return {
+      valid:
+        false,
+
+      result:
+        TicketScanResult.INVALID,
+
+      message:
+        "Les informations signées du QR code ne correspondent pas au billet.",
+
+      permission,
+
+      ticket:
+        ticketInformation,
+
+      authenticity:
+        null,
+    };
+  }
+
+  let authenticity:
+    TicketAuthenticity;
+
+  if (verifiedQr) {
+    authenticity =
+      buildSignedQrAuthenticity({
+        verifiedQr,
+
+        qrValue:
+          normalizedQrValue,
+      });
+  } else if (
     normalizedQrValue ===
-      ticket.qrCodeValue
-      ? (
-          ticket.qrTokenHash
-            ? "SIGNED_QR"
-            : "DATABASE_QR"
-        )
-      : "MANUAL_CODE";
+    ticket.qrCodeValue
+  ) {
+    authenticity =
+      buildDatabaseAuthenticity({
+        qrVersion:
+          ticket.qrVersion,
 
-  const authenticity:
-    TicketAuthenticity = {
-    verified:
-      true,
-    label:
-      verificationMode ===
-        "SIGNED_QR"
-        ? "Signature Tikemia vérifiée"
-        : "Code Tikemia vérifié",
-    verificationMode,
-    qrVersion:
-      ticket.qrVersion,
-    fingerprint:
-      buildFingerprint(
-        normalizedQrValue,
-      ),
-  };
+        qrValue:
+          normalizedQrValue,
+      });
+  } else {
+    authenticity =
+      buildManualCodeAuthenticity({
+        qrVersion:
+          ticket.qrVersion,
 
-  const ticketInformation:
-    VerifiedTicketInformation = {
-    id:
-      ticket.id,
-    code:
-      ticket.code,
-    qrVersion:
-      ticket.qrVersion,
-    status:
-      ticket.status,
-    holderName:
-      ticket.holderName,
-    holderEmail:
-      ticket.holderEmail,
-    holderPhone:
-      ticket.holderPhone,
-    usedAt:
-      ticket.usedAt,
-    scannedAt:
-      ticket.scannedAt,
-    event:
-      ticket.event,
-    ticketType:
-      ticket.ticketType,
-  };
+        qrValue:
+          normalizedQrValue,
+      });
+  }
 
   if (
     ticket.event.id !==
@@ -371,13 +702,18 @@ export async function verifyTicketForScan({
     return {
       valid:
         false,
+
       result:
         TicketScanResult.WRONG_EVENT,
+
       message:
         "Ce billet appartient à un autre événement.",
+
       permission,
+
       ticket:
         ticketInformation,
+
       authenticity,
     };
   }
@@ -389,17 +725,22 @@ export async function verifyTicketForScan({
     return {
       valid:
         false,
+
       result:
         mapTicketStatusToScanResult(
           ticket.status,
         ),
+
       message:
         getTicketStatusMessage(
           ticket.status,
         ),
+
       permission,
+
       ticket:
         ticketInformation,
+
       authenticity,
     };
   }
@@ -407,13 +748,18 @@ export async function verifyTicketForScan({
   return {
     valid:
       true,
+
     result:
       TicketScanResult.ACCEPTED,
+
     message:
       "Billet Tikemia valide. Accès autorisé.",
+
     permission,
+
     ticket:
       ticketInformation,
+
     authenticity,
   };
 }
