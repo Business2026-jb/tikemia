@@ -537,7 +537,8 @@ export async function getSubscriptionPlans(
             ?.currency,
       );
 
-    const where: Prisma.SubscriptionPlanWhereInput =
+    const baseWhere:
+      Prisma.SubscriptionPlanWhereInput =
       {
         isActive: true,
         isPublic: true,
@@ -550,48 +551,64 @@ export async function getSubscriptionPlans(
                   .billingPeriod,
             }
           : {}),
-
-        currency:
-          preferredCurrency,
       };
 
+    const orderBy:
+      Prisma.SubscriptionPlanOrderByWithRelationInput[] =
+      [
+        {
+          sortOrder: "asc",
+        },
+        {
+          price: "asc",
+        },
+        {
+          createdAt: "asc",
+        },
+        {
+          id: "asc",
+        },
+      ];
+
+    const select = {
+      id: true,
+      code: true,
+      name: true,
+      description: true,
+      price: true,
+      currency: true,
+      billingPeriod: true,
+      durationDays: true,
+      maxBoostedEvents: true,
+      priorityScore: true,
+      features: true,
+      isActive: true,
+      isPublic: true,
+      sortOrder: true,
+      createdAt: true,
+      updatedAt: true,
+    } satisfies Prisma.SubscriptionPlanSelect;
+
+    /*
+     * Les formules Premium sont globales à Tikemia.
+     *
+     * La devise préférée de l'organisateur ne doit jamais déterminer
+     * si une formule est visible ou non. Toutes les formules publiques
+     * et actives sont donc chargées, quelle que soit leur devise.
+     *
+     * Chaque formule conserve son prix et sa devise réels. Aucune
+     * conversion n'est effectuée ici : le checkout et le prestataire
+     * de paiement utilisent ensuite directement plan.price et
+     * plan.currency côté serveur.
+     */
     const plans =
       await prisma.subscriptionPlan.findMany({
-        where,
+        where:
+          baseWhere,
 
-        orderBy: [
-          {
-            sortOrder: "asc",
-          },
-          {
-            price: "asc",
-          },
-          {
-            createdAt: "asc",
-          },
-          {
-            id: "asc",
-          },
-        ],
+        orderBy,
 
-        select: {
-          id: true,
-          code: true,
-          name: true,
-          description: true,
-          price: true,
-          currency: true,
-          billingPeriod: true,
-          durationDays: true,
-          maxBoostedEvents: true,
-          priorityScore: true,
-          features: true,
-          isActive: true,
-          isPublic: true,
-          sortOrder: true,
-          createdAt: true,
-          updatedAt: true,
-        },
+        select,
       });
 
     const normalizedPlans:

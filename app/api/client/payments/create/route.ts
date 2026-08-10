@@ -29,10 +29,13 @@ import type {
   PaymentMethod,
   PaymentProviderName,
 } from "@/lib/payments/payment-provider-types";
+import { validateCoupon } from "@/lib/coupons/validate-coupon";
 import { prisma } from "@/lib/prisma";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
+export const revalidate = 0;
+export const maxDuration = 30;
 
 const DEFAULT_CLIENT_SESSION_COOKIE_NAME =
   "tikemia_client_session";
@@ -83,6 +86,19 @@ const createPaymentSchema = z
     paymentMethod:
       paymentMethodSchema.optional(),
 
+    couponCode: z
+      .string()
+      .trim()
+      .min(
+        1,
+        "Le code promo est invalide.",
+      )
+      .max(
+        100,
+        "Le code promo est trop long.",
+      )
+      .optional(),
+
     idempotencyKey: z
       .string()
       .trim()
@@ -117,6 +133,20 @@ type PaymentRuntimeConfig = Readonly<{
   reservationMinutes: number;
 }>;
 
+type CouponPaymentSnapshot = Readonly<{
+  promoCodeId: string;
+  code: string;
+  discountType: string;
+  discountValue: string;
+  discountAmount: string;
+  subtotalBeforeDiscount: string;
+  platformFeeBeforeDiscount: string;
+  discountedSubtotal: string;
+  discountedPlatformFee: string;
+  payableAmount: string;
+  currency: string;
+}>;
+
 function jsonResponse(
   body: Record<string, unknown>,
   status = 200,
@@ -143,6 +173,49 @@ function toJsonValue(
   return JSON.parse(
     JSON.stringify(value),
   ) as Prisma.InputJsonValue;
+}
+
+function readJsonObject(
+  value: Prisma.JsonValue | null,
+): Record<string, unknown> {
+  if (
+    value &&
+    typeof value === "object" &&
+    !Array.isArray(value)
+  ) {
+    return {
+      ...value,
+    };
+  }
+
+  return {};
+}
+
+function getStoredCouponCode(
+  metadata: Prisma.JsonValue | null,
+): string | null {
+  const metadataObject =
+    readJsonObject(metadata);
+
+  const coupon =
+    metadataObject.coupon;
+
+  if (
+    !coupon ||
+    typeof coupon !== "object" ||
+    Array.isArray(coupon)
+  ) {
+    return null;
+  }
+
+  const code =
+    "code" in coupon
+      ? coupon.code
+      : null;
+
+  return typeof code === "string"
+    ? code.trim().toUpperCase() || null
+    : null;
 }
 
 function hashToken(token: string): string {
@@ -399,15 +472,56 @@ function getPaymentIdempotencyKey({
   input,
   orderId,
   provider,
+  couponCode,
 }: {
   input: CreatePaymentInput;
   orderId: string;
   provider: PaymentProviderName;
+  couponCode: string | null;
 }): string {
-  return (
-    normalizeText(input.idempotencyKey) ||
-    `payment_${provider.toLowerCase()}_order_${orderId}`
-  );
+  const explicitKey =
+    normalizeText(
+      input.idempotencyKey,
+    );
+
+  const baseKey =
+    explicitKey ||
+    `payment_${provider.toLowerCase()}_order_${orderId}`;
+
+  if (
+    !couponCode
+  ) {
+    return baseKey;
+  }
+
+  /*
+   * Un changement de code promo peut changer le montant envoyé au
+   * prestataire. La clé doit donc varier avec le coupon, même lorsque le
+   * client fournit déjà une clé d'idempotence.
+   *
+   * La troncature maintient la clé finale sous la limite de 200 caractères
+   * imposée par le schéma d'entrée.
+   */
+  const couponFingerprint =
+    createHash(
+      "sha256",
+    )
+      .update(
+        couponCode,
+        "utf8",
+      )
+      .digest(
+        "hex",
+      )
+      .slice(
+        0,
+        16,
+      );
+
+  return `${baseKey.slice(
+    0,
+    175,
+  )}_coupon_${couponFingerprint}`;
 }
 
 function buildReturnUrl({
@@ -815,6 +929,8 @@ export async function POST(request: Request) {
           customerPhone: true,
           checkoutTokenHash: true,
           currency: true,
+          subtotal: true,
+          platformFee: true,
           total: true,
           status: true,
           reservationExpiresAt: true,
@@ -839,6 +955,7 @@ export async function POST(request: Request) {
               checkoutUrl: true,
               expiresAt: true,
               idempotencyKey: true,
+              metadata: true,
             },
           },
           reservations: {
@@ -871,6 +988,11 @@ export async function POST(request: Request) {
         input.checkoutToken,
     });
 
+    /*
+     * Une requête rejouée après confirmation doit retourner le paiement
+     * existant avant les contrôles de réservation ou de coupon. La commande
+     * peut déjà être PAID et le code promo peut avoir été désactivé depuis.
+     */
     assertOrderCanBePaid({
       order,
       now,
@@ -906,26 +1028,25 @@ export async function POST(request: Request) {
       });
     }
 
-    if (
-      order.payment?.status ===
-      PaymentStatus.SUCCESS
-    ) {
-      return jsonResponse({
-        success: true,
-        code:
-          "PAYMENT_ALREADY_SUCCESSFUL",
-        message:
-          "Cette commande est déjà payée.",
-        payment: {
-          id: order.payment.id,
-          status: order.payment.status,
-          orderId: order.id,
-          orderReference:
-            order.reference,
-        },
-      });
-    }
+    const requestedCouponCode =
+      normalizeText(
+        input.couponCode,
+      )
+        .toUpperCase() ||
+      null;
 
+    const storedCouponCode =
+      getStoredCouponCode(
+        order.payment?.metadata ??
+        null,
+      );
+
+    /*
+     * Si le checkout existant correspond exactement au coupon demandé, il
+     * est réutilisé sans revalider le coupon. Cela protège les rejeux
+     * idempotents lorsqu'un administrateur modifie ou désactive le coupon
+     * après la création du checkout.
+     */
     if (
       order.payment &&
       order.payment.provider ===
@@ -937,6 +1058,8 @@ export async function POST(request: Request) {
           PaymentStatus.PROCESSING
       ) &&
       order.payment.checkoutUrl &&
+      storedCouponCode ===
+        requestedCouponCode &&
       (
         !order.payment.expiresAt ||
         order.payment.expiresAt.getTime() >
@@ -959,9 +1082,155 @@ export async function POST(request: Request) {
             order.payment.method,
           checkoutUrl:
             order.payment.checkoutUrl,
+          amount:
+            order.payment.amount
+              .toFixed(2),
+          currency:
+            order.payment.currency,
+          couponCode:
+            storedCouponCode,
           expiresAt:
             order.payment.expiresAt
               ?.toISOString() ?? null,
+          orderId: order.id,
+          orderReference:
+            order.reference,
+        },
+      });
+    }
+
+    const validatedCoupon =
+      requestedCouponCode
+        ? await validateCoupon({
+            eventId:
+              order.event.id,
+
+            code:
+              requestedCouponCode,
+
+            subtotal:
+              order.subtotal,
+
+            platformFee:
+              order.platformFee,
+
+            currency:
+              order.currency,
+
+            customerId:
+              customer?.id ??
+              order.customerId,
+
+            customerEmail:
+              customer?.email ??
+              order.customerEmail,
+
+            orderId:
+              order.id,
+          })
+        : null;
+
+    const couponSnapshot:
+      CouponPaymentSnapshot
+      | null =
+      validatedCoupon
+        ? {
+            promoCodeId:
+              validatedCoupon
+                .coupon.id,
+
+            code:
+              validatedCoupon
+                .coupon.code,
+
+            discountType:
+              validatedCoupon
+                .coupon
+                .discountType,
+
+            discountValue:
+              validatedCoupon
+                .coupon
+                .discountValue,
+
+            discountAmount:
+              validatedCoupon
+                .amounts
+                .discountAmount,
+
+            subtotalBeforeDiscount:
+              validatedCoupon
+                .amounts
+                .subtotal,
+
+            platformFeeBeforeDiscount:
+              validatedCoupon
+                .amounts
+                .platformFee,
+
+            discountedSubtotal:
+              validatedCoupon
+                .amounts
+                .discountedSubtotal,
+
+            discountedPlatformFee:
+              validatedCoupon
+                .amounts
+                .discountedPlatformFee,
+
+            payableAmount:
+              validatedCoupon
+                .amounts
+                .total,
+
+            currency:
+              validatedCoupon
+                .amounts
+                .currency,
+          }
+        : null;
+
+    const payableAmount =
+      couponSnapshot
+        ? new Prisma.Decimal(
+            couponSnapshot
+              .payableAmount,
+          )
+        : order.total;
+
+    if (
+      payableAmount.lte(
+        0,
+      )
+    ) {
+      throw new PaymentValidationError({
+        code:
+          "PAYMENT_AMOUNT_MISMATCH",
+
+        message:
+          "Le montant final à payer est invalide.",
+
+        status:
+          409,
+
+        orderId:
+          order.id,
+      });
+    }
+
+    if (
+      order.payment?.status ===
+      PaymentStatus.SUCCESS
+    ) {
+      return jsonResponse({
+        success: true,
+        code:
+          "PAYMENT_ALREADY_SUCCESSFUL",
+        message:
+          "Cette commande est déjà payée.",
+        payment: {
+          id: order.payment.id,
+          status: order.payment.status,
           orderId: order.id,
           orderReference:
             order.reference,
@@ -980,11 +1249,14 @@ export async function POST(request: Request) {
         input,
         orderId: order.id,
         provider: selectedProvider,
+        couponCode:
+          couponSnapshot?.code ??
+          null,
       });
 
     const providerAmount =
       decimalToProviderAmount(
-        order.total,
+        payableAmount,
         order.currency,
       );
 
@@ -1010,7 +1282,8 @@ export async function POST(request: Request) {
                       selectedProvider,
                     method:
                       paymentMethod,
-                    amount: order.total,
+                    amount:
+                      payableAmount,
                     currency:
                       order.currency,
                     status:
@@ -1032,6 +1305,18 @@ export async function POST(request: Request) {
                       order.customerEmail,
                     customerPhone:
                       order.customerPhone,
+                    metadata:
+                      toJsonValue({
+                        orderReference:
+                          order.reference,
+                        eventId:
+                          order.event.id,
+                        requestedPaymentMethod:
+                          paymentMethod,
+                        selectedProvider,
+                        coupon:
+                          couponSnapshot,
+                      }),
                   },
                   select: {
                     id: true,
@@ -1044,7 +1329,8 @@ export async function POST(request: Request) {
                       selectedProvider,
                     method:
                       paymentMethod,
-                    amount: order.total,
+                    amount:
+                      payableAmount,
                     currency:
                       order.currency,
                     status:
@@ -1068,6 +1354,8 @@ export async function POST(request: Request) {
                         requestedPaymentMethod:
                           paymentMethod,
                         selectedProvider,
+                        coupon:
+                          couponSnapshot,
                       }),
                   },
                   select: {
@@ -1097,9 +1385,12 @@ export async function POST(request: Request) {
               requestedPaymentMethod:
                 paymentMethod,
               amount:
-                order.total.toFixed(2),
+                payableAmount
+                  .toFixed(2),
               currency:
                 order.currency,
+              coupon:
+                couponSnapshot,
             });
 
           const attempt =
@@ -1118,7 +1409,7 @@ export async function POST(request: Request) {
                       method:
                         paymentMethod,
                       amount:
-                        order.total,
+                        payableAmount,
                       currency:
                         order.currency,
                       status:
@@ -1152,7 +1443,7 @@ export async function POST(request: Request) {
                       method:
                         paymentMethod,
                       amount:
-                        order.total,
+                        payableAmount,
                       currency:
                         order.currency,
                       status:
@@ -1291,6 +1582,8 @@ export async function POST(request: Request) {
               ...providerMetadata,
               providerRawStatus:
                 hostedCheckout.rawStatus,
+              coupon:
+                couponSnapshot,
             }),
           },
         });
@@ -1352,9 +1645,11 @@ export async function POST(request: Request) {
           status:
             hostedCheckout.status,
           amount:
-            order.total.toFixed(2),
+            payableAmount.toFixed(2),
           currency:
             order.currency,
+          coupon:
+            couponSnapshot,
           checkoutUrl,
           returnUrl,
           cancelUrl,

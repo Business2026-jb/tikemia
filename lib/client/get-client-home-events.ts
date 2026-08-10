@@ -1,6 +1,7 @@
 import "server-only";
 
 import {
+  EventBoostStatus,
   EventStatus,
   Prisma,
   TicketStatus,
@@ -688,9 +689,11 @@ function getCoverImage(
 function mapEvent({
   event,
   reservedTickets,
+  featuredOverride,
 }: {
   event: SelectedEvent;
   reservedTickets: number;
+  featuredOverride?: boolean;
 }): ClientHomeEvent {
   const capacity =
     Math.max(
@@ -777,6 +780,7 @@ function mapEvent({
       event.status,
 
     isFeatured:
+      featuredOverride ??
       event.isFeatured,
 
     publishedAt:
@@ -1115,7 +1119,32 @@ export async function getClientHomeEvents(
       dateTo,
     });
 
-  const featuredWhere: Prisma.EventWhereInput = {
+  /*
+   * Les événements Premium de la page d'accueil proviennent d'abord
+   * des EventBoost réellement actifs.
+   *
+   * Le champ Event.isFeatured est conservé uniquement comme compatibilité
+   * avec les anciennes mises en avant administratives déjà existantes.
+   */
+  const activeBoostWhere: Prisma.EventBoostWhereInput = {
+    status:
+      EventBoostStatus.ACTIVE,
+
+    startsAt: {
+      lte: now,
+    },
+
+    endsAt: {
+      gt: now,
+    },
+
+    event: {
+      is:
+        publicWhere,
+    },
+  };
+
+  const legacyFeaturedWhere: Prisma.EventWhereInput = {
     ...publicWhere,
     isFeatured: true,
   };
@@ -1126,7 +1155,8 @@ export async function getClientHomeEvents(
 
   try {
     const [
-      rawFeaturedEvents,
+      rawActiveBoosts,
+      rawLegacyFeaturedEvents,
       rawEvents,
       totalItems,
       categories,
@@ -1135,19 +1165,51 @@ export async function getClientHomeEvents(
       totalFeaturedEvents,
     ] =
       await Promise.all([
+        prisma.eventBoost.findMany({
+          where:
+            activeBoostWhere,
+
+          select: {
+            event: {
+              select:
+                eventSelect,
+            },
+          },
+
+          orderBy: [
+            {
+              priorityScore:
+                "desc",
+            },
+            {
+              startsAt:
+                "asc",
+            },
+            {
+              createdAt:
+                "asc",
+            },
+          ],
+
+          take:
+            featuredLimit,
+        }),
+
         prisma.event.findMany({
           where:
-            featuredWhere,
+            legacyFeaturedWhere,
 
           select:
             eventSelect,
 
           orderBy: [
             {
-              startsAt: "asc",
+              startsAt:
+                "asc",
             },
             {
-              publishedAt: "desc",
+              publishedAt:
+                "desc",
             },
           ],
 
@@ -1207,9 +1269,6 @@ export async function getClientHomeEvents(
             status:
               EventStatus.PUBLISHED,
 
-            isFeatured:
-              true,
-
             startsAt: {
               gte: now,
             },
@@ -1219,9 +1278,70 @@ export async function getClientHomeEvents(
                 isActive: true,
               },
             },
+
+            OR: [
+              {
+                isFeatured:
+                  true,
+              },
+              {
+                boosts: {
+                  some: {
+                    status:
+                      EventBoostStatus.ACTIVE,
+
+                    startsAt: {
+                      lte: now,
+                    },
+
+                    endsAt: {
+                      gt: now,
+                    },
+                  },
+                },
+              },
+            ],
           },
         }),
       ]);
+
+    /*
+     * Les promotions actives passent toujours avant les anciennes
+     * mises en avant Event.isFeatured.
+     *
+     * On déduplique par event.id pour garantir qu'un même événement
+     * ne soit jamais affiché deux fois dans la section Premium.
+     */
+    const promotedEventIds =
+      new Set(
+        rawActiveBoosts.map(
+          (boost) =>
+            boost.event.id,
+        ),
+      );
+
+    const rawPromotedEvents =
+      rawActiveBoosts.map(
+        (boost) =>
+          boost.event,
+      );
+
+    const rawFallbackFeaturedEvents =
+      rawLegacyFeaturedEvents.filter(
+        (event) =>
+          !promotedEventIds.has(
+            event.id,
+          ),
+      );
+
+    const rawFeaturedEvents =
+      [
+        ...rawPromotedEvents,
+        ...rawFallbackFeaturedEvents,
+      ].slice(
+        0,
+        featuredLimit,
+      );
 
     const eventIds =
       Array.from(
@@ -1250,6 +1370,12 @@ export async function getClientHomeEvents(
               reservedTicketCounts.get(
                 event.id,
               ) ?? 0,
+            featuredOverride:
+              promotedEventIds.has(
+                event.id,
+              )
+                ? true
+                : undefined,
           }),
       );
 

@@ -19,10 +19,15 @@ import {
 } from "@/lib/organizer/promotions/promotion-schemas";
 import { prisma } from "@/lib/prisma";
 
+/*
+ * Sécurité des droits Premium :
+ * seul un abonnement réellement ACTIVE peut autoriser une promotion.
+ *
+ * PENDING, PAST_DUE, PAUSED, CANCELLED et EXPIRED ne donnent aucun
+ * droit de création, réactivation ou programmation de promotion.
+ */
 const ACTIVE_SUBSCRIPTION_STATUSES: SubscriptionStatus[] = [
   SubscriptionStatus.ACTIVE,
-  SubscriptionStatus.PAST_DUE,
-  SubscriptionStatus.PAUSED,
 ];
 
 const OCCUPYING_BOOST_STATUSES: EventBoostStatus[] = [
@@ -270,22 +275,71 @@ async function expireOutdatedData(
   organizerId: string,
   now: Date,
 ) {
-  await tx.organizerSubscription.updateMany({
-    where: {
-      organizerId,
-      status: {
-        in: ACTIVE_SUBSCRIPTION_STATUSES,
+  const outdatedSubscriptions =
+    await tx.organizerSubscription.findMany({
+      where: {
+        organizerId,
+        status:
+          SubscriptionStatus.ACTIVE,
+        endsAt: {
+          lte: now,
+        },
       },
-      endsAt: {
-        lte: now,
+      select: {
+        id: true,
       },
-    },
-    data: {
-      status: SubscriptionStatus.EXPIRED,
-      autoRenew: false,
-    },
-  });
+    });
 
+  const outdatedSubscriptionIds =
+    outdatedSubscriptions.map(
+      (subscription) =>
+        subscription.id,
+    );
+
+  if (
+    outdatedSubscriptionIds.length > 0
+  ) {
+    await tx.organizerSubscription.updateMany({
+      where: {
+        organizerId,
+        id: {
+          in: outdatedSubscriptionIds,
+        },
+        status:
+          SubscriptionStatus.ACTIVE,
+      },
+      data: {
+        status:
+          SubscriptionStatus.EXPIRED,
+        autoRenew: false,
+      },
+    });
+
+    /*
+     * Une promotion liée à un abonnement expiré ne doit jamais rester
+     * ACTIVE/SCHEDULED/PAUSED, même si son endsAt propre est incorrect.
+     */
+    await tx.eventBoost.updateMany({
+      where: {
+        organizerId,
+        subscriptionId: {
+          in: outdatedSubscriptionIds,
+        },
+        status: {
+          in: OCCUPYING_BOOST_STATUSES,
+        },
+      },
+      data: {
+        status:
+          EventBoostStatus.EXPIRED,
+      },
+    });
+  }
+
+  /*
+   * Garde-fou complémentaire pour les anciennes promotions dont la
+   * date de fin est déjà dépassée.
+   */
   await tx.eventBoost.updateMany({
     where: {
       organizerId,
@@ -297,7 +351,8 @@ async function expireOutdatedData(
       },
     },
     data: {
-      status: EventBoostStatus.EXPIRED,
+      status:
+        EventBoostStatus.EXPIRED,
     },
   });
 }
@@ -355,25 +410,34 @@ async function getUsableSubscription(
     await tx.organizerSubscription.findFirst({
       where: {
         organizerId,
+
         ...(subscriptionId
           ? {
               id: subscriptionId,
             }
           : {}),
-        status: {
-          in: ACTIVE_SUBSCRIPTION_STATUSES,
+
+        /*
+         * Un paiement annulé, échoué, expiré ou simplement en attente
+         * ne peut jamais satisfaire cette requête : seul ACTIVE passe.
+         */
+        status:
+          SubscriptionStatus.ACTIVE,
+
+        /*
+         * La période Premium doit réellement avoir commencé et avoir
+         * une date de fin encore valide. Un abonnement ACTIVE sans
+         * startsAt/endsAt est traité comme incohérent et refusé.
+         */
+        startsAt: {
+          lte: now,
         },
-        OR: [
-          {
-            endsAt: null,
-          },
-          {
-            endsAt: {
-              gt: now,
-            },
-          },
-        ],
+
+        endsAt: {
+          gt: now,
+        },
       },
+
       orderBy: [
         {
           createdAt: "desc",
@@ -382,12 +446,14 @@ async function getUsableSubscription(
           id: "desc",
         },
       ],
+
       select: {
         id: true,
         organizerId: true,
         status: true,
         startsAt: true,
         endsAt: true,
+
         plan: {
           select: {
             id: true,
@@ -402,14 +468,46 @@ async function getUsableSubscription(
 
   if (!subscription) {
     throw new UpdatePromotedEventError({
-      code: "ACTIVE_SUBSCRIPTION_REQUIRED",
+      code:
+        "ACTIVE_SUBSCRIPTION_REQUIRED",
       status: 409,
       message:
-        "Un abonnement Premium actif est nécessaire pour promouvoir cet événement.",
+        "Un abonnement Premium actif et payé est nécessaire pour promouvoir cet événement.",
     });
   }
 
   return subscription;
+}
+
+function assertSubscriptionCanUsePremium({
+  subscription,
+  now,
+}: {
+  subscription: {
+    status: SubscriptionStatus;
+    startsAt: Date | null;
+    endsAt: Date | null;
+  } | null;
+  now: Date;
+}) {
+  if (
+    !subscription ||
+    subscription.status !==
+      SubscriptionStatus.ACTIVE ||
+    subscription.startsAt === null ||
+    subscription.startsAt.getTime() >
+      now.getTime() ||
+    subscription.endsAt === null ||
+    subscription.endsAt.getTime() <=
+      now.getTime()
+  ) {
+    throw new UpdatePromotedEventError({
+      code: "SUBSCRIPTION_NOT_USABLE",
+      status: 409,
+      message:
+        "L’abonnement associé à cette promotion n’est plus actif ou son paiement n’a pas été confirmé.",
+    });
+  }
 }
 
 async function getOwnedBoost(
@@ -826,6 +924,8 @@ export async function assignPromotedEvent({
       {
         isolationLevel:
           Prisma.TransactionIsolationLevel.Serializable,
+        maxWait: 5_000,
+        timeout: 15_000,
       },
     );
   } catch (error) {
@@ -932,17 +1032,22 @@ export async function updatePromotedEvent({
           });
         }
 
+        /*
+         * Retirer une promotion doit rester possible même si
+         * l'abonnement n'est plus actif. En revanche, toute action
+         * qui conserve/réactive/programme le Premium exige un
+         * abonnement ACTIVE dans sa période payée.
+         */
         if (
-          !boost.subscription ||
-          !ACTIVE_SUBSCRIPTION_STATUSES.includes(
-            boost.subscription.status,
-          )
+          parsed.data.status !==
+            EventBoostStatus.CANCELLED &&
+          parsed.data.status !==
+            EventBoostStatus.PAUSED
         ) {
-          throw new UpdatePromotedEventError({
-            code: "SUBSCRIPTION_NOT_USABLE",
-            status: 409,
-            message:
-              "L’abonnement associé à cette promotion n’est plus utilisable.",
+          assertSubscriptionCanUsePremium({
+            subscription:
+              boost.subscription,
+            now,
           });
         }
 
@@ -970,10 +1075,14 @@ export async function updatePromotedEvent({
           });
         }
 
+        const subscriptionEndsAt =
+          boost.subscription?.endsAt ??
+          null;
+
         if (
-          boost.subscription.endsAt &&
+          subscriptionEndsAt &&
           endsAt.getTime() >
-            boost.subscription.endsAt.getTime()
+            subscriptionEndsAt.getTime()
         ) {
           throw new UpdatePromotedEventError({
             code: "PROMOTION_EXCEEDS_SUBSCRIPTION",
@@ -1019,6 +1128,12 @@ export async function updatePromotedEvent({
 
         switch (requestedStatus) {
           case EventBoostStatus.ACTIVE:
+            assertSubscriptionCanUsePremium({
+              subscription:
+                boost.subscription,
+              now,
+            });
+
             assertEventCanBePromoted({
               event: boost.event,
               now,
@@ -1035,6 +1150,12 @@ export async function updatePromotedEvent({
             break;
 
           case EventBoostStatus.SCHEDULED:
+            assertSubscriptionCanUsePremium({
+              subscription:
+                boost.subscription,
+              now,
+            });
+
             if (
               startsAt.getTime() <=
               now.getTime()
@@ -1150,6 +1271,8 @@ export async function updatePromotedEvent({
       {
         isolationLevel:
           Prisma.TransactionIsolationLevel.Serializable,
+        maxWait: 5_000,
+        timeout: 15_000,
       },
     );
   } catch (error) {
@@ -1209,6 +1332,14 @@ export async function removePromotedEvent({
   try {
     return await prisma.$transaction(
       async (tx) => {
+        const now = new Date();
+
+        await expireOutdatedData(
+          tx,
+          organizerId,
+          now,
+        );
+
         const boost = await getOwnedBoost(
           tx,
           {
@@ -1241,8 +1372,6 @@ export async function removePromotedEvent({
             boost: normalizeBoost(boost),
           };
         }
-
-        const now = new Date();
 
         const removedBoost =
           await tx.eventBoost.update({
@@ -1304,6 +1433,8 @@ export async function removePromotedEvent({
       {
         isolationLevel:
           Prisma.TransactionIsolationLevel.Serializable,
+        maxWait: 5_000,
+        timeout: 15_000,
       },
     );
   } catch (error) {

@@ -366,7 +366,18 @@ export const createOrganizerSubscriptionSchema = z
   .object({
     planId: cuidSchema,
     autoRenew: requiredBooleanFromUnknown.default(false),
-    paymentMethod: promotionPaymentMethodSchema,
+
+    /*
+     * La création de la souscription ne déclenche pas encore le
+     * paiement. Le moyen de paiement réel est choisi ensuite sur le
+     * checkout sécurisé du prestataire (Moneroo).
+     *
+     * Ce champ reste accepté pour compatibilité avec les anciens
+     * clients/API, mais il n'est plus obligatoire à cette étape.
+     */
+    paymentMethod:
+      promotionPaymentMethodSchema.optional(),
+
     currency: currencySchema.optional(),
     returnUrl: trimmedOptionalString(2_000),
     cancelUrl: trimmedOptionalString(2_000),
@@ -399,7 +410,17 @@ export const renewOrganizerSubscriptionSchema = z
   .object({
     subscriptionId: cuidSchema.optional(),
     planId: cuidSchema.optional(),
-    paymentMethod: promotionPaymentMethodSchema,
+
+    /*
+     * Comme pour une première souscription, le renouvellement crée
+     * d'abord une demande PENDING. Le moyen de paiement est choisi
+     * ensuite sur le checkout sécurisé du prestataire.
+     *
+     * On conserve le champ en option pour rester rétrocompatible.
+     */
+    paymentMethod:
+      promotionPaymentMethodSchema.optional(),
+
     autoRenew: optionalBooleanFromUnknown,
     currency: currencySchema.optional(),
     metadata: jsonMetadataSchema,

@@ -300,22 +300,84 @@ async function expireOutdatedSubscriptions(
   organizerId: string,
   now: Date,
 ) {
-  await tx.organizerSubscription.updateMany({
-    where: {
-      organizerId,
-      status: {
-        in: ACTIVE_SUBSCRIPTION_STATUSES,
+  /*
+   * Une formule Premium donne des droits uniquement jusqu'à endsAt.
+   * Même si autoRenew était activé, l'abonnement courant ne doit
+   * jamais rester utilisable après cette date sans nouveau paiement
+   * confirmé et nouvelle période activée.
+   */
+  const outdatedSubscriptions =
+    await tx.organizerSubscription.findMany({
+      where: {
+        organizerId,
+        status: {
+          in: ACTIVE_SUBSCRIPTION_STATUSES,
+        },
+        endsAt: {
+          lte: now,
+        },
       },
-      endsAt: {
-        lte: now,
+      select: {
+        id: true,
       },
-    },
-    data: {
-      status: SubscriptionStatus.EXPIRED,
-      autoRenew: false,
-    },
-  });
+    });
 
+  const outdatedSubscriptionIds =
+    outdatedSubscriptions.map(
+      (subscription) =>
+        subscription.id,
+    );
+
+  if (
+    outdatedSubscriptionIds.length > 0
+  ) {
+    await tx.organizerSubscription.updateMany({
+      where: {
+        organizerId,
+        id: {
+          in: outdatedSubscriptionIds,
+        },
+        status: {
+          in: ACTIVE_SUBSCRIPTION_STATUSES,
+        },
+      },
+      data: {
+        status:
+          SubscriptionStatus.EXPIRED,
+        autoRenew: false,
+      },
+    });
+
+    /*
+     * Toutes les promotions liées à un abonnement expiré cessent
+     * immédiatement d'être actives, même si leur propre endsAt est
+     * incorrectement positionné plus loin.
+     */
+    await tx.eventBoost.updateMany({
+      where: {
+        organizerId,
+        subscriptionId: {
+          in: outdatedSubscriptionIds,
+        },
+        status: {
+          in: [
+            EventBoostStatus.SCHEDULED,
+            EventBoostStatus.ACTIVE,
+            EventBoostStatus.PAUSED,
+          ],
+        },
+      },
+      data: {
+        status:
+          EventBoostStatus.EXPIRED,
+      },
+    });
+  }
+
+  /*
+   * Garde-fou pour les promotions dont la date de fin est dépassée,
+   * y compris les anciennes données créées avant cette logique.
+   */
   await tx.eventBoost.updateMany({
     where: {
       organizerId,
@@ -331,7 +393,8 @@ async function expireOutdatedSubscriptions(
       },
     },
     data: {
-      status: EventBoostStatus.EXPIRED,
+      status:
+        EventBoostStatus.EXPIRED,
     },
   });
 }
@@ -828,6 +891,12 @@ export async function cancelOrganizerSubscription({
       async (tx) => {
         const now = new Date();
 
+        await expireOutdatedSubscriptions(
+          tx,
+          organizerId,
+          now,
+        );
+
         const subscription =
           parsed.data.subscriptionId
             ? await getOwnedSubscription(tx, {
@@ -1023,6 +1092,14 @@ export async function renewOrganizerSubscription({
   try {
     return await prisma.$transaction(
       async (tx) => {
+        const now = new Date();
+
+        await expireOutdatedSubscriptions(
+          tx,
+          organizerId,
+          now,
+        );
+
         const currentSubscription =
           parsed.data.subscriptionId
             ? await getOwnedSubscription(tx, {
@@ -1193,6 +1270,14 @@ export async function updateOrganizerSubscriptionAutoRenew({
   try {
     return await prisma.$transaction(
       async (tx) => {
+        const now = new Date();
+
+        await expireOutdatedSubscriptions(
+          tx,
+          organizerId,
+          now,
+        );
+
         const subscription =
           parsed.data.subscriptionId
             ? await getOwnedSubscription(tx, {
@@ -1261,7 +1346,7 @@ export async function updateOrganizerSubscriptionAutoRenew({
         return {
           message:
             parsed.data.autoRenew
-              ? "Le renouvellement automatique est activé."
+              ? "La préférence de renouvellement est activée. Une nouvelle période ne sera activée qu’après confirmation d’un nouveau paiement."
               : "Le renouvellement automatique est désactivé.",
           subscription:
             normalizeSubscription(

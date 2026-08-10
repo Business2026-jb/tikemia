@@ -350,33 +350,21 @@ async function getAdminDashboardData() {
       ),
     );
 
+  /*
+   * IMPORTANT — Pool Prisma/Supabase
+   *
+   * Le dashboard charge beaucoup d'indicateurs, mais ne doit pas
+   * lancer toutes les requêtes simultanément. Le pool actuellement
+   * disponible est limité à 5 connexions.
+   *
+   * On conserve donc exactement les mêmes requêtes et les mêmes
+   * données, tout en limitant la concurrence à 3 requêtes par bloc.
+   * Cela laisse également de la capacité aux autres pages/API Tikemia.
+   */
   const [
     totalUsers,
     activeUsers,
     totalOrganizers,
-    activeOrganizers,
-    totalCustomers,
-    totalEvents,
-    publishedEvents,
-    pendingEvents,
-    totalTickets,
-    usedTicketsToday,
-    paidOrdersToday,
-    pendingOrders,
-    pendingPayments,
-    failedPaymentsToday,
-    pendingPayouts,
-    activeSubscriptions,
-    openSupportTickets,
-    openReports,
-    allTimeRevenue,
-    todayRevenue,
-    platformRevenue,
-    pendingPayoutAmount,
-    recentEvents,
-    recentPayments,
-    recentOrders,
-    revenueOrders,
   ] =
     await Promise.all([
       prisma.user.count(),
@@ -394,7 +382,14 @@ async function getAdminDashboardData() {
             "ORGANIZER",
         },
       }),
+    ]);
 
+  const [
+    activeOrganizers,
+    totalCustomers,
+    totalEvents,
+  ] =
+    await Promise.all([
       prisma.user.count({
         where: {
           role:
@@ -413,7 +408,14 @@ async function getAdminDashboardData() {
       }),
 
       prisma.event.count(),
+    ]);
 
+  const [
+    publishedEvents,
+    pendingEvents,
+    totalTickets,
+  ] =
+    await Promise.all([
       prisma.event.count({
         where: {
           status:
@@ -429,7 +431,14 @@ async function getAdminDashboardData() {
       }),
 
       prisma.ticket.count(),
+    ]);
 
+  const [
+    usedTicketsToday,
+    paidOrdersToday,
+    pendingOrders,
+  ] =
+    await Promise.all([
       prisma.ticket.count({
         where: {
           usedAt: {
@@ -463,7 +472,14 @@ async function getAdminDashboardData() {
             "PENDING",
         },
       }),
+    ]);
 
+  const [
+    pendingPayments,
+    failedPaymentsToday,
+    pendingPayouts,
+  ] =
+    await Promise.all([
       prisma.payment.count({
         where: {
           status:
@@ -496,7 +512,14 @@ async function getAdminDashboardData() {
           },
         },
       }),
+    ]);
 
+  const [
+    activeSubscriptions,
+    openSupportTickets,
+    openReports,
+  ] =
+    await Promise.all([
       prisma.organizerSubscription.count({
         where: {
           status:
@@ -526,7 +549,14 @@ async function getAdminDashboardData() {
           },
         },
       }),
+    ]);
 
+  const [
+    allTimeRevenue,
+    todayRevenue,
+    platformRevenue,
+  ] =
+    await Promise.all([
       prisma.order.aggregate({
         where: {
           status:
@@ -570,7 +600,14 @@ async function getAdminDashboardData() {
             true,
         },
       }),
+    ]);
 
+  const [
+    pendingPayoutAmount,
+    recentEvents,
+    recentPayments,
+  ] =
+    await Promise.all([
       prisma.payout.aggregate({
         where: {
           status: {
@@ -705,7 +742,13 @@ async function getAdminDashboardData() {
           },
         },
       }),
+    ]);
 
+  const [
+    recentOrders,
+    revenueOrders,
+  ] =
+    await Promise.all([
       prisma.order.findMany({
         take:
           RECENT_ITEMS_LIMIT,

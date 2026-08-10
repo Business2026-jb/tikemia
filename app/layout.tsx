@@ -5,7 +5,8 @@ import type {
 
 import "./globals.css";
 
-const APP_NAME = "Tikemia";
+const APP_NAME =
+  "Tikemia";
 
 const APP_URL =
   process.env.NEXT_PUBLIC_APP_URL?.trim() ||
@@ -17,6 +18,15 @@ const CLIENT_SOCIAL_IMAGE =
 
 const SITE_ICON =
   "/favicon.png";
+
+const PWA_ICON_192 =
+  "/icons/icon-192x192.png";
+
+const PWA_ICON_512 =
+  "/icons/icon-512x512.png";
+
+const APPLE_TOUCH_ICON =
+  "/icons/apple-touch-icon.png";
 
 export const metadata: Metadata = {
   metadataBase:
@@ -90,11 +100,44 @@ export const metadata: Metadata = {
       false,
   },
 
+  /*
+   * Manifest PWA généré automatiquement
+   * par app/manifest.ts.
+   */
+  manifest:
+    "/manifest.webmanifest",
+
+  /*
+   * On conserve le favicon historique
+   * et on ajoute les icônes dédiées PWA.
+   */
   icons: {
     icon: [
       {
         url:
           SITE_ICON,
+
+        type:
+          "image/png",
+
+        sizes:
+          "512x512",
+      },
+
+      {
+        url:
+          PWA_ICON_192,
+
+        type:
+          "image/png",
+
+        sizes:
+          "192x192",
+      },
+
+      {
+        url:
+          PWA_ICON_512,
 
         type:
           "image/png",
@@ -117,13 +160,13 @@ export const metadata: Metadata = {
     apple: [
       {
         url:
-          SITE_ICON,
+          APPLE_TOUCH_ICON,
 
         type:
           "image/png",
 
         sizes:
-          "512x512",
+          "180x180",
       },
     ],
   },
@@ -221,6 +264,10 @@ export const metadata: Metadata = {
     },
   },
 
+  /*
+   * Configuration spécifique iPhone / iPad
+   * lorsque Tikemia est ajouté à l’écran d’accueil.
+   */
   appleWebApp: {
     capable:
       true,
@@ -247,7 +294,8 @@ export const metadata: Metadata = {
   },
 };
 
-export const viewport: Viewport = {
+export const viewport:
+  Viewport = {
   width:
     "device-width",
 
@@ -268,6 +316,7 @@ export const viewport: Viewport = {
       color:
         "#03070a",
     },
+
     {
       media:
         "(prefers-color-scheme: dark)",
@@ -284,14 +333,15 @@ export const viewport: Viewport = {
 export default function RootLayout({
   children,
 }: Readonly<{
-  children: React.ReactNode;
+  children:
+    React.ReactNode;
 }>) {
   return (
     <html
       lang="fr"
       suppressHydrationWarning
     >
-      <body className="min-h-screen bg-[#03070a] text-white antialiased">
+      <body>
         {children}
       </body>
     </html>

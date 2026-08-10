@@ -7,6 +7,8 @@ import {
   BadgeCheck,
   CalendarDays,
   CheckCircle2,
+  ChevronDown,
+  ChevronUp,
   CircleAlert,
   Clock3,
   Crown,
@@ -253,6 +255,16 @@ export default function PromotionPageClient({
   const [selectedPlanId, setSelectedPlanId] =
     useState<string | null>(null);
 
+  /*
+   * Les cartes d'abonnement restent disponibles sans occuper toute la page.
+   * - nouvel organisateur : elles sont ouvertes par défaut ;
+   * - abonnement déjà actif : la section reste compacte jusqu'au clic.
+   */
+  const [showPlans, setShowPlans] =
+    useState(
+      !initialData.currentSubscription,
+    );
+
   const [
     processingBoostId,
     setProcessingBoostId,
@@ -357,17 +369,127 @@ export default function PromotionPageClient({
     setFeedback(null);
   }
 
-  function handleSelectPlan(
+  async function handleSelectPlan(
     plan: OrganizerSubscriptionPlan,
   ) {
+    if (selectedPlanId) {
+      return;
+    }
+
+    const currentSubscription =
+      initialData.currentSubscription;
+
+    if (
+      currentSubscription &&
+      currentSubscription.plan.id ===
+        plan.id
+    ) {
+      setFeedback({
+        type: "success",
+        message:
+          "Cette formule Premium est déjà votre formule actuelle.",
+      });
+      return;
+    }
+
     clearFeedback();
     setSelectedPlanId(plan.id);
 
-    router.push(
-      `/organizer/promotions/checkout?planId=${encodeURIComponent(
-        plan.id,
-      )}`,
-    );
+    try {
+      /*
+       * Le backend sait déjà gérer le changement de formule via RENEW :
+       * il crée une nouvelle souscription PENDING pour le nouveau plan,
+       * puis l'ancien abonnement n'est remplacé qu'après paiement confirmé.
+       *
+       * Sans abonnement actif, on conserve le parcours CREATE d'origine.
+       */
+      const requestBody =
+        currentSubscription
+          ? {
+              action:
+                "RENEW" as const,
+              subscriptionId:
+                currentSubscription.id,
+              planId:
+                plan.id,
+              autoRenew:
+                currentSubscription.autoRenew,
+            }
+          : {
+              action:
+                "CREATE" as const,
+              planId:
+                plan.id,
+              autoRenew:
+                false,
+            };
+
+      const response = await fetch(
+        "/api/organizer/promotions/subscription",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type":
+              "application/json",
+          },
+          body:
+            JSON.stringify(
+              requestBody,
+            ),
+        },
+      );
+
+      const payload =
+        (await response
+          .json()
+          .catch(() => null)) as
+          | ActionApiResponse
+          | null;
+
+      if (
+        response.status === 401 &&
+        payload?.redirectTo
+      ) {
+        router.push(
+          payload.redirectTo,
+        );
+        return;
+      }
+
+      if (
+        !response.ok ||
+        !payload?.success
+      ) {
+        throw new Error(
+          payload?.message ??
+            (currentSubscription
+              ? "Impossible de préparer le changement de formule pour le moment."
+              : "Impossible de créer la demande de souscription pour le moment."),
+        );
+      }
+
+      if (!payload.redirectTo) {
+        throw new Error(
+          "La page de paiement de l’abonnement est indisponible.",
+        );
+      }
+
+      router.push(
+        payload.redirectTo,
+      );
+    } catch (error) {
+      setFeedback({
+        type: "error",
+        message:
+          error instanceof Error
+            ? error.message
+            : currentSubscription
+              ? "Impossible de préparer le changement de formule pour le moment."
+              : "Impossible de créer la demande de souscription pour le moment.",
+      });
+
+      setSelectedPlanId(null);
+    }
   }
 
   function handleRenewSubscription() {
@@ -410,8 +532,22 @@ export default function PromotionPageClient({
       setFeedback({
         type: "error",
         message:
-          "Vous devez disposer d’un abonnement Premium actif pour promouvoir un événement.",
+          "Choisissez d’abord une formule Premium pour pouvoir promouvoir un événement.",
       });
+
+      setShowPlans(true);
+
+      window.setTimeout(() => {
+        document
+          .getElementById(
+            "premium-plans",
+          )
+          ?.scrollIntoView({
+            behavior: "smooth",
+            block: "start",
+          });
+      }, 0);
+
       return;
     }
 
@@ -630,10 +766,6 @@ export default function PromotionPageClient({
           onPromoteEvent={
             openPromotionSelector
           }
-          canPromoteEvent={
-            hasUsableSubscription &&
-            hasRemainingSlots
-          }
         />
 
         {feedback && (
@@ -722,19 +854,7 @@ export default function PromotionPageClient({
               )
             }
             onPrimaryAction={
-              hasUsableSubscription
-                ? openPromotionSelector
-                : () => {
-                    document
-                      .getElementById(
-                        "premium-plans",
-                      )
-                      ?.scrollIntoView({
-                        behavior:
-                          "smooth",
-                        block: "start",
-                      });
-                  }
+              openPromotionSelector
             }
             onSecondaryAction={
               hasUsableSubscription
@@ -746,29 +866,101 @@ export default function PromotionPageClient({
 
         <section
           id="premium-plans"
-          className="scroll-mt-24"
+          className="scroll-mt-24 overflow-hidden rounded-2xl border border-white/[0.08] bg-[#071015]"
         >
-          <SubscriptionPlansGrid
-            plans={initialData.plans}
-            currentPlanId={
-              currentPlanId
-            }
-            recommendedPlanCode={
-              recommendedPlanCode
-            }
-            popularPlanCode={
-              popularPlanCode
-            }
-            selectedPlanId={
-              selectedPlanId
-            }
-            disabled={
-              isRefreshing
-            }
-            onSelectPlan={
-              handleSelectPlan
-            }
-          />
+          <div className="flex flex-col gap-4 p-4 sm:flex-row sm:items-center sm:justify-between sm:p-5">
+            <div className="flex min-w-0 items-start gap-3">
+              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-emerald-500/20 bg-emerald-500/10 text-lime-400">
+                <Crown className="h-4.5 w-4.5" />
+              </div>
+
+              <div className="min-w-0">
+                <div className="flex flex-wrap items-center gap-2">
+                  <h2 className="text-sm font-black text-white sm:text-base">
+                    {currentPlanId
+                      ? "Changer de formule Premium"
+                      : "Choisir une formule Premium"}
+                  </h2>
+
+                  {initialData.currentSubscription?.plan
+                    .name ? (
+                    <span className="rounded-full border border-blue-500/20 bg-blue-500/[0.08] px-2.5 py-1 text-[9px] font-black uppercase tracking-[0.08em] text-blue-300">
+                      Actuelle :{" "}
+                      {
+                        initialData
+                          .currentSubscription
+                          .plan.name
+                      }
+                    </span>
+                  ) : null}
+                </div>
+
+                <p className="mt-1 max-w-2xl text-[11px] leading-5 text-neutral-500 sm:text-xs">
+                  {currentPlanId
+                    ? "Comparez les formules seulement lorsque vous souhaitez augmenter votre capacité de promotion. Votre abonnement actuel reste actif jusqu’à la confirmation du nouveau paiement."
+                    : "Sélectionnez la formule adaptée au nombre d’événements que vous souhaitez promouvoir."}
+                </p>
+              </div>
+            </div>
+
+            <button
+              type="button"
+              onClick={() =>
+                setShowPlans(
+                  (current) =>
+                    !current,
+                )
+              }
+              aria-expanded={
+                showPlans
+              }
+              className="inline-flex h-10 shrink-0 items-center justify-center gap-2 rounded-xl border border-white/[0.09] bg-white/[0.035] px-4 text-xs font-black text-neutral-200 transition hover:border-emerald-500/25 hover:bg-emerald-500/[0.07] hover:text-white"
+            >
+              <Sparkles className="h-3.5 w-3.5 text-lime-400" />
+
+              {showPlans
+                ? "Masquer les formules"
+                : currentPlanId
+                  ? "Changer de formule"
+                  : "Voir les formules"}
+
+              {showPlans ? (
+                <ChevronUp className="h-4 w-4" />
+              ) : (
+                <ChevronDown className="h-4 w-4" />
+              )}
+            </button>
+          </div>
+
+          {showPlans ? (
+            <div className="border-t border-white/[0.07] p-3 sm:p-4">
+              <SubscriptionPlansGrid
+                plans={
+                  initialData.plans
+                }
+                currentPlanId={
+                  currentPlanId
+                }
+                recommendedPlanCode={
+                  recommendedPlanCode
+                }
+                popularPlanCode={
+                  popularPlanCode
+                }
+                selectedPlanId={
+                  selectedPlanId
+                }
+                disabled={
+                  isRefreshing ||
+                  selectedPlanId !==
+                    null
+                }
+                onSelectPlan={
+                  handleSelectPlan
+                }
+              />
+            </div>
+          ) : null}
         </section>
 
         <PremiumInformationPanel
@@ -836,14 +1028,12 @@ function PromotionPageHeader({
   organizerName,
   hasBlueBadge,
   isRefreshing,
-  canPromoteEvent,
   onRefresh,
   onPromoteEvent,
 }: {
   organizerName: string;
   hasBlueBadge: boolean;
   isRefreshing: boolean;
-  canPromoteEvent: boolean;
   onRefresh: () => void;
   onPromoteEvent: () => void;
 }) {
@@ -897,7 +1087,7 @@ function PromotionPageHeader({
             type="button"
             onClick={onPromoteEvent}
             disabled={
-              !canPromoteEvent
+              isRefreshing
             }
             className="inline-flex h-11 items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-emerald-500 via-lime-500 to-orange-500 px-5 text-sm font-black text-white shadow-[0_14px_40px_rgba(34,197,94,0.18)] transition hover:scale-[1.01] disabled:cursor-not-allowed disabled:opacity-45"
           >

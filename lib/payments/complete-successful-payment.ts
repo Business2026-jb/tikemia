@@ -7,12 +7,14 @@ import {
   OrderStatus,
   PaymentStatus,
   Prisma,
+  PromoCodeStatus,
   TicketReservationStatus,
 } from "@prisma/client";
 
 import {
   processEmailDeliveries,
 } from "@/lib/deliveries/process-email-deliveries";
+import { calculateCouponDiscount } from "@/lib/coupons/calculate-coupon-discount";
 import { prisma } from "@/lib/prisma";
 import {
   generateOrderTickets,
@@ -22,6 +24,20 @@ import {
 const MONEROO_PROVIDER = "MONEROO";
 
 const MAX_TRANSACTION_ATTEMPTS = 3;
+
+type CouponPaymentSnapshot = Readonly<{
+  promoCodeId: string;
+  code: string;
+  discountType: string;
+  discountValue: string;
+  discountAmount: string;
+  subtotalBeforeDiscount: string;
+  platformFeeBeforeDiscount: string;
+  discountedSubtotal: string;
+  discountedPlatformFee: string;
+  payableAmount: string;
+  currency: string;
+}>;
 
 export type CompleteSuccessfulPaymentInput = Readonly<{
   paymentId: string;
@@ -132,6 +148,124 @@ function readJsonObject(
   }
 
   return {};
+}
+
+function readCouponSnapshot(
+  metadata: Prisma.JsonValue | null,
+): CouponPaymentSnapshot | null {
+  const metadataObject =
+    readJsonObject(
+      metadata,
+    );
+
+  const coupon =
+    metadataObject.coupon;
+
+  if (
+    !coupon ||
+    typeof coupon !== "object" ||
+    Array.isArray(coupon)
+  ) {
+    return null;
+  }
+
+  const value =
+    coupon as Record<
+      string,
+      unknown
+    >;
+
+  const requiredFields = [
+    "promoCodeId",
+    "code",
+    "discountType",
+    "discountValue",
+    "discountAmount",
+    "subtotalBeforeDiscount",
+    "platformFeeBeforeDiscount",
+    "discountedSubtotal",
+    "discountedPlatformFee",
+    "payableAmount",
+    "currency",
+  ] as const;
+
+  for (
+    const field of
+    requiredFields
+  ) {
+    if (
+      typeof value[field] !==
+        "string" ||
+      !value[field]
+        .trim()
+    ) {
+      throw new SuccessfulPaymentCompletionError(
+        "Les informations du code promo enregistrées avec le paiement sont invalides.",
+        "PAYMENT_COUPON_METADATA_INVALID",
+      );
+    }
+  }
+
+  return {
+    promoCodeId:
+      (
+        value.promoCodeId as string
+      ).trim(),
+
+    code:
+      (
+        value.code as string
+      )
+        .trim()
+        .toUpperCase(),
+
+    discountType:
+      (
+        value.discountType as string
+      ).trim(),
+
+    discountValue:
+      (
+        value.discountValue as string
+      ).trim(),
+
+    discountAmount:
+      (
+        value.discountAmount as string
+      ).trim(),
+
+    subtotalBeforeDiscount:
+      (
+        value.subtotalBeforeDiscount as string
+      ).trim(),
+
+    platformFeeBeforeDiscount:
+      (
+        value.platformFeeBeforeDiscount as string
+      ).trim(),
+
+    discountedSubtotal:
+      (
+        value.discountedSubtotal as string
+      ).trim(),
+
+    discountedPlatformFee:
+      (
+        value.discountedPlatformFee as string
+      ).trim(),
+
+    payableAmount:
+      (
+        value.payableAmount as string
+      ).trim(),
+
+    currency:
+      (
+        value.currency as string
+      )
+        .trim()
+        .toUpperCase(),
+  };
 }
 
 function isRetryableTransactionError(
@@ -308,6 +442,490 @@ async function confirmPendingReservation({
   }
 }
 
+async function finalizeCouponUsage({
+  transaction,
+  payment,
+  paidAt,
+}: {
+  transaction:
+    Prisma.TransactionClient;
+
+  payment: {
+    initiatedAt:
+      Date;
+
+    amount:
+      Prisma.Decimal;
+
+    currency:
+      string;
+
+    metadata:
+      Prisma.JsonValue
+      | null;
+
+    order: {
+      id:
+        string;
+
+      eventId:
+        string;
+
+      customerId:
+        string
+        | null;
+
+      customerEmail:
+        string;
+
+      subtotal:
+        Prisma.Decimal;
+
+      platformFee:
+        Prisma.Decimal;
+
+      total:
+        Prisma.Decimal;
+
+      currency:
+        string;
+    };
+  };
+
+  paidAt:
+    Date;
+}): Promise<
+  Prisma.Decimal
+> {
+  const couponSnapshot =
+    readCouponSnapshot(
+      payment.metadata,
+    );
+
+  if (
+    !couponSnapshot
+  ) {
+    return payment.order.total;
+  }
+
+  const paymentCurrency =
+    payment.currency
+      .trim()
+      .toUpperCase();
+
+  const orderCurrency =
+    payment.order.currency
+      .trim()
+      .toUpperCase();
+
+  if (
+    couponSnapshot.currency !==
+      paymentCurrency ||
+    couponSnapshot.currency !==
+      orderCurrency
+  ) {
+    throw new SuccessfulPaymentCompletionError(
+      "La devise du code promo ne correspond pas au paiement.",
+      "PAYMENT_COUPON_CURRENCY_MISMATCH",
+    );
+  }
+
+  const coupon =
+    await transaction
+      .promoCode
+      .findUnique({
+        where: {
+          id:
+            couponSnapshot
+              .promoCodeId,
+        },
+
+        select: {
+          id:
+            true,
+
+          eventId:
+            true,
+
+          code:
+            true,
+
+          discountType:
+            true,
+
+          discountValue:
+            true,
+
+          minimumOrderAmount:
+            true,
+
+          maximumDiscount:
+            true,
+
+          maximumUses:
+            true,
+
+          usesPerCustomer:
+            true,
+
+          currentUses:
+            true,
+
+          startsAt:
+            true,
+
+          expiresAt:
+            true,
+
+          status:
+            true,
+
+          isActive:
+            true,
+        },
+      });
+
+  if (
+    !coupon
+  ) {
+    throw new SuccessfulPaymentCompletionError(
+      "Le code promo associé au paiement est introuvable.",
+      "PAYMENT_COUPON_NOT_FOUND",
+    );
+  }
+
+  if (
+    coupon.eventId !==
+      payment.order.eventId ||
+    coupon.code
+      .trim()
+      .toUpperCase() !==
+      couponSnapshot.code
+  ) {
+    throw new SuccessfulPaymentCompletionError(
+      "Le code promo ne correspond pas à la commande.",
+      "PAYMENT_COUPON_ORDER_MISMATCH",
+    );
+  }
+
+  const validationDate =
+    payment.initiatedAt;
+
+  if (
+    coupon.status !==
+      PromoCodeStatus.ACTIVE ||
+    !coupon.isActive ||
+    (
+      coupon.startsAt &&
+      coupon.startsAt >
+        validationDate
+    ) ||
+    (
+      coupon.expiresAt &&
+      coupon.expiresAt <=
+        validationDate
+    )
+  ) {
+    throw new SuccessfulPaymentCompletionError(
+      "Le code promo n’était pas valide au moment de la création du paiement.",
+      "PAYMENT_COUPON_NOT_ACTIVE",
+    );
+  }
+
+  if (
+    coupon.minimumOrderAmount &&
+    payment.order.subtotal.lessThan(
+      coupon.minimumOrderAmount,
+    )
+  ) {
+    throw new SuccessfulPaymentCompletionError(
+      "Le montant minimum du code promo n’est pas respecté.",
+      "PAYMENT_COUPON_MINIMUM_NOT_REACHED",
+    );
+  }
+
+  const calculation =
+    calculateCouponDiscount({
+      discountType:
+        coupon.discountType,
+
+      discountValue:
+        coupon.discountValue,
+
+      subtotal:
+        payment.order.subtotal,
+
+      platformFee:
+        payment.order.platformFee,
+
+      maximumDiscount:
+        coupon.maximumDiscount,
+    });
+
+  const expectedAmount =
+    calculation.finalTotal;
+
+  if (
+    !new Prisma.Decimal(
+      couponSnapshot
+        .subtotalBeforeDiscount,
+    ).equals(
+      payment.order.subtotal,
+    ) ||
+    !new Prisma.Decimal(
+      couponSnapshot
+        .platformFeeBeforeDiscount,
+    ).equals(
+      payment.order.platformFee,
+    ) ||
+    !new Prisma.Decimal(
+      couponSnapshot
+        .discountAmount,
+    ).equals(
+      calculation.discountAmount,
+    ) ||
+    !new Prisma.Decimal(
+      couponSnapshot
+        .discountedSubtotal,
+    ).equals(
+      calculation.discountedSubtotal,
+    ) ||
+    !new Prisma.Decimal(
+      couponSnapshot
+        .discountedPlatformFee,
+    ).equals(
+      calculation.discountedPlatformFee,
+    ) ||
+    !new Prisma.Decimal(
+      couponSnapshot
+        .payableAmount,
+    ).equals(
+      expectedAmount,
+    ) ||
+    !new Prisma.Decimal(
+      couponSnapshot
+        .discountValue,
+    ).equals(
+      coupon.discountValue,
+    ) ||
+    couponSnapshot
+      .discountType !==
+      coupon.discountType
+  ) {
+    throw new SuccessfulPaymentCompletionError(
+      "Le calcul du code promo ne correspond plus au paiement enregistré.",
+      "PAYMENT_COUPON_CALCULATION_MISMATCH",
+    );
+  }
+
+  if (
+    !payment.amount.equals(
+      expectedAmount,
+    )
+  ) {
+    throw new SuccessfulPaymentCompletionError(
+      "Le montant payé ne correspond pas au total après réduction.",
+      "PAYMENT_AMOUNT_MISMATCH",
+    );
+  }
+
+  const existingUsage =
+    await transaction
+      .promoCodeUsage
+      .findFirst({
+        where: {
+          orderId:
+            payment.order.id,
+        },
+
+        select: {
+          id:
+            true,
+
+          promoCodeId:
+            true,
+
+          discountAmount:
+            true,
+
+          currency:
+            true,
+        },
+      });
+
+  if (
+    existingUsage
+  ) {
+    if (
+      existingUsage.promoCodeId !==
+        coupon.id ||
+      !existingUsage
+        .discountAmount
+        .equals(
+          calculation
+            .discountAmount,
+        ) ||
+      existingUsage.currency
+        .trim()
+        .toUpperCase() !==
+        orderCurrency
+    ) {
+      throw new SuccessfulPaymentCompletionError(
+        "L’utilisation du code promo enregistrée ne correspond pas au paiement.",
+        "PAYMENT_COUPON_USAGE_MISMATCH",
+      );
+    }
+
+    return expectedAmount;
+  }
+
+  if (
+    coupon.maximumUses !==
+      null &&
+    coupon.currentUses >=
+      coupon.maximumUses
+  ) {
+    throw new SuccessfulPaymentCompletionError(
+      "La limite d’utilisation de ce code promo est atteinte.",
+      "PAYMENT_COUPON_USAGE_LIMIT_REACHED",
+    );
+  }
+
+  if (
+    coupon.usesPerCustomer !==
+      null
+  ) {
+    const customerUsageCount =
+      await transaction
+        .promoCodeUsage
+        .count({
+          where: {
+            promoCodeId:
+              coupon.id,
+
+            OR: [
+              ...(
+                payment.order
+                  .customerId
+                  ? [
+                      {
+                        customerId:
+                          payment.order
+                            .customerId,
+                      },
+                    ]
+                  : []
+              ),
+
+              {
+                customerEmail:
+                  payment.order
+                    .customerEmail
+                    .trim()
+                    .toLowerCase(),
+              },
+            ],
+          },
+        });
+
+    if (
+      customerUsageCount >=
+        coupon.usesPerCustomer
+    ) {
+      throw new SuccessfulPaymentCompletionError(
+        "La limite d’utilisation du code promo par client est atteinte.",
+        "PAYMENT_COUPON_CUSTOMER_LIMIT_REACHED",
+      );
+    }
+  }
+
+  const couponUpdate =
+    await transaction
+      .promoCode
+      .updateMany({
+        where: {
+          id:
+            coupon.id,
+
+          status:
+            PromoCodeStatus.ACTIVE,
+
+          isActive:
+            true,
+
+          currentUses:
+            coupon.currentUses,
+
+          ...(
+            coupon.maximumUses !==
+              null
+              ? {
+                  AND: [
+                    {
+                      currentUses: {
+                        lt:
+                          coupon.maximumUses,
+                      },
+                    },
+                  ],
+                }
+              : {}
+          ),
+        },
+
+        data: {
+          currentUses: {
+            increment:
+              1,
+          },
+        },
+      });
+
+  if (
+    couponUpdate.count !==
+      1
+  ) {
+    throw new SuccessfulPaymentCompletionError(
+      "Le code promo a atteint sa limite pendant la confirmation du paiement.",
+      "PAYMENT_COUPON_CONCURRENT_UPDATE",
+    );
+  }
+
+  await transaction
+    .promoCodeUsage
+    .create({
+      data: {
+        promoCodeId:
+          coupon.id,
+
+        orderId:
+          payment.order.id,
+
+        customerId:
+          payment.order
+            .customerId,
+
+        customerEmail:
+          payment.order
+            .customerEmail
+            .trim()
+            .toLowerCase(),
+
+        discountAmount:
+          calculation
+            .discountAmount,
+
+        currency:
+          orderCurrency,
+
+        usedAt:
+          paidAt,
+      },
+    });
+
+  return expectedAmount;
+}
+
 async function prepareSuccessfulPaymentOnce({
   paymentId,
   providerTransactionId,
@@ -364,6 +982,9 @@ async function prepareSuccessfulPaymentOnce({
             metadata:
               true,
 
+            initiatedAt:
+              true,
+
             paidAt:
               true,
 
@@ -376,6 +997,21 @@ async function prepareSuccessfulPaymentOnce({
                   true,
 
                 status:
+                  true,
+
+                eventId:
+                  true,
+
+                customerId:
+                  true,
+
+                customerEmail:
+                  true,
+
+                subtotal:
+                  true,
+
+                platformFee:
                   true,
 
                 total:
@@ -445,17 +1081,12 @@ async function prepareSuccessfulPaymentOnce({
         );
       }
 
-      if (
-        !payment.amount.equals(
-          payment.order.total,
-        )
-      ) {
-        throw new SuccessfulPaymentCompletionError(
-          "Le montant du paiement ne correspond pas au total de la commande.",
-          "PAYMENT_AMOUNT_MISMATCH",
-        );
-      }
-
+      /*
+       * Les contrôles d’identité du paiement restent obligatoires même lors
+       * d’un rejeu du webhook. En revanche, un paiement déjà finalisé ne doit
+       * pas recalculer ni revalider un code promo qui a pu être désactivé ou
+       * modifié après le paiement initial.
+       */
       const paymentCurrency =
         payment.currency
           .trim()
@@ -516,6 +1147,26 @@ async function prepareSuccessfulPaymentOnce({
           alreadyCompleted:
             true,
         };
+      }
+
+      const expectedPaymentAmount =
+        await finalizeCouponUsage({
+          transaction,
+
+          payment,
+
+          paidAt,
+        });
+
+      if (
+        !payment.amount.equals(
+          expectedPaymentAmount,
+        )
+      ) {
+        throw new SuccessfulPaymentCompletionError(
+          "Le montant du paiement ne correspond pas au montant attendu.",
+          "PAYMENT_AMOUNT_MISMATCH",
+        );
       }
 
       if (

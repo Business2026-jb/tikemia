@@ -27,11 +27,17 @@ const SESSION_COOKIE_FALLBACK_NAME =
 
 const DEFAULT_CURRENCY = "XOF";
 
+/*
+ * Règle de sécurité Premium :
+ * seul un abonnement réellement ACTIVE peut donner des droits.
+ *
+ * PENDING, PAST_DUE, PAUSED, CANCELLED et EXPIRED restent des états
+ * métier visibles dans l'interface et l'historique, mais ne doivent
+ * jamais permettre de promouvoir un événement.
+ */
 const ACTIVE_SUBSCRIPTION_STATUSES =
   new Set<SubscriptionStatus>([
     SubscriptionStatus.ACTIVE,
-    SubscriptionStatus.PAST_DUE,
-    SubscriptionStatus.PAUSED,
   ]);
 
 type SerializableDate =
@@ -1198,18 +1204,34 @@ export async function getOrganizerPromotions(
       }),
     ]);
 
-    const currentSubscriptionRaw =
+    /*
+     * L'abonnement "courant" utilisable est recherché en priorité.
+     * Une souscription n'accorde des droits Premium que si :
+     * - son statut est ACTIVE ;
+     * - startsAt existe et a déjà commencé ;
+     * - endsAt existe et est encore dans le futur.
+     *
+     * Si aucun abonnement utilisable n'existe, on conserve le dernier
+     * abonnement uniquement pour afficher son état (PENDING, CANCELLED,
+     * EXPIRED, etc.). Cette valeur de secours ne donnera aucun droit.
+     */
+    const usableSubscriptionRaw =
       subscriptions.find(
         (subscription) =>
           ACTIVE_SUBSCRIPTION_STATUSES.has(
             subscription.status,
           ) &&
-          (
-            !subscription.endsAt ||
-            subscription.endsAt.getTime() >
-              now.getTime()
-          ),
+          subscription.startsAt !== null &&
+          subscription.startsAt.getTime() <=
+            now.getTime() &&
+          subscription.endsAt !== null &&
+          subscription.endsAt.getTime() >
+            now.getTime(),
       ) ??
+      null;
+
+    const currentSubscriptionRaw =
+      usableSubscriptionRaw ??
       subscriptions[0] ??
       null;
 
@@ -1260,6 +1282,24 @@ export async function getOrganizerPromotions(
                   now.getTime()
               );
 
+            const isUsable =
+              currentSubscriptionRaw.status ===
+                SubscriptionStatus.ACTIVE &&
+              currentSubscriptionRaw.startsAt !==
+                null &&
+              currentSubscriptionRaw.startsAt.getTime() <=
+                now.getTime() &&
+              currentSubscriptionRaw.endsAt !==
+                null &&
+              currentSubscriptionRaw.endsAt.getTime() >
+                now.getTime() &&
+              !isExpired;
+
+            const usableRemainingBoostSlots =
+              isUsable
+                ? remainingBoostSlots
+                : 0;
+
             return {
               id:
                 currentSubscriptionRaw.id,
@@ -1298,12 +1338,7 @@ export async function getOrganizerPromotions(
                 currentSubscriptionRaw
                   .updatedAt.toISOString(),
 
-              isUsable:
-                ACTIVE_SUBSCRIPTION_STATUSES.has(
-                  currentSubscriptionRaw
-                    .status,
-                ) &&
-                !isExpired,
+              isUsable,
               isExpired,
               isExpiringSoon:
                 remainingDays !== null &&
@@ -1358,14 +1393,20 @@ export async function getOrganizerPromotions(
               },
 
               usage: {
-                activeBoosts,
-                remainingBoostSlots,
+                activeBoosts:
+                  isUsable
+                    ? activeBoosts
+                    : 0,
+                remainingBoostSlots:
+                  usableRemainingBoostSlots,
                 usagePercentage:
-                  calculatePercentage(
-                    activeBoosts,
-                    currentSubscriptionRaw
-                      .plan.maxBoostedEvents,
-                  ),
+                  isUsable
+                    ? calculatePercentage(
+                        activeBoosts,
+                        currentSubscriptionRaw
+                          .plan.maxBoostedEvents,
+                      )
+                    : 0,
               },
             };
           })()
@@ -1504,6 +1545,11 @@ export async function getOrganizerPromotions(
         };
       });
 
+    const hasUsableSubscription =
+      Boolean(
+        currentSubscription?.isUsable,
+      );
+
     const normalizedEligibleEvents:
       OrganizerPromotionEligibleEvent[] =
       eligibleEvents.map((event) => {
@@ -1523,6 +1569,7 @@ export async function getOrganizerPromotions(
           EventStatus.PUBLISHED;
 
         const canBePromoted =
+          hasUsableSubscription &&
           isPublished &&
           !eventHasEnded &&
           !activeBoost;
@@ -1531,7 +1578,10 @@ export async function getOrganizerPromotions(
           | string
           | null = null;
 
-        if (!isPublished) {
+        if (!hasUsableSubscription) {
+          ineligibilityReason =
+            "Un abonnement Premium actif et payé est nécessaire pour promouvoir cet événement.";
+        } else if (!isPublished) {
           ineligibilityReason =
             "Seuls les événements publiés peuvent être promus.";
         } else if (eventHasEnded) {
@@ -1854,9 +1904,11 @@ export async function getOrganizerPromotions(
         pausedBoosts,
         remainingBoostSlots:
           currentSubscription
-            ?.usage
-            .remainingBoostSlots ??
-          0,
+            ?.isUsable
+            ? currentSubscription
+                .usage
+                .remainingBoostSlots
+            : 0,
         promotedEvents:
           normalizedBoosts.length,
         totalImpressions,

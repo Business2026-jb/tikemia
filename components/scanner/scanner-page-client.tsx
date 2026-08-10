@@ -9,11 +9,9 @@ import {
 } from "react";
 import {
   AlertTriangle,
-  Camera,
   History,
   Loader2,
   RefreshCw,
-  ScanLine,
   ShieldCheck,
 } from "lucide-react";
 
@@ -367,12 +365,6 @@ export default function ScannerPageClient({
     useState(false);
 
   const [
-    cameraActive,
-    setCameraActive,
-  ] =
-    useState(false);
-
-  const [
     online,
     setOnline,
   ] =
@@ -394,6 +386,15 @@ export default function ScannerPageClient({
       value: string;
       at: number;
     } | null>(null);
+
+
+  const processingRef =
+    useRef(false);
+
+  const resultTimerRef =
+    useRef<number | null>(
+      null,
+    );
 
   const selectedEvent =
     useMemo(
@@ -426,6 +427,22 @@ export default function ScannerPageClient({
       "ORGANIZER" ||
     scanner.accessMode ===
       "ORGANIZER_OWNER";
+
+  useEffect(
+    () => {
+      return () => {
+        if (
+          resultTimerRef.current !==
+          null
+        ) {
+          window.clearTimeout(
+            resultTimerRef.current,
+          );
+        }
+      };
+    },
+    [],
+  );
 
   useEffect(
     () => {
@@ -661,7 +678,7 @@ export default function ScannerPageClient({
         if (
           !normalizedValue ||
           !selectedEvent ||
-          processing
+          processingRef.current
         ) {
           return;
         }
@@ -693,6 +710,9 @@ export default function ScannerPageClient({
           at:
             now,
         };
+
+        processingRef.current =
+          true;
 
         setProcessing(
           true,
@@ -750,19 +770,39 @@ export default function ScannerPageClient({
               payload
             ) as ScannerScanResult;
 
+          if (
+            resultTimerRef.current !==
+            null
+          ) {
+            window.clearTimeout(
+              resultTimerRef.current,
+            );
+          }
+
           setScanResult(
             result,
-          );
-
-          setCameraActive(
-            false,
           );
 
           playFeedback(
             result.accepted,
           );
 
-          await Promise.all([
+          resultTimerRef.current =
+            window.setTimeout(
+              () => {
+                setScanResult(
+                  null,
+                );
+
+                resultTimerRef.current =
+                  null;
+              },
+              result.accepted
+                ? 1_100
+                : 1_700,
+            );
+
+          void Promise.allSettled([
             loadEvents(),
             loadHistory(
               selectedEvent.event.id,
@@ -775,6 +815,9 @@ export default function ScannerPageClient({
               : "Le billet n’a pas pu être vérifié.",
           );
         } finally {
+          processingRef.current =
+            false;
+
           setProcessing(
             false,
           );
@@ -784,25 +827,29 @@ export default function ScannerPageClient({
         loadEvents,
         loadHistory,
         online,
-        processing,
         selectedEvent,
       ],
     );
 
   const scanNext =
     () => {
+      if (
+        resultTimerRef.current !==
+        null
+      ) {
+        window.clearTimeout(
+          resultTimerRef.current,
+        );
+
+        resultTimerRef.current =
+          null;
+      }
+
       setScanResult(
         null,
       );
 
       setGlobalError("");
-
-      lastScanRef.current =
-        null;
-
-      setCameraActive(
-        true,
-      );
     };
 
   const logout =
@@ -923,12 +970,23 @@ export default function ScannerPageClient({
                           selected.event.id,
                         );
 
+                        if (
+                          resultTimerRef.current !==
+                          null
+                        ) {
+                          window.clearTimeout(
+                            resultTimerRef.current,
+                          );
+
+                          resultTimerRef.current =
+                            null;
+                        }
+
+                        lastScanRef.current =
+                          null;
+
                         setScanResult(
                           null,
-                        );
-
-                        setCameraActive(
-                          false,
                         );
 
                         setGlobalError("");
@@ -949,62 +1007,26 @@ export default function ScannerPageClient({
 
                 <div className="grid min-w-0 gap-5 lg:grid-cols-[minmax(0,1fr)_400px]">
                   <div className="min-w-0 space-y-4">
-                    {cameraActive &&
-                    !scanResult ? (
-                      <ScannerCamera
-                        active
-                        processing={
-                          processing
-                        }
-                        onDetected={(
+                    <ScannerCamera
+                      active
+                      processing={
+                        processing
+                      }
+                      onDetected={(
+                        value,
+                      ) =>
+                        void submitScan(
                           value,
-                        ) =>
-                          void submitScan(
-                            value,
-                          )
-                        }
-                        onError={(
+                        )
+                      }
+                      onError={(
+                        message,
+                      ) =>
+                        setGlobalError(
                           message,
-                        ) =>
-                          setGlobalError(
-                            message,
-                          )
-                        }
-                      />
-                    ) : (
-                      <div className="rounded-[28px] border border-white/[0.08] bg-[#071015] p-6 text-center sm:p-8">
-                        <span className="mx-auto flex h-20 w-20 items-center justify-center rounded-3xl border border-lime-400/20 bg-lime-400/[0.08] text-lime-300">
-                          <ScanLine className="h-10 w-10" />
-                        </span>
-
-                        <h2 className="mt-5 text-2xl font-black tracking-[-0.04em] text-white">
-                          Contrôle d’accès prêt
-                        </h2>
-
-                        <p className="mx-auto mt-3 max-w-md text-sm leading-6 text-neutral-500">
-                          Ouvrez la caméra puis placez le QR code officiel Tikemia dans le cadre.
-                        </p>
-
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setScanResult(
-                              null,
-                            );
-
-                            setGlobalError("");
-
-                            setCameraActive(
-                              true,
-                            );
-                          }}
-                          className="mt-6 inline-flex h-14 items-center justify-center gap-2 rounded-2xl bg-gradient-to-r from-emerald-500 via-lime-500 to-orange-500 px-6 text-sm font-black text-white transition hover:scale-[1.01]"
-                        >
-                          <Camera className="h-5 w-5" />
-                          Ouvrir le scanner
-                        </button>
-                      </div>
-                    )}
+                        )
+                      }
+                    />
 
                     <ScannerManualCodeForm
                       disabled={
@@ -1029,15 +1051,9 @@ export default function ScannerPageClient({
                       onScanNext={
                         scanNext
                       }
-                      onClose={() => {
-                        setScanResult(
-                          null,
-                        );
-
-                        setCameraActive(
-                          false,
-                        );
-                      }}
+                      onClose={
+                        scanNext
+                      }
                     />
 
                     <section className="rounded-[28px] border border-white/[0.08] bg-[#071015] p-4 sm:p-5">
