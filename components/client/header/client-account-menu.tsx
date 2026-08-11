@@ -7,6 +7,7 @@ import {
   Heart,
   LogIn,
   LogOut,
+  RotateCcw,
   Settings,
   ShoppingBag,
   Ticket,
@@ -37,6 +38,7 @@ export type ClientAccountMenuProps = {
 
   ticketsHref?: string;
   ordersHref?: string;
+  refundsHref?: string;
   favoritesHref?: string;
   profileHref?: string;
   settingsHref?: string;
@@ -49,7 +51,13 @@ export type ClientAccountMenuProps = {
 type AccountNavigationItem = {
   label: string;
   href: string;
-  icon: typeof Ticket;
+  icon:
+    | typeof Ticket
+    | typeof ShoppingBag
+    | typeof RotateCcw
+    | typeof Heart
+    | typeof UserRound
+    | typeof Settings;
 };
 
 function cn(
@@ -111,6 +119,7 @@ export default function ClientAccountMenu({
 
   ticketsHref = "/account/tickets",
   ordersHref = "/account/orders",
+  refundsHref = "/account/refunds",
   favoritesHref = "/favorites",
   profileHref = "/account/profile",
   settingsHref = "/account/settings",
@@ -173,6 +182,14 @@ export default function ClientAccountMenu({
         },
         {
           label:
+            "Remboursements",
+          href:
+            refundsHref,
+          icon:
+            RotateCcw,
+        },
+        {
+          label:
             "Mes favoris",
           href:
             favoritesHref,
@@ -199,6 +216,7 @@ export default function ClientAccountMenu({
       [
         ticketsHref,
         ordersHref,
+        refundsHref,
         favoritesHref,
         profileHref,
         settingsHref,

@@ -16,14 +16,19 @@ import {
   getMonerooCheckoutUrl,
   isMonerooApiResponse,
   isMonerooInitializePaymentData,
+  isMonerooInitializePayoutData,
   isMonerooPaymentData,
+  isMonerooPayoutData,
   isRecord,
   type MonerooApiErrorPayload,
   type MonerooInitializePaymentInput,
   type MonerooInitializePaymentResponse,
+  type MonerooInitializePayoutInput,
+  type MonerooInitializePayoutResponse,
   type MonerooPaymentData,
   type MonerooRequestOptions,
   type MonerooRetrievePaymentResponse,
+  type MonerooRetrievePayoutResponse,
   type MonerooVerifyPaymentResponse,
 } from "./moneroo-types";
 
@@ -49,6 +54,22 @@ type SafeMonerooInitializePayload = Readonly<{
   description: string;
   return_url: string;
   customer: SafeMonerooCustomer;
+}>;
+
+type SafeMonerooPayoutRecipient = Readonly<
+  Record<string, string | number | boolean>
+>;
+
+type SafeMonerooInitializePayoutPayload = Readonly<{
+  amount: number;
+  currency: string;
+  description: string;
+  method: string;
+  customer: SafeMonerooCustomer;
+  recipient: SafeMonerooPayoutRecipient;
+  metadata?: Readonly<
+    Record<string, string | number | boolean | null>
+  >;
 }>;
 
 function normalizeRequiredText(
@@ -195,6 +216,374 @@ function validatePaymentId(
   return encodeURIComponent(
     normalizedPaymentId,
   );
+}
+
+function validatePayoutId(
+  payoutId: string,
+): string {
+  const normalizedPayoutId =
+    payoutId.trim();
+
+  if (!normalizedPayoutId) {
+    throw new MonerooValidationError(
+      "L’identifiant du transfert Moneroo est obligatoire.",
+    );
+  }
+
+  if (
+    normalizedPayoutId.length >
+    255
+  ) {
+    throw new MonerooValidationError(
+      "L’identifiant du transfert Moneroo est trop long.",
+    );
+  }
+
+  return encodeURIComponent(
+    normalizedPayoutId,
+  );
+}
+
+function normalizePayoutMethod(
+  value: string | null | undefined,
+): string {
+  const normalizedMethod =
+    normalizeRequiredText(
+      value,
+      "La méthode de transfert Moneroo est obligatoire.",
+    ).toLowerCase();
+
+  if (
+    normalizedMethod.length >
+      120 ||
+    !/^[a-z0-9][a-z0-9_-]*$/.test(
+      normalizedMethod,
+    )
+  ) {
+    throw new MonerooValidationError(
+      "La méthode de transfert Moneroo n’est pas valide.",
+    );
+  }
+
+  return normalizedMethod;
+}
+
+function createSafePayoutRecipient(
+  value: unknown,
+): SafeMonerooPayoutRecipient {
+  if (!isRecord(value)) {
+    throw new MonerooValidationError(
+      "Les informations du bénéficiaire du remboursement sont obligatoires.",
+    );
+  }
+
+  const entries =
+    Object.entries(value)
+      .filter(
+        (
+          entry,
+        ): entry is [
+          string,
+          string | number | boolean
+        ] => {
+          const [
+            key,
+            entryValue,
+          ] = entry;
+
+          if (!key.trim()) {
+            return false;
+          }
+
+          if (
+            typeof entryValue ===
+              "string"
+          ) {
+            return Boolean(
+              entryValue.trim(),
+            );
+          }
+
+          return (
+            typeof entryValue ===
+              "number" &&
+              Number.isFinite(
+                entryValue,
+              )
+          ) ||
+            typeof entryValue ===
+              "boolean";
+        },
+      )
+      .map(
+        ([
+          key,
+          entryValue,
+        ]) => [
+          key.trim(),
+          typeof entryValue ===
+            "string"
+            ? entryValue.trim()
+            : entryValue,
+        ] as const,
+      );
+
+  if (
+    entries.length ===
+    0
+  ) {
+    throw new MonerooValidationError(
+      "Les informations du bénéficiaire du remboursement sont incomplètes.",
+    );
+  }
+
+  return Object.freeze(
+    Object.fromEntries(
+      entries,
+    ),
+  );
+}
+
+function createSafePayoutMetadata(
+  value: unknown,
+): Readonly<
+  Record<
+    string,
+    string | number | boolean | null
+  >
+> | undefined {
+  if (
+    value === undefined ||
+    value === null
+  ) {
+    return undefined;
+  }
+
+  if (!isRecord(value)) {
+    throw new MonerooValidationError(
+      "Les métadonnées du transfert Moneroo ne sont pas valides.",
+    );
+  }
+
+  const entries =
+    Object.entries(value)
+      .filter(
+        (
+          entry,
+        ): entry is [
+          string,
+          string | number | boolean | null
+        ] => {
+          const [
+            key,
+            entryValue,
+          ] = entry;
+
+          if (!key.trim()) {
+            return false;
+          }
+
+          return (
+            entryValue ===
+              null ||
+            typeof entryValue ===
+              "string" ||
+            (
+              typeof entryValue ===
+                "number" &&
+              Number.isFinite(
+                entryValue,
+              )
+            ) ||
+            typeof entryValue ===
+              "boolean"
+          );
+        },
+      )
+      .map(
+        ([
+          key,
+          entryValue,
+        ]) => [
+          key.trim(),
+          typeof entryValue ===
+            "string"
+            ? entryValue.trim()
+            : entryValue,
+        ] as const,
+      );
+
+  return entries.length > 0
+    ? Object.freeze(
+        Object.fromEntries(
+          entries,
+        ),
+      )
+    : undefined;
+}
+
+function validateInitializePayoutInput(
+  input: MonerooInitializePayoutInput,
+): void {
+  if (
+    !Number.isFinite(
+      input.amount,
+    ) ||
+    input.amount <= 0
+  ) {
+    throw new MonerooValidationError(
+      "Le montant du remboursement Moneroo doit être supérieur à zéro.",
+    );
+  }
+
+  if (
+    !Number.isSafeInteger(
+      input.amount,
+    )
+  ) {
+    throw new MonerooValidationError(
+      "Le montant envoyé à Moneroo doit être un entier positif.",
+    );
+  }
+
+  normalizeCurrency(
+    input.currency,
+  );
+
+  const description =
+    normalizeRequiredText(
+      input.description,
+      "La description du remboursement Moneroo est obligatoire.",
+    );
+
+  if (
+    description.length >
+    1_000
+  ) {
+    throw new MonerooValidationError(
+      "La description du remboursement Moneroo est trop longue.",
+    );
+  }
+
+  normalizePayoutMethod(
+    input.method,
+  );
+
+  if (
+    !input.customer ||
+    typeof input.customer !==
+      "object"
+  ) {
+    throw new MonerooValidationError(
+      "Les informations essentielles du bénéficiaire sont obligatoires.",
+    );
+  }
+
+  normalizeEmail(
+    input.customer.email,
+  );
+
+  const firstName =
+    normalizeRequiredText(
+      input.customer.first_name,
+      "Le prénom du bénéficiaire est obligatoire.",
+    );
+
+  if (
+    firstName.length >
+    120
+  ) {
+    throw new MonerooValidationError(
+      "Le prénom du bénéficiaire est trop long.",
+    );
+  }
+
+  const lastName =
+    normalizeRequiredText(
+      input.customer.last_name,
+      "Le nom du bénéficiaire est obligatoire.",
+    );
+
+  if (
+    lastName.length >
+    120
+  ) {
+    throw new MonerooValidationError(
+      "Le nom du bénéficiaire est trop long.",
+    );
+  }
+
+  createSafePayoutRecipient(
+    input.recipient,
+  );
+
+  createSafePayoutMetadata(
+    input.metadata,
+  );
+}
+
+function createSafeInitializePayoutPayload(
+  input: MonerooInitializePayoutInput,
+): SafeMonerooInitializePayoutPayload {
+  validateInitializePayoutInput(
+    input,
+  );
+
+  const metadata =
+    createSafePayoutMetadata(
+      input.metadata,
+    );
+
+  return Object.freeze({
+    amount:
+      input.amount,
+
+    currency:
+      normalizeCurrency(
+        input.currency,
+      ),
+
+    description:
+      normalizeRequiredText(
+        input.description,
+        "La description du remboursement Moneroo est obligatoire.",
+      ),
+
+    method:
+      normalizePayoutMethod(
+        input.method,
+      ),
+
+    customer: {
+      email:
+        normalizeEmail(
+          input.customer.email,
+        ),
+
+      first_name:
+        normalizeRequiredText(
+          input.customer.first_name,
+          "Le prénom du bénéficiaire est obligatoire.",
+        ),
+
+      last_name:
+        normalizeRequiredText(
+          input.customer.last_name,
+          "Le nom du bénéficiaire est obligatoire.",
+        ),
+    },
+
+    recipient:
+      createSafePayoutRecipient(
+        input.recipient,
+      ),
+
+    ...(metadata
+      ? {
+          metadata,
+        }
+      : {}),
+  });
 }
 
 function validateInitializePaymentInput(
@@ -599,15 +988,26 @@ async function requestMoneroo<T>(
         response.status ===
         404
       ) {
-        const paymentId =
+        const resourceId =
           endpoint
             .split("/")
             .filter(Boolean)
             .at(-1) ??
           "inconnu";
 
+        if (
+          endpoint.startsWith(
+            "/v1/payouts/",
+          )
+        ) {
+          throw new MonerooResponseError(
+            `Le transfert Moneroo « ${resourceId} » est introuvable.`,
+            details,
+          );
+        }
+
         throw new MonerooPaymentNotFoundError(
-          paymentId,
+          resourceId,
           details,
         );
       }
@@ -772,6 +1172,33 @@ function isVerifyPaymentApiResponse(
   );
 }
 
+function isInitializePayoutApiResponse(
+  value: unknown,
+): value is MonerooInitializePayoutResponse {
+  return isMonerooApiResponse(
+    value,
+    isMonerooInitializePayoutData,
+  );
+}
+
+function isRetrievePayoutApiResponse(
+  value: unknown,
+): value is MonerooRetrievePayoutResponse {
+  return isMonerooApiResponse(
+    value,
+    isMonerooPayoutData,
+  );
+}
+
+function isVerifyPayoutApiResponse(
+  value: unknown,
+): value is MonerooRetrievePayoutResponse {
+  return isMonerooApiResponse(
+    value,
+    isMonerooPayoutData,
+  );
+}
+
 export async function initializeMonerooPayment(
   input: MonerooInitializePaymentInput,
   options: MonerooRequestOptions = {},
@@ -912,6 +1339,114 @@ export async function verifyMonerooPayment(
     },
 
     isVerifyPaymentApiResponse,
+  );
+}
+
+/**
+ * Initialise un transfert Moneroo.
+ *
+ * Cette fonction est volontairement séparée du flux Payment existant.
+ * Elle peut être utilisée par le moteur de remboursement Tikemia.
+ *
+ * Endpoint officiel Moneroo :
+ * POST /v1/payouts/initialize
+ */
+export async function initializeMonerooPayout(
+  input: MonerooInitializePayoutInput,
+  options: MonerooRequestOptions = {},
+): Promise<MonerooInitializePayoutResponse> {
+  const safePayload =
+    createSafeInitializePayoutPayload(
+      input,
+    );
+
+  return requestMoneroo<MonerooInitializePayoutResponse>(
+    {
+      method:
+        "POST",
+
+      endpoint:
+        "/v1/payouts/initialize",
+
+      body:
+        safePayload,
+
+      signal:
+        options.signal,
+
+      idempotencyKey:
+        options.idempotencyKey,
+    },
+
+    isInitializePayoutApiResponse,
+  );
+}
+
+/**
+ * Récupère l'état courant d'un transfert Moneroo.
+ *
+ * Endpoint officiel Moneroo :
+ * GET /v1/payouts/{payoutId}
+ */
+export async function retrieveMonerooPayout(
+  payoutId: string,
+  options: Pick<
+    MonerooRequestOptions,
+    "signal"
+  > = {},
+): Promise<MonerooRetrievePayoutResponse> {
+  const encodedPayoutId =
+    validatePayoutId(
+      payoutId,
+    );
+
+  return requestMoneroo<MonerooRetrievePayoutResponse>(
+    {
+      method:
+        "GET",
+
+      endpoint:
+        `/v1/payouts/${encodedPayoutId}`,
+
+      signal:
+        options.signal,
+    },
+
+    isRetrievePayoutApiResponse,
+  );
+}
+
+/**
+ * Vérifie côté serveur un transfert Moneroo.
+ *
+ * Endpoint officiel Moneroo :
+ * GET /v1/payouts/{payoutId}/verify
+ */
+export async function verifyMonerooPayout(
+  payoutId: string,
+  options: Pick<
+    MonerooRequestOptions,
+    "signal"
+  > = {},
+): Promise<MonerooRetrievePayoutResponse> {
+  const encodedPayoutId =
+    validatePayoutId(
+      payoutId,
+    );
+
+  return requestMoneroo<MonerooRetrievePayoutResponse>(
+    {
+      method:
+        "GET",
+
+      endpoint:
+        `/v1/payouts/${encodedPayoutId}/verify`,
+
+      signal:
+        options.signal,
+    },
+
+    isVerifyPayoutApiResponse,
   );
 }
 

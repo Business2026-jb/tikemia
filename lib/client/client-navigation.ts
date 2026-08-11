@@ -4,6 +4,7 @@ import {
   Heart,
   Home,
   Info,
+  RotateCcw,
   Search,
   Settings,
   ShoppingBag,
@@ -21,7 +22,8 @@ export type ClientNavigationIcon =
   | typeof UserRound
   | typeof CircleHelp
   | typeof Info
-  | typeof Settings;
+  | typeof Settings
+  | typeof RotateCcw;
 
 export type ClientNavigationItem = {
   id: string;
@@ -120,6 +122,15 @@ export const CLIENT_ACCOUNT_NAVIGATION: ClientNavigationItem[] = [
     href: "/account/orders",
     icon: ShoppingBag,
     description: "Historique de mes achats",
+    requiresAuthentication: true,
+    mobile: true,
+  },
+  {
+    id: "refunds",
+    label: "Remboursements",
+    href: "/account/refunds",
+    icon: RotateCcw,
+    description: "Demander et suivre mes remboursements",
     requiresAuthentication: true,
     mobile: true,
   },

@@ -12,6 +12,7 @@ import {
   Languages,
   LogIn,
   LogOut,
+  RotateCcw,
   Search,
   Settings,
   ShoppingBag,
@@ -46,7 +47,8 @@ export type ClientMobileDrawerNavigationItem = {
     | typeof UserRound
     | typeof CircleHelp
     | typeof Info
-    | typeof Settings;
+    | typeof Settings
+    | typeof RotateCcw;
 
   requiresAuthentication?: boolean;
 };
@@ -110,6 +112,13 @@ const CUSTOMER_NAVIGATION: ClientMobileDrawerNavigationItem[] = [
     description: "Historique de mes achats",
     href: "/account/orders",
     icon: ShoppingBag,
+    requiresAuthentication: true,
+  },
+  {
+    label: "Remboursements",
+    description: "Demander et suivre mes remboursements",
+    href: "/account/refunds",
+    icon: RotateCcw,
     requiresAuthentication: true,
   },
   {

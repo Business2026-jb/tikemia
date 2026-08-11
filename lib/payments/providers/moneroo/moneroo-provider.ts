@@ -4,8 +4,11 @@ import type { PaymentStatus } from "@prisma/client";
 
 import {
   initializeMonerooPayment,
+  initializeMonerooPayout,
   retrieveMonerooPayment,
+  retrieveMonerooPayout,
   verifyMonerooPayment,
+  verifyMonerooPayout,
 } from "./moneroo-client";
 import { MonerooResponseError } from "./moneroo-errors";
 import { mapMonerooStatusToPaymentStatus } from "./moneroo-status";
@@ -13,10 +16,15 @@ import {
   getMonerooCheckoutUrl,
   type MonerooInitializePaymentInput,
   type MonerooInitializePaymentResponse,
+  type MonerooInitializePayoutInput,
+  type MonerooInitializePayoutResponse,
   type MonerooMetadata,
   type MonerooPaymentData,
+  type MonerooPayoutData,
+  type MonerooPayoutRecipient,
   type MonerooRequestOptions,
   type MonerooRetrievePaymentResponse,
+  type MonerooRetrievePayoutResponse,
   type MonerooVerifyPaymentResponse,
 } from "./moneroo-types";
 
@@ -83,6 +91,50 @@ export type MonerooPaymentResult =
     raw:
       | MonerooRetrievePaymentResponse
       | MonerooVerifyPaymentResponse;
+  }>;
+
+export type MonerooProviderPayoutStatus =
+  | "PENDING"
+  | "PROCESSING"
+  | "SUCCESS"
+  | "FAILED"
+  | "CANCELLED";
+
+export type CreateMonerooPayoutInput =
+  Readonly<{
+    amount: number;
+    currency: string;
+    description: string;
+    method: string;
+
+    customer: Readonly<{
+      email: string;
+      firstName: string;
+      lastName: string;
+    }>;
+
+    recipient: MonerooPayoutRecipient;
+
+    metadata?: MonerooMetadata;
+  }>;
+
+export type MonerooPayoutResult =
+  Readonly<{
+    provider: MonerooProviderName;
+    providerTransactionId: string;
+    providerReference: string | null;
+    amount: number | null;
+    currency: string | null;
+    status: MonerooProviderPayoutStatus;
+    rawStatus: string;
+    isProcessed: boolean;
+    processedAt: string | null;
+    method: string | null;
+    metadata: Record<string, unknown> | null;
+
+    raw:
+      | MonerooInitializePayoutResponse
+      | MonerooRetrievePayoutResponse;
   }>;
 
 function normalizeOptionalText(
@@ -431,6 +483,168 @@ function extractProcessedAt(
   );
 }
 
+function normalizeOptionalResponseAmount(
+  value: unknown,
+): number | null {
+  if (
+    value === undefined ||
+    value === null
+  ) {
+    return null;
+  }
+
+  return normalizeResponseAmount(
+    value,
+  );
+}
+
+function normalizeOptionalResponseCurrency(
+  value: unknown,
+): string | null {
+  if (
+    value === undefined ||
+    value === null
+  ) {
+    return null;
+  }
+
+  return normalizeResponseCurrency(
+    value,
+  );
+}
+
+function extractPayoutProcessedState(
+  data: MonerooPayoutData,
+): boolean {
+  return (
+    data.is_processed === true ||
+    data.isProcessed === true
+  );
+}
+
+function extractPayoutProcessedAt(
+  data: MonerooPayoutData,
+): string | null {
+  return (
+    normalizeOptionalText(
+      data.processed_at,
+    ) ??
+    normalizeOptionalText(
+      data.processedAt,
+    ) ??
+    null
+  );
+}
+
+function mapMonerooPayoutStatus(
+  value: string | null | undefined,
+): MonerooProviderPayoutStatus {
+  const normalized =
+    value
+      ?.trim()
+      .toLowerCase() ??
+    "";
+
+  switch (normalized) {
+    case "successful":
+    case "success":
+    case "completed":
+    case "paid":
+      return "SUCCESS";
+
+    case "failed":
+    case "error":
+      return "FAILED";
+
+    case "cancelled":
+    case "canceled":
+    case "expired":
+      return "CANCELLED";
+
+    case "processing":
+      return "PROCESSING";
+
+    case "initiated":
+    case "pending":
+    default:
+      return "PENDING";
+  }
+}
+
+function mapPayoutResult(
+  response:
+    | MonerooInitializePayoutResponse
+    | MonerooRetrievePayoutResponse,
+): MonerooPayoutResult {
+  const data =
+    response.data;
+
+  const providerTransactionId =
+    requireResponseText(
+      data.id,
+      "data.id",
+    );
+
+  const rawStatus =
+    normalizeOptionalText(
+      data.status,
+    ) ??
+    "initiated";
+
+  return Object.freeze({
+    provider:
+      MONEROO_PROVIDER_NAME,
+
+    providerTransactionId,
+
+    providerReference:
+      normalizeOptionalText(
+        data.reference,
+      ) ??
+      null,
+
+    amount:
+      normalizeOptionalResponseAmount(
+        data.amount,
+      ),
+
+    currency:
+      normalizeOptionalResponseCurrency(
+        data.currency,
+      ),
+
+    status:
+      mapMonerooPayoutStatus(
+        rawStatus,
+      ),
+
+    rawStatus,
+
+    isProcessed:
+      extractPayoutProcessedState(
+        data,
+      ),
+
+    processedAt:
+      extractPayoutProcessedAt(
+        data,
+      ),
+
+    method:
+      normalizeOptionalText(
+        data.method,
+      ) ??
+      null,
+
+    metadata:
+      data.metadata ??
+      null,
+
+    raw:
+      response,
+  });
+}
+
 function mapPaymentResult(
   response:
     | MonerooRetrievePaymentResponse
@@ -713,6 +927,181 @@ export async function verifyMonerooProviderPayment(
   );
 }
 
+function toInitializePayoutInput(
+  input: CreateMonerooPayoutInput,
+): MonerooInitializePayoutInput {
+  const firstName =
+    requireInputText(
+      input.customer.firstName,
+      "customer.firstName",
+    );
+
+  const lastName =
+    requireInputText(
+      input.customer.lastName,
+      "customer.lastName",
+    );
+
+  const description =
+    requireInputText(
+      input.description,
+      "description",
+    );
+
+  const method =
+    requireInputText(
+      input.method,
+      "method",
+    )
+      .toLowerCase();
+
+  if (
+    method.length > 120 ||
+    !/^[a-z0-9][a-z0-9_-]*$/.test(
+      method,
+    )
+  ) {
+    throw new MonerooResponseError(
+      "La méthode de transfert Moneroo n’est pas valide.",
+    );
+  }
+
+  if (
+    !input.recipient ||
+    typeof input.recipient !==
+      "object" ||
+    Array.isArray(
+      input.recipient,
+    )
+  ) {
+    throw new MonerooResponseError(
+      "Les informations du bénéficiaire du transfert sont obligatoires.",
+    );
+  }
+
+  return {
+    amount:
+      normalizeInputAmount(
+        input.amount,
+      ),
+
+    currency:
+      normalizeInputCurrency(
+        input.currency,
+      ),
+
+    description,
+
+    method,
+
+    customer: {
+      email:
+        normalizeEmail(
+          input.customer.email,
+        ),
+
+      first_name:
+        firstName,
+
+      last_name:
+        lastName,
+    },
+
+    recipient:
+      input.recipient,
+
+    ...(input.metadata
+      ? {
+          metadata:
+            input.metadata,
+        }
+      : {}),
+  };
+}
+
+export async function createMonerooPayout(
+  input: CreateMonerooPayoutInput,
+  options: MonerooRequestOptions = {},
+): Promise<MonerooPayoutResult> {
+  const initializeInput =
+    toInitializePayoutInput(
+      input,
+    );
+
+  const response =
+    await initializeMonerooPayout(
+      initializeInput,
+      options,
+    );
+
+  return mapPayoutResult(
+    response,
+  );
+}
+
+export async function getMonerooPayout(
+  payoutId: string,
+  options: Pick<
+    MonerooRequestOptions,
+    "signal"
+  > = {},
+): Promise<MonerooPayoutResult> {
+  const normalizedPayoutId =
+    requireInputText(
+      payoutId,
+      "payoutId",
+    );
+
+  const response =
+    await retrieveMonerooPayout(
+      normalizedPayoutId,
+      options,
+    );
+
+  return mapPayoutResult(
+    response,
+  );
+}
+
+export async function verifyMonerooProviderPayout(
+  payoutId: string,
+  options: Pick<
+    MonerooRequestOptions,
+    "signal"
+  > = {},
+): Promise<MonerooPayoutResult> {
+  const normalizedPayoutId =
+    requireInputText(
+      payoutId,
+      "payoutId",
+    );
+
+  const response =
+    await verifyMonerooPayout(
+      normalizedPayoutId,
+      options,
+    );
+
+  return mapPayoutResult(
+    response,
+  );
+}
+
+/**
+ * Alias explicites destinés au moteur de remboursement Tikemia.
+ *
+ * Un remboursement Moneroo est techniquement exécuté comme un Payout.
+ * Ces alias évitent de mélanger ce flux avec le paiement initial.
+ */
+export const createMonerooRefundPayout =
+  createMonerooPayout;
+
+export const getMonerooRefundPayout =
+  getMonerooPayout;
+
+export const verifyMonerooRefundPayout =
+  verifyMonerooProviderPayout;
+
 export const monerooProvider =
   Object.freeze({
     name:
@@ -726,4 +1115,22 @@ export const monerooProvider =
 
     verifyPayment:
       verifyMonerooProviderPayment,
+
+    createPayout:
+      createMonerooPayout,
+
+    getPayout:
+      getMonerooPayout,
+
+    verifyPayout:
+      verifyMonerooProviderPayout,
+
+    createRefundPayout:
+      createMonerooRefundPayout,
+
+    getRefundPayout:
+      getMonerooRefundPayout,
+
+    verifyRefundPayout:
+      verifyMonerooRefundPayout,
   });

@@ -14,6 +14,7 @@ import {
   LogIn,
   LogOut,
   Menu,
+  RotateCcw,
   Search,
   ShoppingBag,
   Ticket,
@@ -58,7 +59,18 @@ export type ClientHeaderProps = {
 type NavigationItem = {
   label: string;
   href: string;
-  icon: typeof Home;
+  icon:
+    | typeof Home
+    | typeof Search
+    | typeof CalendarDays
+    | typeof Ticket
+    | typeof Info
+    | typeof CircleHelp
+    | typeof UserRound
+    | typeof ShoppingBag
+    | typeof Heart
+    | typeof RotateCcw
+    | typeof LogOut;
 };
 
 const DESKTOP_NAVIGATION: NavigationItem[] = [
@@ -104,6 +116,11 @@ const AUTHENTICATED_MOBILE_NAVIGATION: NavigationItem[] = [
     label: "Mes commandes",
     href: "/account/orders",
     icon: ShoppingBag,
+  },
+  {
+    label: "Remboursements",
+    href: "/account/refunds",
+    icon: RotateCcw,
   },
   {
     label: "Mes billets",
@@ -916,6 +933,12 @@ function AccountDropdown({
             />
 
             <AccountLink
+              href="/account/refunds"
+              icon={RotateCcw}
+              label="Remboursements"
+            />
+
+            <AccountLink
               href="/account/tickets"
               icon={Ticket}
               label="Mes billets"
@@ -983,7 +1006,12 @@ function AccountLink({
   label,
 }: {
   href: string;
-  icon: typeof Ticket;
+  icon:
+    | typeof Ticket
+    | typeof ShoppingBag
+    | typeof Heart
+    | typeof UserRound
+    | typeof RotateCcw;
   label: string;
 }) {
   return (

@@ -18,6 +18,7 @@ import {
   LogOut,
   Megaphone,
   Plus,
+  RotateCcw,
   Settings,
   ShoppingBag,
   Sparkles,
@@ -78,6 +79,11 @@ const NAVIGATION: NavigationItem[] = [
     name: "Paiements",
     href: "/organizer/payments",
     icon: CircleDollarSign,
+  },
+  {
+    name: "Remboursements",
+    href: "/organizer/refunds",
+    icon: RotateCcw,
   },
   {
     name: "Retraits",

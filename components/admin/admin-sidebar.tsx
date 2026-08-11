@@ -22,6 +22,7 @@ import {
   Megaphone,
   MessageSquareWarning,
   ReceiptText,
+  RotateCcw,
   Settings,
   ShieldCheck,
   Sparkles,
@@ -101,6 +102,11 @@ const NAVIGATION_SECTIONS: NavigationSection[] = [
         name: "Paiements",
         href: "/admin/payments",
         icon: CircleDollarSign,
+      },
+      {
+        name: "Remboursements",
+        href: "/admin/refunds",
+        icon: RotateCcw,
       },
       {
         name: "Retraits",

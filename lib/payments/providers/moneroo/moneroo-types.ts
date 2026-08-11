@@ -636,3 +636,223 @@ export function isMonerooPaymentData(
 
   return true;
 }
+
+/* -------------------------------------------------------------------------- */
+/* Payouts / remboursements                                                   */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * Moneroo utilise l'API Payout pour envoyer de l'argent à un client.
+ *
+ * Cette structure est ajoutée séparément des types Payment afin de ne pas
+ * modifier ni casser le flux de paiement déjà utilisé par Tikemia.
+ */
+export type MonerooPayoutStatus =
+  | "initiated"
+  | "pending"
+  | "processing"
+  | "successful"
+  | "success"
+  | "completed"
+  | "paid"
+  | "failed"
+  | "cancelled"
+  | "canceled"
+  | "expired"
+  | string;
+
+export type MonerooPayoutRecipient = {
+  /**
+   * Numéro du bénéficiaire, au format attendu par le moyen de transfert
+   * sélectionné (ex. Mobile Money).
+   */
+  msisdn?: string;
+
+  /**
+   * Certains moyens de transfert futurs peuvent demander d'autres champs.
+   * On garde cette ouverture sans affaiblir les champs obligatoires de Tikemia.
+   */
+  [key: string]: unknown;
+};
+
+export type MonerooPayoutCustomerInput = {
+  email: string;
+  first_name: string;
+  last_name: string;
+};
+
+export type MonerooInitializePayoutInput = {
+  /**
+   * Montant entier envoyé à Moneroo.
+   */
+  amount: number;
+
+  /**
+   * Devise ISO 4217, par exemple XOF.
+   */
+  currency: string;
+
+  description: string;
+
+  /**
+   * Code de la méthode de payout Moneroo, par exemple mtn_bj.
+   */
+  method: string;
+
+  customer: MonerooPayoutCustomerInput;
+
+  /**
+   * Données nécessaires au bénéficiaire.
+   * Pour Mobile Money, Moneroo utilise notamment recipient.msisdn.
+   */
+  recipient: MonerooPayoutRecipient;
+
+  /**
+   * Métadonnées internes Tikemia.
+   *
+   * Ne jamais y mettre de secret, de clé API ou de donnée sensible inutile.
+   */
+  metadata?: MonerooMetadata;
+};
+
+export type MonerooPayoutData = {
+  id: string;
+
+  status?: MonerooPayoutStatus | null;
+
+  reference?: string | null;
+
+  amount?: MonerooAmountValue | null;
+
+  currency?: MonerooCurrencyValue | null;
+
+  description?: string | null;
+
+  method?: string | null;
+
+  gateway?: string | null;
+  provider?: string | null;
+
+  customer?:
+    | MonerooPaymentCustomer
+    | null;
+
+  recipient?:
+    | Record<string, unknown>
+    | null;
+
+  metadata?:
+    | Record<string, unknown>
+    | null;
+
+  is_processed?: boolean;
+  isProcessed?: boolean;
+
+  processed_at?: string | null;
+  processedAt?: string | null;
+
+  created_at?: string | null;
+  createdAt?: string | null;
+
+  updated_at?: string | null;
+  updatedAt?: string | null;
+
+  [key: string]: unknown;
+};
+
+export type MonerooInitializePayoutResponse =
+  MonerooApiResponse<
+    MonerooPayoutData
+  >;
+
+export type MonerooRetrievePayoutResponse =
+  MonerooApiResponse<
+    MonerooPayoutData
+  >;
+
+/**
+ * Vérifie les données minimales retournées lors de l'initialisation d'un payout.
+ *
+ * Moneroo documente au minimum data.id pour une initialisation réussie.
+ * Les autres propriétés restent facultatives afin de préserver la compatibilité
+ * avec les réponses réelles du prestataire.
+ */
+export function isMonerooInitializePayoutData(
+  value: unknown,
+): value is MonerooPayoutData {
+  if (!isRecord(value)) {
+    return false;
+  }
+
+  if (
+    !isNonEmptyString(
+      value.id,
+    )
+  ) {
+    return false;
+  }
+
+  if (
+    value.status !==
+      undefined &&
+    value.status !==
+      null &&
+    !isNonEmptyString(
+      value.status,
+    )
+  ) {
+    return false;
+  }
+
+  if (
+    value.amount !==
+      undefined &&
+    value.amount !==
+      null &&
+    !isValidAmountValue(
+      value.amount,
+    )
+  ) {
+    return false;
+  }
+
+  if (
+    value.currency !==
+      undefined &&
+    value.currency !==
+      null &&
+    !isValidCurrencyValue(
+      value.currency,
+    )
+  ) {
+    return false;
+  }
+
+  return true;
+}
+
+/**
+ * Vérifie les données d'un payout récupéré depuis Moneroo.
+ *
+ * L'identifiant est obligatoire. Le statut, le montant et la devise sont
+ * validés lorsqu'ils sont présents.
+ */
+export function isMonerooPayoutData(
+  value: unknown,
+): value is MonerooPayoutData {
+  return isMonerooInitializePayoutData(
+    value,
+  );
+}
+
+/**
+ * Alias explicite utilisé par le moteur de remboursement Tikemia.
+ *
+ * Un remboursement exécuté via l'API Payout reste techniquement un payout
+ * Moneroo. Cet alias évite de confondre ce flux avec l'état du Payment initial.
+ */
+export type MonerooRefundPayoutInput =
+  MonerooInitializePayoutInput;
+
+export type MonerooRefundPayoutResponse =
+  MonerooInitializePayoutResponse;
