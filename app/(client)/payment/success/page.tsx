@@ -590,6 +590,22 @@ function PaymentSuccessContent() {
       ],
     );
 
+  const returnToken =
+    useMemo(
+      () =>
+        normalizeText(
+          searchParams.get(
+            "returnToken",
+          ) ||
+            searchParams.get(
+              "return_token",
+            ),
+        ),
+      [
+        searchParams,
+      ],
+    );
+
   const [
     verificationState,
     setVerificationState,
@@ -709,6 +725,12 @@ function PaymentSuccessContent() {
                           checkoutToken,
                         }
                       : {}),
+
+                    ...(returnToken
+                      ? {
+                          returnToken,
+                        }
+                      : {}),
                   }),
               },
             );
@@ -768,7 +790,8 @@ function PaymentSuccessContent() {
                 result,
                 response.status ===
                     401 &&
-                  !checkoutToken
+                  !checkoutToken &&
+                  !returnToken
                   ? "Le contexte sécurisé de la commande est introuvable. Ne recommencez pas le paiement : contactez le support Tikemia avec votre référence."
                   : "Le paiement n’a pas pu être vérifié.",
               ),
@@ -882,6 +905,36 @@ function PaymentSuccessContent() {
               orderId:
                 responseOrderId,
             });
+
+            /*
+             * Le returnToken a rempli son rôle après vérification.
+             * On le retire de la barre d'adresse pour éviter qu'il
+             * reste inutilement visible dans l'historique du navigateur.
+             */
+            if (
+              returnToken &&
+              typeof window !==
+                "undefined"
+            ) {
+              const cleanUrl =
+                new URL(
+                  window.location.href,
+                );
+
+              cleanUrl.searchParams.delete(
+                "returnToken",
+              );
+
+              cleanUrl.searchParams.delete(
+                "return_token",
+              );
+
+              window.history.replaceState(
+                window.history.state,
+                "",
+                `${cleanUrl.pathname}${cleanUrl.search}${cleanUrl.hash}`,
+              );
+            }
           }
         } catch (
           error
@@ -907,6 +960,7 @@ function PaymentSuccessContent() {
       [
         orderId,
         paymentId,
+        returnToken,
       ],
     );
 

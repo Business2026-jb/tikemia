@@ -243,6 +243,7 @@ function secureHashEquals(
   );
 }
 
+
 function getSessionCookieNames(): string[] {
   return Array.from(
     new Set(
@@ -533,12 +534,16 @@ function buildReturnUrl({
   paymentId: string;
   orderId: string;
 }): string {
-  const url = new URL(baseUrl);
+  const url =
+    new URL(
+      baseUrl,
+    );
 
   url.searchParams.set(
     "paymentId",
     paymentId,
   );
+
   url.searchParams.set(
     "orderId",
     orderId,
@@ -1489,17 +1494,32 @@ export async function POST(request: Request) {
     paymentId = prepared.paymentId;
     attemptId = prepared.attemptId;
 
-    const returnUrl = buildReturnUrl({
-      baseUrl: config.successUrl,
-      paymentId,
-      orderId: order.id,
-    });
+    /*
+     * IMPORTANT :
+     *
+     * L'URL envoyée au prestataire reste volontairement courte et stable.
+     * Aucun checkoutToken ni returnToken n'est exposé dans l'URL Moneroo.
+     *
+     * La preuve réelle du paiement reste exclusivement côté serveur
+     * (webhook + vérification du paiement chez le prestataire).
+     */
+    const returnUrl =
+      buildReturnUrl({
+        baseUrl:
+          config.successUrl,
+        paymentId,
+        orderId:
+          order.id,
+      });
 
-    const cancelUrl = buildReturnUrl({
-      baseUrl: config.cancelUrl,
-      paymentId,
-      orderId: order.id,
-    });
+    const cancelUrl =
+      buildReturnUrl({
+        baseUrl:
+          config.cancelUrl,
+        paymentId,
+        orderId:
+          order.id,
+      });
 
     const customerNameParts =
       order.customerName

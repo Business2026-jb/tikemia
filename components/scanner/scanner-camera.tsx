@@ -11,6 +11,7 @@ import {
   Camera,
   CameraOff,
   Flashlight,
+  Loader2,
   RefreshCw,
 } from "lucide-react";
 
@@ -76,6 +77,20 @@ type Html5QrCodeInstance = {
 
 const CAMERA_FPS =
   24;
+
+/*
+ * La vidéo reste active en permanence.
+ * Ce délai bloque uniquement les répétitions immédiates du même QR.
+ */
+const SAME_QR_GUARD_MS =
+  1_500;
+
+/*
+ * Petit verrou local pour éviter deux callbacks quasi simultanés
+ * avant que le parent ne propage `processing=true`.
+ */
+const DETECTION_DISPATCH_GUARD_MS =
+  180;
 
 const MIN_QR_BOX_SIZE =
   220;
@@ -240,8 +255,14 @@ export default function ScannerCamera({
   const startingRef =
     useRef(false);
 
-  const detectedValueRef =
-    useRef("");
+  const lastDetectionRef =
+    useRef<{
+      value: string;
+      at: number;
+    } | null>(null);
+
+  const lastDispatchAtRef =
+    useRef(0);
 
   const processingRef =
     useRef(
@@ -331,8 +352,11 @@ export default function ScannerCamera({
         startingRef.current =
           false;
 
-        detectedValueRef.current =
-          "";
+        lastDetectionRef.current =
+          null;
+
+        lastDispatchAtRef.current =
+          0;
 
         if (!scanner) {
           if (
@@ -469,24 +493,51 @@ export default function ScannerCamera({
 
               if (
                 !normalizedValue ||
-                processingRef.current ||
-                detectedValueRef.current ===
-                  normalizedValue
+                processingRef.current
               ) {
                 return;
               }
 
-              detectedValueRef.current =
-                normalizedValue;
+              const now =
+                Date.now();
 
-              try {
-                scanner.pause(
-                  true,
-                );
-              } catch {
-                // La vérification serveur reste prioritaire.
+              if (
+                now -
+                  lastDispatchAtRef.current <
+                DETECTION_DISPATCH_GUARD_MS
+              ) {
+                return;
               }
 
+              const previousDetection =
+                lastDetectionRef.current;
+
+              if (
+                previousDetection &&
+                previousDetection.value ===
+                  normalizedValue &&
+                now -
+                  previousDetection.at <
+                  SAME_QR_GUARD_MS
+              ) {
+                return;
+              }
+
+              lastDispatchAtRef.current =
+                now;
+
+              lastDetectionRef.current = {
+                value:
+                  normalizedValue,
+                at:
+                  now,
+              };
+
+              /*
+               * Le flux vidéo ne s'arrête jamais ici.
+               * La validation serveur se fait pendant que la caméra
+               * reste visible et opérationnelle.
+               */
               onDetectedRef.current(
                 normalizedValue,
               );
@@ -547,8 +598,11 @@ export default function ScannerCamera({
       mountedRef.current =
         true;
 
-      detectedValueRef.current =
-        "";
+      lastDetectionRef.current =
+        null;
+
+      lastDispatchAtRef.current =
+        0;
 
       if (active) {
         void startCamera();
@@ -567,46 +621,6 @@ export default function ScannerCamera({
       active,
       startCamera,
       stopCamera,
-    ],
-  );
-
-  useEffect(
-    () => {
-      const scanner =
-        scannerRef.current;
-
-      if (
-        !scanner ||
-        cameraStatus !==
-          "running"
-      ) {
-        return;
-      }
-
-      if (processing) {
-        try {
-          scanner.pause(
-            true,
-          );
-        } catch {
-          // Le scanner peut être en cours d’arrêt.
-        }
-
-        return;
-      }
-
-      detectedValueRef.current =
-        "";
-
-      try {
-        scanner.resume();
-      } catch {
-        // L’utilisateur peut redémarrer la caméra manuellement.
-      }
-    },
-    [
-      cameraStatus,
-      processing,
     ],
   );
 
@@ -680,6 +694,27 @@ export default function ScannerCamera({
           className="h-full w-full [&_video]:h-full [&_video]:w-full [&_video]:object-cover"
         />
 
+        {cameraStatus ===
+        "running" ? (
+          <>
+            <div className="pointer-events-none absolute left-3 top-3 z-20 inline-flex items-center gap-2 rounded-full border border-emerald-400/25 bg-black/65 px-3 py-1.5 text-[10px] font-black uppercase tracking-[0.14em] text-emerald-300 backdrop-blur-md">
+              <span className="relative flex h-2 w-2">
+                <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-50" />
+                <span className="relative inline-flex h-2 w-2 rounded-full bg-emerald-400" />
+              </span>
+
+              Scan continu
+            </div>
+
+            {processing ? (
+              <div className="pointer-events-none absolute right-3 top-3 z-20 inline-flex items-center gap-2 rounded-full border border-amber-400/25 bg-black/70 px-3 py-1.5 text-[10px] font-black uppercase tracking-[0.12em] text-amber-300 backdrop-blur-md">
+                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                Vérification
+              </div>
+            ) : null}
+          </>
+        ) : null}
+
         <ScannerFrame
           active={
             cameraStatus ===
@@ -751,8 +786,8 @@ export default function ScannerCamera({
             Caméra arrière
           </p>
 
-          <p className="mt-1 truncate text-[11px] text-neutral-600">
-            Placez entièrement le QR code dans le cadre
+          <p className="mt-1 text-[11px] leading-4 text-neutral-600">
+            La caméra reste active : présentez le billet suivant dès le résultat.
           </p>
         </div>
 

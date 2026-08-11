@@ -1,6 +1,7 @@
 import "server-only";
 
 import { getMonerooConfig } from "./config";
+
 import {
   MonerooApiError,
   MonerooAuthenticationError,
@@ -10,6 +11,7 @@ import {
   MonerooTimeoutError,
   MonerooValidationError,
 } from "./moneroo-errors";
+
 import {
   getMonerooCheckoutUrl,
   isMonerooApiResponse,
@@ -19,7 +21,6 @@ import {
   type MonerooApiErrorPayload,
   type MonerooInitializePaymentInput,
   type MonerooInitializePaymentResponse,
-  type MonerooMetadata,
   type MonerooPaymentData,
   type MonerooRequestOptions,
   type MonerooRetrievePaymentResponse,
@@ -48,7 +49,6 @@ type SafeMonerooInitializePayload = Readonly<{
   description: string;
   return_url: string;
   customer: SafeMonerooCustomer;
-  metadata?: MonerooMetadata;
 }>;
 
 function normalizeRequiredText(
@@ -74,7 +74,9 @@ function normalizeEmail(
 
   if (
     normalizedEmail.length > 320 ||
-    !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalizedEmail)
+    !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(
+      normalizedEmail,
+    )
   ) {
     throw new MonerooValidationError(
       "L’adresse e-mail du client n’est pas valide.",
@@ -87,12 +89,17 @@ function normalizeEmail(
 function normalizeCurrency(
   value: string | null | undefined,
 ): string {
-  const normalizedCurrency = normalizeRequiredText(
-    value,
-    "La devise du paiement Moneroo est obligatoire.",
-  ).toUpperCase();
+  const normalizedCurrency =
+    normalizeRequiredText(
+      value,
+      "La devise du paiement Moneroo est obligatoire.",
+    ).toUpperCase();
 
-  if (!/^[A-Z]{3}$/.test(normalizedCurrency)) {
+  if (
+    !/^[A-Z]{3}$/.test(
+      normalizedCurrency,
+    )
+  ) {
     throw new MonerooValidationError(
       "La devise Moneroo doit respecter le format ISO 4217 sur trois lettres.",
     );
@@ -104,15 +111,18 @@ function normalizeCurrency(
 function normalizeReturnUrl(
   value: string | null | undefined,
 ): string {
-  const normalizedUrl = normalizeRequiredText(
-    value,
-    "L’URL de retour Moneroo est obligatoire.",
-  );
+  const normalizedUrl =
+    normalizeRequiredText(
+      value,
+      "L’URL de retour Moneroo est obligatoire.",
+    );
 
   let parsedUrl: URL;
 
   try {
-    parsedUrl = new URL(normalizedUrl);
+    parsedUrl = new URL(
+      normalizedUrl,
+    );
   } catch {
     throw new MonerooValidationError(
       "L’URL de retour Moneroo n’est pas valide.",
@@ -129,7 +139,8 @@ function normalizeReturnUrl(
   }
 
   if (
-    process.env.NODE_ENV === "production" &&
+    process.env.NODE_ENV ===
+      "production" &&
     parsedUrl.protocol !== "https:"
   ) {
     throw new MonerooValidationError(
@@ -143,13 +154,16 @@ function normalizeReturnUrl(
 function normalizeIdempotencyKey(
   value: string | null | undefined,
 ): string | null {
-  const normalizedValue = value?.trim();
+  const normalizedValue =
+    value?.trim();
 
   if (!normalizedValue) {
     return null;
   }
 
-  if (normalizedValue.length > 255) {
+  if (
+    normalizedValue.length > 255
+  ) {
     throw new MonerooValidationError(
       "La clé d’idempotence Moneroo est trop longue.",
     );
@@ -161,7 +175,8 @@ function normalizeIdempotencyKey(
 function validatePaymentId(
   paymentId: string,
 ): string {
-  const normalizedPaymentId = paymentId.trim();
+  const normalizedPaymentId =
+    paymentId.trim();
 
   if (!normalizedPaymentId) {
     throw new MonerooValidationError(
@@ -169,20 +184,26 @@ function validatePaymentId(
     );
   }
 
-  if (normalizedPaymentId.length > 255) {
+  if (
+    normalizedPaymentId.length > 255
+  ) {
     throw new MonerooValidationError(
       "L’identifiant du paiement Moneroo est trop long.",
     );
   }
 
-  return encodeURIComponent(normalizedPaymentId);
+  return encodeURIComponent(
+    normalizedPaymentId,
+  );
 }
 
 function validateInitializePaymentInput(
   input: MonerooInitializePaymentInput,
 ): void {
   if (
-    !Number.isFinite(input.amount) ||
+    !Number.isFinite(
+      input.amount,
+    ) ||
     input.amount <= 0
   ) {
     throw new MonerooValidationError(
@@ -190,55 +211,76 @@ function validateInitializePaymentInput(
     );
   }
 
-  if (!Number.isSafeInteger(input.amount)) {
+  if (
+    !Number.isSafeInteger(
+      input.amount,
+    )
+  ) {
     throw new MonerooValidationError(
       "Le montant envoyé à Moneroo doit être un entier positif.",
     );
   }
 
-  normalizeCurrency(input.currency);
-
-  const description = normalizeRequiredText(
-    input.description,
-    "La description du paiement Moneroo est obligatoire.",
+  normalizeCurrency(
+    input.currency,
   );
 
-  if (description.length > 1_000) {
+  const description =
+    normalizeRequiredText(
+      input.description,
+      "La description du paiement Moneroo est obligatoire.",
+    );
+
+  if (
+    description.length >
+    1_000
+  ) {
     throw new MonerooValidationError(
       "La description du paiement Moneroo est trop longue.",
     );
   }
 
-  normalizeReturnUrl(input.return_url);
+  normalizeReturnUrl(
+    input.return_url,
+  );
 
   if (
     !input.customer ||
-    typeof input.customer !== "object"
+    typeof input.customer !==
+      "object"
   ) {
     throw new MonerooValidationError(
       "Les informations essentielles du client sont obligatoires.",
     );
   }
 
-  normalizeEmail(input.customer.email);
-
-  const firstName = normalizeRequiredText(
-    input.customer.first_name,
-    "Le prénom du client est obligatoire.",
+  normalizeEmail(
+    input.customer.email,
   );
 
-  if (firstName.length > 120) {
+  const firstName =
+    normalizeRequiredText(
+      input.customer.first_name,
+      "Le prénom du client est obligatoire.",
+    );
+
+  if (
+    firstName.length > 120
+  ) {
     throw new MonerooValidationError(
       "Le prénom du client est trop long.",
     );
   }
 
-  const lastName = normalizeRequiredText(
-    input.customer.last_name,
-    "Le nom du client est obligatoire.",
-  );
+  const lastName =
+    normalizeRequiredText(
+      input.customer.last_name,
+      "Le nom du client est obligatoire.",
+    );
 
-  if (lastName.length > 120) {
+  if (
+    lastName.length > 120
+  ) {
     throw new MonerooValidationError(
       "Le nom du client est trop long.",
     );
@@ -246,53 +288,67 @@ function validateInitializePaymentInput(
 }
 
 /**
- * Construit strictement le payload réellement envoyé à Moneroo.
+ * Construit strictement le payload réellement envoyé
+ * à Moneroo lors de l'initialisation.
  *
- * Le téléphone, l’adresse, la ville et le code pays restent enregistrés
- * dans Tikemia, mais ne sont pas transmis au processeur.
+ * IMPORTANT :
+ *
+ * Les informations internes Tikemia qui ne sont pas
+ * nécessaires à Moneroo ne doivent pas être transmises.
+ *
+ * Cela concerne notamment :
+ * - metadata ;
+ * - téléphone ;
+ * - adresse ;
+ * - ville ;
+ * - code pays.
+ *
+ * Ces informations restent disponibles dans Tikemia.
  */
 function createSafeInitializePayload(
   input: MonerooInitializePaymentInput,
 ): SafeMonerooInitializePayload {
-  validateInitializePaymentInput(input);
+  validateInitializePaymentInput(
+    input,
+  );
 
   return Object.freeze({
     amount: input.amount,
 
-    currency: normalizeCurrency(
-      input.currency,
-    ),
+    currency:
+      normalizeCurrency(
+        input.currency,
+      ),
 
-    description: normalizeRequiredText(
-      input.description,
-      "La description du paiement Moneroo est obligatoire.",
-    ),
+    description:
+      normalizeRequiredText(
+        input.description,
+        "La description du paiement Moneroo est obligatoire.",
+      ),
 
-    return_url: normalizeReturnUrl(
-      input.return_url,
-    ),
+    return_url:
+      normalizeReturnUrl(
+        input.return_url,
+      ),
 
     customer: {
-      email: normalizeEmail(
-        input.customer.email,
-      ),
+      email:
+        normalizeEmail(
+          input.customer.email,
+        ),
 
-      first_name: normalizeRequiredText(
-        input.customer.first_name,
-        "Le prénom du client est obligatoire.",
-      ),
+      first_name:
+        normalizeRequiredText(
+          input.customer.first_name,
+          "Le prénom du client est obligatoire.",
+        ),
 
-      last_name: normalizeRequiredText(
-        input.customer.last_name,
-        "Le nom du client est obligatoire.",
-      ),
+      last_name:
+        normalizeRequiredText(
+          input.customer.last_name,
+          "Le nom du client est obligatoire.",
+        ),
     },
-
-    ...(input.metadata
-      ? {
-          metadata: input.metadata,
-        }
-      : {}),
   });
 }
 
@@ -311,9 +367,13 @@ function getErrorMessage(
     payload.description,
   ];
 
-  for (const candidate of candidateMessages) {
+  for (
+    const candidate of
+    candidateMessages
+  ) {
     if (
-      typeof candidate === "string" &&
+      typeof candidate ===
+        "string" &&
       candidate.trim()
     ) {
       return candidate.trim();
@@ -321,8 +381,11 @@ function getErrorMessage(
   }
 
   if (
-    isRecord(payload.error) &&
-    typeof payload.error.message === "string" &&
+    isRecord(
+      payload.error,
+    ) &&
+    typeof payload.error
+      .message === "string" &&
     payload.error.message.trim()
   ) {
     return payload.error.message.trim();
@@ -334,14 +397,17 @@ function getErrorMessage(
 async function readResponseBody(
   response: Response,
 ): Promise<unknown> {
-  const rawBody = await response.text();
+  const rawBody =
+    await response.text();
 
   if (!rawBody.trim()) {
     return null;
   }
 
   try {
-    return JSON.parse(rawBody) as unknown;
+    return JSON.parse(
+      rawBody,
+    ) as unknown;
   } catch {
     return rawBody;
   }
@@ -355,29 +421,34 @@ function createAbortContext(
   cleanup: () => void;
   didTimeout: () => boolean;
 } {
-  const controller = new AbortController();
+  const controller =
+    new AbortController();
 
   let timedOut = false;
 
-  const timeout = setTimeout(() => {
-    timedOut = true;
+  const timeout =
+    setTimeout(() => {
+      timedOut = true;
 
-    controller.abort(
-      new DOMException(
-        "La requête Moneroo a dépassé le délai autorisé.",
-        "AbortError",
-      ),
-    );
-  }, timeoutMs);
+      controller.abort(
+        new DOMException(
+          "La requête Moneroo a dépassé le délai autorisé.",
+          "AbortError",
+        ),
+      );
+    }, timeoutMs);
 
-  const handleExternalAbort = () => {
-    controller.abort(
-      externalSignal?.reason,
-    );
-  };
+  const handleExternalAbort =
+    () => {
+      controller.abort(
+        externalSignal?.reason,
+      );
+    };
 
   if (externalSignal) {
-    if (externalSignal.aborted) {
+    if (
+      externalSignal.aborted
+    ) {
       controller.abort(
         externalSignal.reason,
       );
@@ -393,12 +464,16 @@ function createAbortContext(
   }
 
   return {
-    signal: controller.signal,
+    signal:
+      controller.signal,
 
-    didTimeout: () => timedOut,
+    didTimeout: () =>
+      timedOut,
 
     cleanup: () => {
-      clearTimeout(timeout);
+      clearTimeout(
+        timeout,
+      );
 
       externalSignal?.removeEventListener(
         "abort",
@@ -412,8 +487,10 @@ function isAbortError(
   error: unknown,
 ): boolean {
   return (
-    error instanceof DOMException &&
-    error.name === "AbortError"
+    error instanceof
+      DOMException &&
+    error.name ===
+      "AbortError"
   );
 }
 
@@ -423,31 +500,37 @@ async function requestMoneroo<T>(
     value: unknown,
   ) => value is T,
 ): Promise<T> {
-  const config = getMonerooConfig();
+  const config =
+    getMonerooConfig();
 
   const endpoint =
-    parameters.endpoint.startsWith("/")
+    parameters.endpoint.startsWith(
+      "/",
+    )
       ? parameters.endpoint
       : `/${parameters.endpoint}`;
 
   const url =
     `${config.apiBaseUrl}${endpoint}`;
 
-  const abortContext = createAbortContext(
-    config.requestTimeoutMs,
-    parameters.signal,
-  );
+  const abortContext =
+    createAbortContext(
+      config.requestTimeoutMs,
+      parameters.signal,
+    );
 
   try {
-    const headers = new Headers({
-      Accept: "application/json",
+    const headers =
+      new Headers({
+        Accept:
+          "application/json",
 
-      Authorization:
-        `Bearer ${config.secretKey}`,
+        Authorization:
+          `Bearer ${config.secretKey}`,
 
-      "Content-Type":
-        "application/json",
-    });
+        "Content-Type":
+          "application/json",
+      });
 
     const idempotencyKey =
       normalizeIdempotencyKey(
@@ -461,22 +544,27 @@ async function requestMoneroo<T>(
       );
     }
 
-    const response = await fetch(url, {
-      method: parameters.method,
+    const response =
+      await fetch(url, {
+        method:
+          parameters.method,
 
-      headers,
+        headers,
 
-      body:
-        parameters.body === undefined
-          ? undefined
-          : JSON.stringify(
-              parameters.body,
-            ),
+        body:
+          parameters.body ===
+          undefined
+            ? undefined
+            : JSON.stringify(
+                parameters.body,
+              ),
 
-      cache: "no-store",
+        cache:
+          "no-store",
 
-      signal: abortContext.signal,
-    });
+        signal:
+          abortContext.signal,
+      });
 
     const responseBody =
       await readResponseBody(
@@ -485,22 +573,32 @@ async function requestMoneroo<T>(
 
     if (!response.ok) {
       const details = {
-        status: response.status,
+        status:
+          response.status,
+
         endpoint,
-        method: parameters.method,
+
+        method:
+          parameters.method,
+
         responseBody,
       };
 
       if (
-        response.status === 401 ||
-        response.status === 403
+        response.status ===
+          401 ||
+        response.status ===
+          403
       ) {
         throw new MonerooAuthenticationError(
           details,
         );
       }
 
-      if (response.status === 404) {
+      if (
+        response.status ===
+        404
+      ) {
         const paymentId =
           endpoint
             .split("/")
@@ -514,14 +612,17 @@ async function requestMoneroo<T>(
         );
       }
 
-      const message = getErrorMessage(
-        responseBody,
-        `Moneroo a retourné une erreur HTTP ${response.status}.`,
-      );
+      const message =
+        getErrorMessage(
+          responseBody,
+          `Moneroo a retourné une erreur HTTP ${response.status}.`,
+        );
 
       if (
-        response.status === 400 ||
-        response.status === 422
+        response.status ===
+          400 ||
+        response.status ===
+          422
       ) {
         throw new MonerooValidationError(
           message,
@@ -535,7 +636,11 @@ async function requestMoneroo<T>(
       );
     }
 
-    if (!validateData(responseBody)) {
+    if (
+      !validateData(
+        responseBody,
+      )
+    ) {
       if (
         process.env.NODE_ENV ===
         "development"
@@ -544,9 +649,14 @@ async function requestMoneroo<T>(
           "[MONEROO_UNEXPECTED_RESPONSE]",
           JSON.stringify(
             {
-              status: response.status,
+              status:
+                response.status,
+
               endpoint,
-              method: parameters.method,
+
+              method:
+                parameters.method,
+
               responseBody,
             },
             null,
@@ -558,9 +668,14 @@ async function requestMoneroo<T>(
       throw new MonerooResponseError(
         "La réponse reçue de Moneroo ne respecte pas le format attendu.",
         {
-          status: response.status,
+          status:
+            response.status,
+
           endpoint,
-          method: parameters.method,
+
+          method:
+            parameters.method,
+
           responseBody,
         },
       );
@@ -569,14 +684,19 @@ async function requestMoneroo<T>(
     return responseBody;
   } catch (error) {
     if (
-      error instanceof MonerooApiError ||
-      error instanceof MonerooResponseError ||
-      error instanceof MonerooRequestError
+      error instanceof
+        MonerooApiError ||
+      error instanceof
+        MonerooResponseError ||
+      error instanceof
+        MonerooRequestError
     ) {
       throw error;
     }
 
-    if (isAbortError(error)) {
+    if (
+      isAbortError(error)
+    ) {
       if (
         abortContext.didTimeout()
       ) {
@@ -584,8 +704,12 @@ async function requestMoneroo<T>(
           config.requestTimeoutMs,
           {
             endpoint,
-            method: parameters.method,
-            cause: error,
+
+            method:
+              parameters.method,
+
+            cause:
+              error,
           },
         );
       }
@@ -594,8 +718,12 @@ async function requestMoneroo<T>(
         "La requête Moneroo a été annulée.",
         {
           endpoint,
-          method: parameters.method,
-          cause: error,
+
+          method:
+            parameters.method,
+
+          cause:
+            error,
         },
       );
     }
@@ -604,8 +732,12 @@ async function requestMoneroo<T>(
       "Impossible de communiquer avec l’API Moneroo.",
       {
         endpoint,
-        method: parameters.method,
-        cause: error,
+
+        method:
+          parameters.method,
+
+        cause:
+          error,
       },
     );
   } finally {
@@ -652,12 +784,14 @@ export async function initializeMonerooPayment(
   const response =
     await requestMoneroo<MonerooInitializePaymentResponse>(
       {
-        method: "POST",
+        method:
+          "POST",
 
         endpoint:
           "/v1/payments/initialize",
 
-        body: safePayload,
+        body:
+          safePayload,
 
         signal:
           options.signal,
@@ -674,8 +808,8 @@ export async function initializeMonerooPayment(
    *
    * data.checkout_url
    *
-   * Les variantes checkoutUrl et link restent acceptées pour préserver
-   * la compatibilité avec d’autres réponses.
+   * Les variantes checkoutUrl et link restent
+   * acceptées pour préserver la compatibilité.
    */
   const checkoutUrl =
     getMonerooCheckoutUrl(
@@ -699,10 +833,10 @@ export async function initializeMonerooPayment(
   }
 
   /*
-   * Normalisation interne.
+   * Normalisation interne Tikemia.
    *
-   * Les anciens fichiers Tikemia qui lisent encore data.link continueront
-   * donc de fonctionner, même si Moneroo retourne data.checkout_url.
+   * Les anciens fichiers qui utilisent encore
+   * data.link continueront donc de fonctionner.
    */
   const normalizedResponse:
     MonerooInitializePaymentResponse =

@@ -1,5 +1,6 @@
 import {
   createHash,
+  createHmac,
   timingSafeEqual,
 } from "node:crypto";
 
@@ -87,6 +88,26 @@ const verifyPaymentSchema = z
       .max(
         500,
         "Le jeton de checkout est trop long.",
+      )
+      .optional(),
+
+    /*
+     * Jeton signé présent dans l'URL de retour Moneroo.
+     *
+     * Il sert uniquement à autoriser une commande invitée à demander
+     * la vérification de SON paiement. Il ne prouve jamais que le
+     * paiement est réussi.
+     */
+    returnToken: z
+      .string()
+      .trim()
+      .min(
+        32,
+        "Le jeton de retour est invalide.",
+      )
+      .max(
+        2000,
+        "Le jeton de retour est trop long.",
       )
       .optional(),
   })
@@ -196,6 +217,288 @@ function secureHashEquals(
     leftBuffer,
     rightBuffer,
   );
+}
+
+
+type PaymentReturnTokenPayload = Readonly<{
+  paymentId: string;
+  orderId: string;
+  expiresAt: number;
+}>;
+
+function safeEqualBuffers(
+  left: Buffer,
+  right: Buffer,
+): boolean {
+  if (
+    left.length !==
+    right.length
+  ) {
+    return false;
+  }
+
+  return timingSafeEqual(
+    left,
+    right,
+  );
+}
+
+function parsePaymentReturnTokenPayload(
+  encodedPayload: string,
+): PaymentReturnTokenPayload | null {
+  try {
+    const decoded =
+      Buffer.from(
+        encodedPayload,
+        "base64url",
+      ).toString(
+        "utf8",
+      );
+
+    const parsed =
+      JSON.parse(
+        decoded,
+      ) as unknown;
+
+    if (
+      typeof parsed !==
+        "object" ||
+      parsed === null ||
+      Array.isArray(
+        parsed,
+      )
+    ) {
+      return null;
+    }
+
+    const record =
+      parsed as Record<
+        string,
+        unknown
+      >;
+
+    const paymentId =
+      normalizeText(
+        typeof record.paymentId ===
+          "string"
+          ? record.paymentId
+          : "",
+      );
+
+    const orderId =
+      normalizeText(
+        typeof record.orderId ===
+          "string"
+          ? record.orderId
+          : "",
+      );
+
+    const expiresAt =
+      typeof record.expiresAt ===
+        "number"
+        ? record.expiresAt
+        : Number.NaN;
+
+    if (
+      !paymentId ||
+      !orderId ||
+      !Number.isSafeInteger(
+        expiresAt,
+      ) ||
+      expiresAt <= 0
+    ) {
+      return null;
+    }
+
+    return {
+      paymentId,
+      orderId,
+      expiresAt,
+    };
+  } catch {
+    return null;
+  }
+}
+
+function assertValidPaymentReturnToken({
+  returnToken,
+  checkoutTokenHash,
+  paymentId,
+  orderId,
+}: {
+  returnToken: string;
+  checkoutTokenHash: string;
+  paymentId: string;
+  orderId: string;
+}): void {
+  const normalizedToken =
+    normalizeText(
+      returnToken,
+    );
+
+  const parts =
+    normalizedToken.split(
+      ".",
+    );
+
+  if (
+    parts.length !==
+      2
+  ) {
+    throw new PaymentValidationError({
+      code:
+        "PAYMENT_FORBIDDEN",
+
+      message:
+        "Le jeton sécurisé de retour est invalide.",
+
+      status:
+        403,
+
+      paymentId,
+
+      orderId,
+    });
+  }
+
+  const [
+    encodedPayload,
+    receivedSignature,
+  ] =
+    parts;
+
+  if (
+    !encodedPayload ||
+    !receivedSignature
+  ) {
+    throw new PaymentValidationError({
+      code:
+        "PAYMENT_FORBIDDEN",
+
+      message:
+        "Le jeton sécurisé de retour est invalide.",
+
+      status:
+        403,
+
+      paymentId,
+
+      orderId,
+    });
+  }
+
+  const expectedSignature =
+    createHmac(
+      "sha256",
+      checkoutTokenHash,
+    )
+      .update(
+        encodedPayload,
+        "utf8",
+      )
+      .digest(
+        "base64url",
+      );
+
+  const signatureIsValid =
+    safeEqualBuffers(
+      Buffer.from(
+        receivedSignature,
+        "utf8",
+      ),
+      Buffer.from(
+        expectedSignature,
+        "utf8",
+      ),
+    );
+
+  if (
+    !signatureIsValid
+  ) {
+    throw new PaymentValidationError({
+      code:
+        "PAYMENT_FORBIDDEN",
+
+      message:
+        "Le jeton sécurisé de retour est invalide.",
+
+      status:
+        403,
+
+      paymentId,
+
+      orderId,
+    });
+  }
+
+  const payload =
+    parsePaymentReturnTokenPayload(
+      encodedPayload,
+    );
+
+  if (!payload) {
+    throw new PaymentValidationError({
+      code:
+        "PAYMENT_FORBIDDEN",
+
+      message:
+        "Le jeton sécurisé de retour est invalide.",
+
+      status:
+        403,
+
+      paymentId,
+
+      orderId,
+    });
+  }
+
+  /*
+   * Le token est lié à l'identifiant INTERNE du paiement Tikemia.
+   * Même si Moneroo remplace paymentId dans l'URL par son identifiant
+   * `py_...`, nous validons ici contre le paiement retrouvé en base.
+   */
+  if (
+    payload.paymentId !==
+      paymentId ||
+    payload.orderId !==
+      orderId
+  ) {
+    throw new PaymentValidationError({
+      code:
+        "PAYMENT_TRANSACTION_MISMATCH",
+
+      message:
+        "Le jeton sécurisé ne correspond pas à ce paiement.",
+
+      status:
+        403,
+
+      paymentId,
+
+      orderId,
+    });
+  }
+
+  if (
+    payload.expiresAt <
+    Date.now()
+  ) {
+    throw new PaymentValidationError({
+      code:
+        "PAYMENT_UNAUTHORIZED",
+
+      message:
+        "Le jeton sécurisé de retour a expiré.",
+
+      status:
+        401,
+
+      paymentId,
+
+      orderId,
+    });
+  }
 }
 
 function getSessionCookieNames():
@@ -397,6 +700,7 @@ function buildPaymentWhere({
 function assertPaymentOwnership({
   customer,
   checkoutToken,
+  returnToken,
   paymentId,
   order,
 }: {
@@ -405,6 +709,7 @@ function assertPaymentOwnership({
     | null;
 
   checkoutToken: string;
+  returnToken: string;
   paymentId: string;
 
   order: {
@@ -467,10 +772,17 @@ function assertPaymentOwnership({
   }
 
   /*
-   * Commande invitée : le jeton sécurisé est obligatoire.
+   * Commande invitée.
+   *
+   * Deux mécanismes sont acceptés :
+   *
+   * 1. checkoutToken original conservé dans sessionStorage ;
+   * 2. returnToken signé reçu après le retour de Moneroo.
+   *
+   * Le returnToken n'est PAS une preuve de paiement. Il autorise
+   * seulement cette route à poursuivre vers verifyMonerooPayment().
    */
   if (
-    !checkoutToken ||
     !order.checkoutTokenHash
   ) {
     throw new PaymentValidationError({
@@ -478,7 +790,7 @@ function assertPaymentOwnership({
         "PAYMENT_UNAUTHORIZED",
 
       message:
-        "Le jeton sécurisé de la commande est obligatoire.",
+        "Le contexte sécurisé de cette commande est indisponible.",
 
       status:
         401,
@@ -489,32 +801,75 @@ function assertPaymentOwnership({
     });
   }
 
-  const suppliedTokenHash =
-    hashToken(
-      checkoutToken,
-    );
+  if (
+    checkoutToken
+  ) {
+    const suppliedTokenHash =
+      hashToken(
+        checkoutToken,
+      );
+
+    if (
+      secureHashEquals(
+        suppliedTokenHash,
+        order.checkoutTokenHash,
+      )
+    ) {
+      return;
+    }
+
+    /*
+     * Si un returnToken valide est aussi présent, on peut encore
+     * autoriser le retour Moneroo malgré un ancien checkoutToken
+     * local devenu incohérent.
+     */
+    if (!returnToken) {
+      throw new PaymentValidationError({
+        code:
+          "PAYMENT_FORBIDDEN",
+
+        message:
+          "Le jeton sécurisé de cette commande est invalide.",
+
+        status:
+          403,
+
+        paymentId,
+        orderId:
+          order.id,
+      });
+    }
+  }
 
   if (
-    !secureHashEquals(
-      suppliedTokenHash,
-      order.checkoutTokenHash,
-    )
+    returnToken
   ) {
-    throw new PaymentValidationError({
-      code:
-        "PAYMENT_FORBIDDEN",
-
-      message:
-        "Le jeton sécurisé de cette commande est invalide.",
-
-      status:
-        403,
-
+    assertValidPaymentReturnToken({
+      returnToken,
+      checkoutTokenHash:
+        order.checkoutTokenHash,
       paymentId,
       orderId:
         order.id,
     });
+
+    return;
   }
+
+  throw new PaymentValidationError({
+    code:
+      "PAYMENT_UNAUTHORIZED",
+
+    message:
+      "Le jeton sécurisé de la commande est obligatoire.",
+
+    status:
+      401,
+
+    paymentId,
+    orderId:
+      order.id,
+  });
 }
 
 function buildDownloadUrl(
@@ -809,6 +1164,11 @@ export async function POST(
       checkoutToken:
         normalizeText(
           input.checkoutToken,
+        ),
+
+      returnToken:
+        normalizeText(
+          input.returnToken,
         ),
 
       paymentId:

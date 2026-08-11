@@ -15,7 +15,10 @@ import type {
 } from "@/components/scanner/scanner-result";
 
 function formatDateTime(
-  value: string | null | undefined,
+  value:
+    | string
+    | null
+    | undefined,
 ): string {
   if (!value) {
     return "À l’instant";
@@ -39,8 +42,6 @@ function formatDateTime(
         "2-digit",
       month:
         "short",
-      year:
-        "numeric",
       hour:
         "2-digit",
       minute:
@@ -49,6 +50,19 @@ function formatDateTime(
         "2-digit",
     },
   ).format(date);
+}
+
+function normalizeValue(
+  value:
+    | string
+    | null
+    | undefined,
+  fallback: string,
+): string {
+  const normalized =
+    value?.trim() ?? "";
+
+  return normalized || fallback;
 }
 
 export default function ScannerSuccessResult({
@@ -63,112 +77,194 @@ export default function ScannerSuccessResult({
   const ticket =
     result.ticket;
 
+  const holderName =
+    normalizeValue(
+      ticket?.holderName,
+      "Détenteur non renseigné",
+    );
+
+  const ticketType =
+    normalizeValue(
+      ticket?.ticketType.name,
+      "Billet Tikemia",
+    );
+
+  const eventTitle =
+    normalizeValue(
+      ticket?.event.title,
+      "Événement Tikemia",
+    );
+
+  const location =
+    [
+      ticket?.event.venueName,
+      ticket?.event.city,
+    ]
+      .map(
+        (
+          value,
+        ) =>
+          value?.trim() ?? "",
+      )
+      .filter(Boolean)
+      .join(", ");
+
   return (
-    <section className="overflow-hidden rounded-[28px] border border-emerald-400/25 bg-[#06130f] shadow-[0_24px_80px_rgba(16,185,129,0.18)]">
-      <div className="border-b border-emerald-400/15 bg-emerald-400/[0.08] p-6 text-center">
-        <span className="mx-auto flex h-20 w-20 items-center justify-center rounded-full border border-emerald-300/30 bg-emerald-400/15 text-emerald-300">
-          <CheckCircle2 className="h-11 w-11" />
-        </span>
+    <section
+      aria-live="assertive"
+      aria-atomic="true"
+      className="overflow-hidden rounded-[26px] border border-emerald-400/30 bg-[#06130f] shadow-[0_24px_80px_rgba(16,185,129,0.20)]"
+    >
+      {/*
+       * DÉCISION IMMÉDIATE
+       *
+       * L'agent doit comprendre le résultat en une fraction de seconde.
+       * Le mot VALIDE est volontairement très grand et très contrasté.
+       */}
+      <div className="relative overflow-hidden border-b border-emerald-400/15 bg-emerald-400/[0.10] px-5 py-6 text-center sm:px-6 sm:py-7">
+        <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_center,rgba(52,211,153,0.12),transparent_65%)]" />
 
-        <p className="mt-4 text-[11px] font-black uppercase tracking-[0.18em] text-emerald-300">
-          Accès autorisé
-        </p>
+        <div className="relative">
+          <span className="mx-auto flex h-20 w-20 items-center justify-center rounded-full border border-emerald-300/35 bg-emerald-400/15 text-emerald-200 shadow-[0_0_42px_rgba(52,211,153,0.18)]">
+            <CheckCircle2 className="h-12 w-12" />
+          </span>
 
-        <h2 className="mt-2 text-2xl font-black tracking-[-0.04em] text-white">
-          Billet accepté
-        </h2>
+          <p className="mt-4 text-[10px] font-black uppercase tracking-[0.22em] text-emerald-300">
+            Entrée autorisée
+          </p>
 
-        <div className="mt-4 inline-flex items-center gap-2 rounded-full border border-emerald-300/20 bg-black/20 px-4 py-2 text-xs font-black text-emerald-200">
-          <ShieldCheck className="h-4 w-4" />
-          {result.authenticity?.label ||
-            "Signature Tikemia vérifiée"}
+          <h2 className="mt-1 text-4xl font-black uppercase tracking-[-0.05em] text-white sm:text-5xl">
+            Valide
+          </h2>
+
+          <p className="mt-2 text-sm font-bold text-emerald-100/85">
+            Billet Tikemia authentique et non encore utilisé
+          </p>
+
+          <div className="mt-4 inline-flex items-center gap-2 rounded-full border border-emerald-300/20 bg-black/25 px-4 py-2 text-[10px] font-black uppercase tracking-[0.12em] text-emerald-200">
+            <ShieldCheck className="h-4 w-4" />
+
+            {result.authenticity?.label ||
+              "Authenticité vérifiée"}
+          </div>
         </div>
       </div>
 
-      <div className="space-y-3 p-5 sm:p-6">
-        <ResultInformation
-          icon={UserRound}
-          label="Détenteur"
-          value={
-            ticket?.holderName ||
-            "Détenteur non renseigné"
-          }
-        />
-
-        <ResultInformation
-          icon={Ticket}
-          label="Catégorie"
-          value={
-            ticket?.ticketType.name ||
-            "Billet Tikemia"
-          }
-        />
-
-        <ResultInformation
-          icon={CalendarDays}
-          label="Événement"
-          value={
-            ticket?.event.title ||
-            "Événement Tikemia"
-          }
-        />
-
-        {(ticket?.event.venueName ||
-          ticket?.event.city) && (
+      {/*
+       * INFORMATIONS ESSENTIELLES
+       *
+       * On évite une fiche trop longue : seulement les informations
+       * utiles au contrôle terrain.
+       */}
+      <div className="space-y-3 p-4 sm:p-5">
+        <div className="grid gap-3 sm:grid-cols-2">
           <ResultInformation
-            icon={MapPin}
-            label="Lieu"
-            value={[
-              ticket.event.venueName,
-              ticket.event.city,
-            ]
-              .filter(Boolean)
-              .join(", ")}
+            icon={
+              UserRound
+            }
+            label="Détenteur"
+            value={
+              holderName
+            }
           />
-        )}
 
-        <ResultInformation
-          icon={Clock3}
-          label="Scanné le"
-          value={formatDateTime(
-            result.scannedAt,
-          )}
-        />
-
-        <div className="rounded-2xl border border-white/[0.07] bg-black/20 p-4">
-          <p className="text-[9px] font-black uppercase tracking-[0.14em] text-neutral-600">
-            Code billet
-          </p>
-
-          <p className="mt-2 break-all font-mono text-sm font-bold text-white">
-            {ticket?.code || "—"}
-          </p>
+          <ResultInformation
+            icon={
+              Ticket
+            }
+            label="Catégorie"
+            value={
+              ticketType
+            }
+          />
         </div>
 
+        <ResultInformation
+          icon={
+            CalendarDays
+          }
+          label="Événement"
+          value={
+            eventTitle
+          }
+        />
+
+        {location ? (
+          <ResultInformation
+            icon={
+              MapPin
+            }
+            label="Lieu"
+            value={
+              location
+            }
+          />
+        ) : null}
+
+        <div className="grid gap-3 sm:grid-cols-2">
+          <ResultInformation
+            icon={
+              Clock3
+            }
+            label="Validé à"
+            value={
+              formatDateTime(
+                result.scannedAt,
+              )
+            }
+          />
+
+          <div className="rounded-2xl border border-white/[0.07] bg-black/20 p-4">
+            <p className="text-[9px] font-black uppercase tracking-[0.14em] text-neutral-600">
+              Code billet
+            </p>
+
+            <p className="mt-2 truncate font-mono text-sm font-black text-white">
+              {ticket?.code ||
+                "—"}
+            </p>
+          </div>
+        </div>
+
+        {/*
+         * Le scan suivant est normalement automatique :
+         * scanner-page-client efface déjà le résultat après un court délai.
+         *
+         * Ce bouton reste uniquement comme raccourci manuel de secours.
+         */}
         <button
           type="button"
-          onClick={onScanNext}
-          className="mt-2 inline-flex h-14 w-full items-center justify-center rounded-2xl bg-gradient-to-r from-emerald-500 via-lime-500 to-orange-500 px-5 text-sm font-black text-white transition hover:scale-[1.01] active:scale-[0.99]"
+          onClick={
+            onScanNext
+          }
+          className="inline-flex h-12 w-full items-center justify-center rounded-2xl border border-emerald-400/20 bg-emerald-400/[0.08] px-5 text-sm font-black text-emerald-200 transition hover:bg-emerald-400/[0.12] active:scale-[0.99]"
         >
-          Scanner le suivant
+          Passer immédiatement au suivant
         </button>
 
-        {onClose && (
+        {onClose ? (
           <button
             type="button"
-            onClick={onClose}
-            className="inline-flex h-12 w-full items-center justify-center rounded-2xl border border-white/[0.08] bg-white/[0.025] px-5 text-sm font-black text-neutral-400 transition hover:text-white"
+            onClick={
+              onClose
+            }
+            className="inline-flex h-11 w-full items-center justify-center rounded-2xl border border-white/[0.07] bg-white/[0.02] px-5 text-xs font-black text-neutral-500 transition hover:text-white"
           >
-            Fermer
+            Fermer le résultat
           </button>
-        )}
+        ) : null}
+
+        <p className="text-center text-[10px] font-bold uppercase tracking-[0.12em] text-neutral-600">
+          Le scanner continue automatiquement
+        </p>
       </div>
     </section>
   );
 }
 
 function ResultInformation({
-  icon: Icon,
+  icon:
+    Icon,
   label,
   value,
 }: {
@@ -177,9 +273,9 @@ function ResultInformation({
   value: string;
 }) {
   return (
-    <div className="flex items-start gap-3 rounded-2xl border border-white/[0.07] bg-black/20 p-4">
+    <div className="flex min-w-0 items-start gap-3 rounded-2xl border border-white/[0.07] bg-black/20 p-4">
       <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-emerald-400/15 bg-emerald-400/[0.07] text-emerald-300">
-        <Icon className="h-4.5 w-4.5" />
+        <Icon className="h-[18px] w-[18px]" />
       </span>
 
       <div className="min-w-0">
@@ -187,7 +283,7 @@ function ResultInformation({
           {label}
         </p>
 
-        <p className="mt-1 text-sm font-black leading-6 text-white">
+        <p className="mt-1 break-words text-sm font-black leading-5 text-white">
           {value}
         </p>
       </div>
