@@ -3,6 +3,8 @@ import type {
   Viewport,
 } from "next";
 
+import { GoogleAnalytics } from "@next/third-parties/google";
+
 import "./globals.css";
 
 const APP_NAME =
@@ -27,6 +29,10 @@ const PWA_ICON_512 =
 
 const APPLE_TOUCH_ICON =
   "/icons/apple-touch-icon.png";
+
+const GOOGLE_ANALYTICS_ID =
+  process.env.NEXT_PUBLIC_GA_ID?.trim() ||
+  "G-FE8WSP77Q9";
 
 export const metadata: Metadata = {
   metadataBase:
@@ -100,17 +106,9 @@ export const metadata: Metadata = {
       false,
   },
 
-  /*
-   * Manifest PWA généré automatiquement
-   * par app/manifest.ts.
-   */
   manifest:
     "/manifest.webmanifest",
 
-  /*
-   * On conserve le favicon historique
-   * et on ajoute les icônes dédiées PWA.
-   */
   icons: {
     icon: [
       {
@@ -264,10 +262,6 @@ export const metadata: Metadata = {
     },
   },
 
-  /*
-   * Configuration spécifique iPhone / iPad
-   * lorsque Tikemia est ajouté à l’écran d’accueil.
-   */
   appleWebApp: {
     capable:
       true,
@@ -344,6 +338,10 @@ export default function RootLayout({
       <body>
         {children}
       </body>
+
+      <GoogleAnalytics
+        gaId={GOOGLE_ANALYTICS_ID}
+      />
     </html>
   );
 }

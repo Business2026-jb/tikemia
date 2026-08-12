@@ -7,19 +7,15 @@ import {
   RefreshCcw,
   RotateCcw,
   ShieldCheck,
-  TicketCheck,
 } from "lucide-react";
 import {
   useCallback,
   useEffect,
-  useMemo,
   useState,
 } from "react";
 
 import RefundDetailsDialog from "@/components/client/refunds/refund-details-dialog";
 import RefundRequestCard from "@/components/client/refunds/refund-request-card";
-import RefundRequestForm from "@/components/client/refunds/refund-request-form";
-import RefundTicketSelector from "@/components/client/refunds/refund-ticket-selector";
 
 export type RefundableTicketData =
   Readonly<{
@@ -133,17 +129,6 @@ type ApiErrorShape =
     message?: string;
   }>;
 
-type EligibleTicketsResponse =
-  Readonly<{
-    success?: boolean;
-    data?: Readonly<{
-      tickets?:
-        readonly RefundableTicketData[];
-      total?: number;
-    }>;
-    error?: ApiErrorShape;
-  }>;
-
 type RefundsResponse =
   Readonly<{
     success?: boolean;
@@ -153,16 +138,7 @@ type RefundsResponse =
       total?: number;
     }>;
     error?: ApiErrorShape;
-  }>;
-
-type CreateRefundResponse =
-  Readonly<{
-    success?: boolean;
     message?: string;
-    data?: Readonly<{
-      refund?: unknown;
-    }>;
-    error?: ApiErrorShape;
   }>;
 
 async function readJson<T>(
@@ -193,27 +169,11 @@ function getApiMessage(
 
 export default function ClientRefundsPage() {
   const [
-    tickets,
-    setTickets,
-  ] =
-    useState<
-      readonly RefundableTicketData[]
-    >([]);
-
-  const [
     refunds,
     setRefunds,
   ] =
     useState<
       readonly ClientRefundData[]
-    >([]);
-
-  const [
-    selectedTicketIds,
-    setSelectedTicketIds,
-  ] =
-    useState<
-      readonly string[]
     >([]);
 
   const [
@@ -237,20 +197,8 @@ export default function ClientRefundsPage() {
     useState(false);
 
   const [
-    submitting,
-    setSubmitting,
-  ] =
-    useState(false);
-
-  const [
     errorMessage,
     setErrorMessage,
-  ] =
-    useState("");
-
-  const [
-    successMessage,
-    setSuccessMessage,
   ] =
     useState("");
 
@@ -270,109 +218,43 @@ export default function ClientRefundsPage() {
         setErrorMessage("");
 
         try {
-          const [
-            ticketsResponse,
-            refundsResponse,
-          ] =
-            await Promise.all([
-              fetch(
-                "/api/client/refunds/eligible-tickets",
-                {
-                  method:
-                    "GET",
-                  headers: {
-                    Accept:
-                      "application/json",
-                  },
-                  credentials:
-                    "include",
-                  cache:
-                    "no-store",
+          const response =
+            await fetch(
+              "/api/client/refunds",
+              {
+                method:
+                  "GET",
+                headers: {
+                  Accept:
+                    "application/json",
                 },
-              ),
-
-              fetch(
-                "/api/client/refunds",
-                {
-                  method:
-                    "GET",
-                  headers: {
-                    Accept:
-                      "application/json",
-                  },
-                  credentials:
-                    "include",
-                  cache:
-                    "no-store",
-                },
-              ),
-            ]);
-
-          const [
-            ticketsPayload,
-            refundsPayload,
-          ] =
-            await Promise.all([
-              readJson<
-                EligibleTicketsResponse
-              >(
-                ticketsResponse,
-              ),
-              readJson<
-                RefundsResponse
-              >(
-                refundsResponse,
-              ),
-            ]);
-
-          if (!ticketsResponse.ok) {
-            throw new Error(
-              getApiMessage(
-                ticketsPayload,
-                "Impossible de charger les billets remboursables.",
-              ),
+                credentials:
+                  "include",
+                cache:
+                  "no-store",
+              },
             );
-          }
 
-          if (!refundsResponse.ok) {
+          const payload =
+            await readJson<
+              RefundsResponse
+            >(
+              response,
+            );
+
+          if (!response.ok) {
             throw new Error(
               getApiMessage(
-                refundsPayload,
+                payload,
                 "Impossible de charger vos demandes de remboursement.",
               ),
             );
           }
 
-          const nextTickets =
-            ticketsPayload?.data
-              ?.tickets ??
-            [];
-
-          const nextRefunds =
-            refundsPayload?.data
-              ?.refunds ??
-            [];
-
-          setTickets(
-            nextTickets,
-          );
-
           setRefunds(
-            nextRefunds,
-          );
-
-          setSelectedTicketIds(
-            (
-              current,
-            ) =>
-              current.filter(
-                (ticketId) =>
-                  nextTickets.some(
-                    (ticket) =>
-                      ticket.id ===
-                      ticketId,
-                  ),
-              ),
+            payload?.data
+              ?.refunds ??
+            [],
           );
         } catch (error) {
           setErrorMessage(
@@ -394,190 +276,6 @@ export default function ClientRefundsPage() {
     },
     [loadData],
   );
-
-  const selectedTickets =
-    useMemo(
-      () =>
-        tickets.filter(
-          (ticket) =>
-            selectedTicketIds.includes(
-              ticket.id,
-            ),
-        ),
-      [
-        tickets,
-        selectedTicketIds,
-      ],
-    );
-
-  const selectedAmount =
-    useMemo(
-      () =>
-        selectedTickets.reduce(
-          (
-            total,
-            ticket,
-          ) => {
-            const amount =
-              Number(
-                ticket.amount
-                  .requestedAmount,
-              );
-
-            return total +
-              (
-                Number.isFinite(
-                  amount,
-                )
-                  ? amount
-                  : 0
-              );
-          },
-          0,
-        ),
-      [
-        selectedTickets,
-      ],
-    );
-
-  const selectedCurrency =
-    selectedTickets[0]
-      ?.amount.currency ??
-    tickets[0]
-      ?.amount.currency ??
-    "XOF";
-
-  const toggleTicket =
-    useCallback(
-      (
-        ticketId: string,
-      ) => {
-        setSuccessMessage("");
-
-        setSelectedTicketIds(
-          (
-            current,
-          ) =>
-            current.includes(
-              ticketId,
-            )
-              ? current.filter(
-                  (id) =>
-                    id !==
-                    ticketId,
-                )
-              : [
-                  ...current,
-                  ticketId,
-                ],
-        );
-      },
-      [],
-    );
-
-  const submitRefund =
-    useCallback(
-      async ({
-        reason,
-        reasonCategory,
-      }: {
-        reason: string;
-        reasonCategory:
-          string | null;
-      }) => {
-        if (
-          selectedTicketIds.length ===
-          0
-        ) {
-          setErrorMessage(
-            "Sélectionnez au moins un billet à rembourser.",
-          );
-          return false;
-        }
-
-        setSubmitting(true);
-        setErrorMessage("");
-        setSuccessMessage("");
-
-        try {
-          const response =
-            await fetch(
-              "/api/client/refunds",
-              {
-                method:
-                  "POST",
-                headers: {
-                  Accept:
-                    "application/json",
-                  "Content-Type":
-                    "application/json",
-                },
-                credentials:
-                  "include",
-                cache:
-                  "no-store",
-                body:
-                  JSON.stringify({
-                    ticketIds:
-                      selectedTicketIds,
-                    reason:
-                      reason.trim(),
-                    reasonCategory:
-                      reasonCategory
-                        ?.trim() ||
-                      null,
-                  }),
-              },
-            );
-
-          const payload =
-            await readJson<
-              CreateRefundResponse
-            >(
-              response,
-            );
-
-          if (!response.ok) {
-            throw new Error(
-              getApiMessage(
-                payload,
-                "La demande de remboursement n’a pas pu être enregistrée.",
-              ),
-            );
-          }
-
-          setSelectedTicketIds(
-            [],
-          );
-
-          setSuccessMessage(
-            payload?.message ??
-            "Votre demande a bien été transmise à l’organisateur.",
-          );
-
-          await loadData({
-            silent:
-              true,
-          });
-
-          return true;
-        } catch (error) {
-          setErrorMessage(
-            error instanceof Error
-              ? error.message
-              : "Impossible d’envoyer la demande de remboursement.",
-          );
-
-          return false;
-        } finally {
-          setSubmitting(false);
-        }
-      },
-      [
-        loadData,
-        selectedTicketIds,
-      ],
-    );
 
   if (loading) {
     return (
@@ -610,11 +308,11 @@ export default function ClientRefundsPage() {
               </div>
 
               <h1 className="mt-2 text-2xl font-black tracking-[-0.04em] text-white sm:text-3xl">
-                Demander le remboursement d’un billet
+                Mes remboursements
               </h1>
 
               <p className="mt-2 max-w-3xl text-sm leading-6 text-neutral-400">
-                Seuls les billets encore éligibles apparaissent ici. Une demande peut être déposée pendant la période autorisée après l’achat.
+                Consultez ici l’historique et le statut de vos demandes de remboursement.
               </p>
             </div>
 
@@ -643,22 +341,12 @@ export default function ClientRefundsPage() {
             </button>
           </div>
 
-          <div className="grid gap-3 p-5 sm:grid-cols-3 sm:p-6">
-            <SummaryCard
-              icon={
-                TicketCheck
-              }
-              label="Billets éligibles"
-              value={String(
-                tickets.length,
-              )}
-            />
-
+          <div className="grid gap-3 p-5 sm:grid-cols-2 sm:p-6">
             <SummaryCard
               icon={
                 ShieldCheck
               }
-              label="Demandes envoyées"
+              label="Demandes enregistrées"
               value={String(
                 refunds.length,
               )}
@@ -668,11 +356,27 @@ export default function ClientRefundsPage() {
               icon={
                 CheckCircle2
               }
-              label="Sélection actuelle"
-              value={String(
-                selectedTicketIds.length,
-              )}
+              label="Nouvelle demande"
+              value="Désactivée"
             />
+          </div>
+        </section>
+
+        <section className="rounded-[28px] border border-amber-300/15 bg-amber-300/[0.05] p-5 sm:p-6">
+          <div className="flex items-start gap-4">
+            <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl border border-amber-300/15 bg-amber-300/[0.06] text-amber-200">
+              <AlertCircle className="h-5 w-5" />
+            </span>
+
+            <div className="min-w-0">
+              <h2 className="text-base font-black text-white">
+                Demandes de remboursement temporairement indisponibles
+              </h2>
+
+              <p className="mt-1 text-sm leading-6 text-neutral-400">
+                La création de nouvelles demandes est momentanément désactivée. Vos demandes déjà enregistrées restent disponibles ci-dessous.
+              </p>
+            </div>
           </div>
         </section>
 
@@ -689,53 +393,6 @@ export default function ClientRefundsPage() {
           </div>
         )}
 
-        {successMessage && (
-          <div
-            role="status"
-            className="flex items-start gap-3 rounded-2xl border border-emerald-400/20 bg-emerald-400/[0.07] p-4 text-sm text-emerald-100"
-          >
-            <CheckCircle2 className="mt-0.5 h-5 w-5 shrink-0 text-emerald-300" />
-
-            <p className="leading-6">
-              {successMessage}
-            </p>
-          </div>
-        )}
-
-        <div className="grid min-w-0 gap-6 xl:grid-cols-[minmax(0,1fr)_390px]">
-          <RefundTicketSelector
-            tickets={
-              tickets
-            }
-            selectedTicketIds={
-              selectedTicketIds
-            }
-            onToggleTicket={
-              toggleTicket
-            }
-          />
-
-          <div className="xl:sticky xl:top-6 xl:self-start">
-            <RefundRequestForm
-              selectedTickets={
-                selectedTickets
-              }
-              selectedAmount={
-                selectedAmount
-              }
-              currency={
-                selectedCurrency
-              }
-              submitting={
-                submitting
-              }
-              onSubmit={
-                submitRefund
-              }
-            />
-          </div>
-        </div>
-
         <section className="overflow-hidden rounded-[28px] border border-white/[0.08] bg-[#071015]">
           <div className="border-b border-white/[0.07] p-5 sm:p-6">
             <h2 className="text-xl font-black tracking-[-0.03em] text-white">
@@ -743,7 +400,7 @@ export default function ClientRefundsPage() {
             </h2>
 
             <p className="mt-1 text-sm text-neutral-500">
-              Suivez ici chaque étape du traitement de vos remboursements.
+              Suivez ici le statut de vos remboursements déjà enregistrés.
             </p>
           </div>
 
@@ -759,7 +416,7 @@ export default function ClientRefundsPage() {
               </h3>
 
               <p className="mx-auto mt-2 max-w-md text-sm leading-6 text-neutral-500">
-                Vos prochaines demandes de remboursement apparaîtront ici.
+                Vous n’avez actuellement aucune demande de remboursement enregistrée.
               </p>
             </div>
           ) : (
@@ -811,7 +468,8 @@ function SummaryCard({
   value,
 }: {
   icon:
-    typeof TicketCheck;
+    | typeof ShieldCheck
+    | typeof CheckCircle2;
   label: string;
   value: string;
 }) {
@@ -822,7 +480,7 @@ function SummaryCard({
           <Icon className="h-4.5 w-4.5" />
         </span>
 
-        <span className="text-2xl font-black tracking-[-0.04em] text-white">
+        <span className="text-right text-xl font-black tracking-[-0.04em] text-white sm:text-2xl">
           {value}
         </span>
       </div>

@@ -1,6 +1,8 @@
 import "server-only";
 
 import {
+  OrderStatus,
+  PaymentStatus,
   Prisma,
   RefundStatus,
   TicketStatus,
@@ -142,14 +144,21 @@ export async function approveRefund({
     reference: string;
     status: RefundStatus;
     workflowStage:
-      "REFUND_PROCESSING";
+      "REFUNDED";
     approvedAt: string;
+    refundedAt: string;
     adminNote:
       string | null;
     ticketIds:
       readonly string[];
     amount: string;
     currency: string;
+    paymentStatus:
+      PaymentStatus;
+    orderStatus:
+      OrderStatus;
+    isFullRefund:
+      boolean;
   }>
 > {
   const normalizedAdminId =
@@ -204,27 +213,29 @@ export async function approveRefund({
               id:
                 normalizedRefundId,
             },
-
             select: {
-              id:
-                true,
-              reference:
-                true,
-              status:
-                true,
-              amount:
-                true,
-              currency:
-                true,
-              metadata:
-                true,
+              id: true,
+              reference: true,
+              paymentId: true,
+              orderId: true,
+              status: true,
+              amount: true,
+              currency: true,
+              metadata: true,
 
               payment: {
                 select: {
-                  id:
-                    true,
-                  status:
-                    true,
+                  id: true,
+                  amount: true,
+                  status: true,
+                },
+              },
+
+              order: {
+                select: {
+                  id: true,
+                  total: true,
+                  status: true,
                 },
               },
             },
@@ -250,6 +261,22 @@ export async function approveRefund({
             "REFUND_NOT_PENDING",
           message:
             "Cette demande ne peut plus être approuvée.",
+          status:
+            409,
+        });
+      }
+
+      if (
+        refund.payment.status !==
+          PaymentStatus.SUCCESS &&
+        refund.payment.status !==
+          PaymentStatus.PARTIALLY_REFUNDED
+      ) {
+        throw new AdminRefundApprovalError({
+          code:
+            "PAYMENT_NOT_REFUNDABLE",
+          message:
+            "Le paiement associé n’est pas dans un état permettant ce remboursement.",
           status:
             409,
         });
@@ -326,14 +353,10 @@ export async function approveRefund({
                   ticketIds,
               },
             },
-
             select: {
-              id:
-                true,
-              status:
-                true,
-              usedAt:
-                true,
+              id: true,
+              status: true,
+              usedAt: true,
             },
           });
 
@@ -384,6 +407,66 @@ export async function approveRefund({
         }
       }
 
+      const previousSuccessfulRefunds =
+        await transaction
+          .paymentRefund
+          .aggregate({
+            where: {
+              paymentId:
+                refund.paymentId,
+              status:
+                RefundStatus.SUCCESS,
+              id: {
+                not:
+                  refund.id,
+              },
+            },
+            _sum: {
+              amount:
+                true,
+            },
+          });
+
+      const alreadyRefundedAmount =
+        previousSuccessfulRefunds
+          ._sum.amount ??
+        new Prisma.Decimal(0);
+
+      const totalRefundedAmount =
+        alreadyRefundedAmount.add(
+          refund.amount,
+        );
+
+      if (
+        totalRefundedAmount.gt(
+          refund.payment.amount,
+        )
+      ) {
+        throw new AdminRefundApprovalError({
+          code:
+            "REFUND_AMOUNT_EXCEEDS_PAYMENT",
+          message:
+            "Le montant total des remboursements dépasse le montant du paiement.",
+          status:
+            409,
+        });
+      }
+
+      const isFullRefund =
+        totalRefundedAmount.gte(
+          refund.payment.amount,
+        );
+
+      const nextPaymentStatus =
+        isFullRefund
+          ? PaymentStatus.REFUNDED
+          : PaymentStatus.PARTIALLY_REFUNDED;
+
+      const nextOrderStatus =
+        isFullRefund
+          ? OrderStatus.REFUNDED
+          : OrderStatus.PARTIALLY_REFUNDED;
+
       const currentAuditTrail =
         Array.isArray(
           metadata.auditTrail,
@@ -396,7 +479,7 @@ export async function approveRefund({
           ...metadata,
 
           workflowStage:
-            "REFUND_PROCESSING",
+            "REFUNDED",
 
           adminDecision: {
             action:
@@ -414,19 +497,11 @@ export async function approveRefund({
           approvedByAdminAt:
             now.toISOString(),
 
-          /*
-           * IMPORTANT :
-           * cette fonction approuve administrativement la demande
-           * et la place en PROCESSING.
-           *
-           * Elle ne marque PAS encore les billets REFUNDED et
-           * ne marque PAS le Payment REFUNDED.
-           *
-           * Ces changements ne doivent être faits qu'après
-           * confirmation réelle du remboursement par le prestataire.
-           */
-          providerRefundStatus:
-            "PENDING_EXECUTION",
+          refundedAt:
+            now.toISOString(),
+
+          finalizationSource:
+            "ADMIN_APPROVAL",
 
           auditTrail: [
             ...currentAuditTrail,
@@ -442,10 +517,22 @@ export async function approveRefund({
               at:
                 now.toISOString(),
             },
+            {
+              action:
+                "REFUND_COMPLETED",
+              actorType:
+                "ADMIN",
+              actorId:
+                normalizedAdminId,
+              note:
+                "Remboursement validé définitivement dans Tikemia.",
+              at:
+                now.toISOString(),
+            },
           ],
         });
 
-      const updated =
+      const updatedRefund =
         await transaction
           .paymentRefund
           .updateMany({
@@ -455,11 +542,12 @@ export async function approveRefund({
               status:
                 RefundStatus.PENDING,
             },
-
             data: {
               status:
-                RefundStatus.PROCESSING,
+                RefundStatus.SUCCESS,
               processingAt:
+                now,
+              refundedAt:
                 now,
               failedAt:
                 null,
@@ -471,7 +559,7 @@ export async function approveRefund({
           });
 
       if (
-        updated.count !==
+        updatedRefund.count !==
         1
       ) {
         throw new AdminRefundApprovalError({
@@ -484,16 +572,93 @@ export async function approveRefund({
         });
       }
 
+      const updatedTickets =
+        await transaction.ticket
+          .updateMany({
+            where: {
+              id: {
+                in:
+                  ticketIds,
+              },
+              status:
+                TicketStatus.VALID,
+              usedAt:
+                null,
+            },
+            data: {
+              status:
+                TicketStatus.REFUNDED,
+              revokedAt:
+                now,
+              revocationReason:
+                "Billet remboursé après validation de la demande par Tikemia.",
+            },
+          });
+
+      if (
+        updatedTickets.count !==
+        ticketIds.length
+      ) {
+        throw new AdminRefundApprovalError({
+          code:
+            "REFUND_TICKETS_CONCURRENT_UPDATE",
+          message:
+            "Un ou plusieurs billets viennent d’être modifiés. Le remboursement n’a pas été finalisé.",
+          status:
+            409,
+        });
+      }
+
+      await transaction.payment
+        .update({
+          where: {
+            id:
+              refund.payment.id,
+          },
+          data: isFullRefund
+            ? {
+                status:
+                  nextPaymentStatus,
+                refundedAt:
+                  now,
+              }
+            : {
+                status:
+                  nextPaymentStatus,
+              },
+        });
+
+      await transaction.order
+        .update({
+          where: {
+            id:
+              refund.order.id,
+          },
+          data: isFullRefund
+            ? {
+                status:
+                  nextOrderStatus,
+                refundedAt:
+                  now,
+              }
+            : {
+                status:
+                  nextOrderStatus,
+              },
+        });
+
       return Object.freeze({
         id:
           refund.id,
         reference:
           refund.reference,
         status:
-          RefundStatus.PROCESSING,
+          RefundStatus.SUCCESS,
         workflowStage:
-          "REFUND_PROCESSING" as const,
+          "REFUNDED" as const,
         approvedAt:
+          now.toISOString(),
+        refundedAt:
           now.toISOString(),
         adminNote,
         ticketIds:
@@ -505,6 +670,11 @@ export async function approveRefund({
             .toFixed(2),
         currency:
           refund.currency,
+        paymentStatus:
+          nextPaymentStatus,
+        orderStatus:
+          nextOrderStatus,
+        isFullRefund,
       });
     },
     {
