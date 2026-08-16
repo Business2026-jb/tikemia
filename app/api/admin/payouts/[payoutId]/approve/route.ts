@@ -2,6 +2,7 @@ import {
   NextRequest,
   NextResponse,
 } from "next/server";
+
 import {
   z,
 } from "zod";
@@ -9,12 +10,15 @@ import {
 import {
   approveAdminPayout,
 } from "@/lib/admin/payouts/approve-admin-payout";
+
 import {
   serializeAdminPayoutError,
 } from "@/lib/admin/payouts/admin-payout-errors";
+
 import {
   requireAdmin,
 } from "@/lib/admin/require-admin";
+
 import {
   sendPayoutApprovedEmail,
 } from "@/lib/mail/payouts/send-payout-approved-email";
@@ -50,6 +54,14 @@ const requestSchema =
         .nullable()
         .optional(),
 
+    /*
+     * Conservé temporairement pour compatibilité avec
+     * l'ancienne interface qui peut encore l'envoyer.
+     *
+     * Il n'est plus utilisé pour définir le statut,
+     * puisque le clic admin signifie que le paiement
+     * a déjà été effectué.
+     */
     estimatedDelay:
       z.string()
         .trim()
@@ -182,7 +194,7 @@ export async function POST(
               parsed.error
                 .issues[0]
                 ?.message ??
-              "Les informations d’approbation sont invalides.",
+              "Les informations de confirmation du retrait sont invalides.",
 
             details: {
               fields:
@@ -196,6 +208,16 @@ export async function POST(
       );
     }
 
+    /*
+     * IMPORTANT :
+     *
+     * approveAdminPayout() marque maintenant directement
+     * le retrait comme PAID.
+     *
+     * Le paiement manuel doit donc avoir été réellement
+     * effectué avant que l'administrateur clique sur
+     * le bouton de confirmation.
+     */
     const result =
       await approveAdminPayout({
         payoutId:
@@ -216,6 +238,13 @@ export async function POST(
       null;
 
     try {
+      /*
+       * On conserve la fonction d'e-mail existante
+       * afin de ne pas casser ton système de mails.
+       *
+       * L'e-mail est envoyé après confirmation
+       * définitive du paiement.
+       */
       await sendPayoutApprovedEmail({
         to:
           result.organizerEmail,
@@ -247,8 +276,12 @@ export async function POST(
         processedAt:
           result.processedAt,
 
+        /*
+         * Le retrait étant déjà payé, on ne communique
+         * plus de délai futur.
+         */
         estimatedDelay:
-          parsed.data.estimatedDelay,
+          null,
       });
 
       emailSent =
@@ -257,10 +290,10 @@ export async function POST(
       emailError =
         mailError instanceof Error
           ? mailError.message
-          : "L’e-mail de notification n’a pas pu être envoyé.";
+          : "L’e-mail de confirmation n’a pas pu être envoyé.";
 
       console.error(
-        "[ADMIN_PAYOUT_APPROVED_EMAIL_ERROR]",
+        "[ADMIN_PAYOUT_PAID_EMAIL_ERROR]",
         mailError,
       );
     }
@@ -271,14 +304,15 @@ export async function POST(
 
       message:
         emailSent
-          ? "Le retrait a été approuvé et l’organisateur a été notifié."
-          : "Le retrait a été approuvé, mais l’e-mail de notification n’a pas pu être envoyé.",
+          ? "Le retrait a été marqué comme payé et l’organisateur a reçu la confirmation."
+          : "Le retrait a été marqué comme payé, mais l’e-mail de confirmation n’a pas pu être envoyé.",
 
       data:
         result,
 
       notification: {
         emailSent,
+
         error:
           emailError,
       },

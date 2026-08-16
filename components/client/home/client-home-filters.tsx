@@ -375,107 +375,18 @@ function ClientHomeFiltersContent({
 
   return (
     <section
-      aria-labelledby="client-home-filters-title"
+      aria-label="Rechercher et filtrer les événements"
       className={cn(
         "w-full min-w-0 overflow-hidden rounded-2xl border border-white/[0.08] bg-[#071014]/96 shadow-[0_18px_60px_rgba(0,0,0,0.24)] backdrop-blur-xl sm:rounded-3xl",
         className,
       )}
     >
       {/*
-        En-tête visible sur tablette et ordinateur.
-        Il est masqué sur mobile pour réduire fortement la hauteur.
-      */}
-      <div className="hidden border-b border-white/[0.07] px-5 py-4 sm:flex sm:items-center sm:justify-between xl:px-6">
-        <div className="flex min-w-0 items-center gap-3">
-          <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-lime-500/20 bg-lime-500/[0.07] text-lime-300">
-            <SlidersHorizontal
-              aria-hidden="true"
-              className="h-4 w-4"
-            />
-          </span>
-
-          <div className="min-w-0">
-            <h2
-              id="client-home-filters-title"
-              className="truncate text-base font-black text-white sm:text-lg"
-            >
-              Rechercher et filtrer
-            </h2>
-
-            <p className="mt-1 line-clamp-2 text-xs leading-5 text-neutral-600">
-              Trouvez rapidement l’événement qui vous correspond.
-            </p>
-          </div>
-        </div>
-
-        <div className="flex flex-wrap items-center gap-2">
-          {activeFiltersCount >
-            0 && (
-            <span className="inline-flex h-8 items-center rounded-full border border-emerald-500/20 bg-emerald-500/[0.07] px-3 text-[10px] font-black text-emerald-300">
-              {activeFiltersCount} filtre
-              {activeFiltersCount >
-              1
-                ? "s"
-                : ""}{" "}
-              actif
-              {activeFiltersCount >
-              1
-                ? "s"
-                : ""}
-            </span>
-          )}
-
-          {activeFiltersCount >
-            0 && (
-            <button
-              type="button"
-              onClick={
-                resetFilters
-              }
-              className="inline-flex h-9 items-center justify-center gap-2 rounded-xl border border-red-500/20 bg-red-500/[0.06] px-3 text-xs font-bold text-red-400 transition hover:bg-red-500/[0.1] active:scale-95"
-            >
-              <X
-                aria-hidden="true"
-                className="h-4 w-4"
-              />
-              Réinitialiser
-            </button>
-          )}
-        </div>
-      </div>
-
-      {/*
         Barre mobile compacte :
         recherche sur toute la largeur,
         puis deux colonnes pour les filtres.
       */}
       <div className="p-3 sm:hidden">
-        <div className="mb-3 flex items-center justify-between gap-3">
-          <h2
-            id="client-home-filters-title-mobile"
-            className="text-sm font-black text-white"
-          >
-            Trouver un événement
-          </h2>
-
-          {activeFiltersCount >
-            0 && (
-            <button
-              type="button"
-              onClick={
-                resetFilters
-              }
-              className="inline-flex h-8 items-center justify-center gap-1.5 rounded-lg border border-red-500/20 bg-red-500/[0.06] px-2.5 text-[10px] font-bold text-red-400"
-            >
-              <X
-                aria-hidden="true"
-                className="h-3.5 w-3.5"
-              />
-              Effacer
-            </button>
-          )}
-        </div>
-
         <form
           role="search"
           onSubmit={(

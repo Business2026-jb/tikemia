@@ -27,6 +27,11 @@ export type ClientHomeHeroProps = {
   secondaryActionHref?: string;
   secondaryActionLabel?: string;
 
+  /**
+   * Conservé uniquement pour compatibilité avec les anciens appels.
+   * La barre de recherche secondaire du hero a été supprimée afin
+   * d’éviter le doublon avec ClientHomeFilters.
+   */
   searchAnchorHref?: string;
 
   className?: string;
@@ -65,9 +70,6 @@ export default function ClientHomeHero({
 
   secondaryActionLabel =
     "Voir tous les événements",
-
-  searchAnchorHref =
-    "#client-home-filters",
 
   className,
 }: ClientHomeHeroProps) {
@@ -170,42 +172,6 @@ export default function ClientHomeHero({
             </Link>
           </div>
         </div>
-      </div>
-
-      {/*
-        Cette barre reste disponible sur tablette et ordinateur.
-        Elle est masquée sur mobile afin d’éviter une répétition avec
-        la section de filtres située immédiatement après le hero.
-      */}
-      <div className="relative mx-auto hidden w-full max-w-[1600px] px-5 pb-5 sm:block lg:px-8">
-        <Link
-          href={
-            searchAnchorHref
-          }
-          className="group flex min-h-14 w-full items-center gap-3 rounded-2xl border border-white/[0.1] bg-[#071014]/94 px-4 py-3 shadow-[0_18px_50px_rgba(0,0,0,0.28)] backdrop-blur-2xl transition hover:border-lime-500/20 sm:px-5"
-        >
-          <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-lime-500/20 bg-lime-500/[0.08] text-lime-300">
-            <Search
-              aria-hidden="true"
-              className="h-[18px] w-[18px]"
-            />
-          </span>
-
-          <span className="min-w-0 flex-1">
-            <span className="block truncate text-sm font-black text-white">
-              Rechercher un événement
-            </span>
-
-            <span className="mt-0.5 block truncate text-xs text-neutral-600">
-              Artiste, organisateur, ville, lieu ou catégorie
-            </span>
-          </span>
-
-          <ArrowRight
-            aria-hidden="true"
-            className="h-4 w-4 shrink-0 text-neutral-600 transition group-hover:translate-x-0.5 group-hover:text-lime-300"
-          />
-        </Link>
       </div>
     </section>
   );
