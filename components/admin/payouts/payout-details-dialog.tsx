@@ -529,9 +529,8 @@ export default function PayoutDetailsDialog({
                       label="Compte"
                       value={
                         payout.destination
-                          ?.bankAccountNumberLast4
-                          ? `•••• ${payout.destination.bankAccountNumberLast4}`
-                          : null
+                          ?.bankAccountNumber ??
+                        null
                       }
                     />
 
@@ -539,9 +538,8 @@ export default function PayoutDetailsDialog({
                       label="IBAN"
                       value={
                         payout.destination
-                          ?.ibanLast4
-                          ? `•••• ${payout.destination.ibanLast4}`
-                          : null
+                          ?.iban ??
+                        null
                       }
                     />
 
@@ -557,9 +555,10 @@ export default function PayoutDetailsDialog({
                       label="Téléphone"
                       value={
                         payout.destination
-                          ?.phoneNumberLast4
-                          ? `•••• ${payout.destination.phoneNumberLast4}`
-                          : null
+                          ?.fullPhoneNumber ??
+                        payout.destination
+                          ?.phoneNumber ??
+                        null
                       }
                     />
 
@@ -575,9 +574,8 @@ export default function PayoutDetailsDialog({
                       label="Adresse crypto"
                       value={
                         payout.destination
-                          ?.cryptoAddressLast6
-                          ? `•••••• ${payout.destination.cryptoAddressLast6}`
-                          : null
+                          ?.cryptoAddress ??
+                        null
                       }
                     />
                   </div>
