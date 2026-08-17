@@ -36,7 +36,7 @@ const PAYMENT_METHODS: readonly PaymentMethodOption[] = [
     logos: [
       { src: "/images/payments/visa.png", alt: "Visa" },
       {
-        src: "/images/payments/mastercard.webp",
+        src: "/images/payments/mastercard.png",
         alt: "Mastercard",
       },
     ],
@@ -48,7 +48,7 @@ const PAYMENT_METHODS: readonly PaymentMethodOption[] = [
     icon: "phone",
     logos: [
       {
-        src: "/images/payments/mtn-momo.webp",
+        src: "/images/payments/mtn-momo.png",
         alt: "MTN Mobile Money",
       },
     ],
@@ -60,7 +60,7 @@ const PAYMENT_METHODS: readonly PaymentMethodOption[] = [
     icon: "phone",
     logos: [
       {
-        src: "/images/payments/moov-money.jpeg",
+        src: "/images/payments/moov-money.png",
         alt: "Moov Money",
       },
     ],
