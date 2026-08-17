@@ -1179,18 +1179,35 @@ export async function POST(
     });
 
     /*
-     * Le paiement a déjà été finalisé.
-     * La route reste idempotente : elle ne génère pas les billets une
-     * deuxième fois.
+     * SOURCE DE VÉRITÉ TIKEMIA :
+     *
+     * Si le paiement est déjà SUCCESS et la commande déjà PAID dans
+     * notre base, le paiement est définitivement confirmé côté Tikemia.
+     *
+     * IMPORTANT :
+     * - on ne redemande PAS une seconde confirmation au prestataire ;
+     * - on ne régénère PAS les billets ;
+     * - on ne transforme jamais un paiement déjà finalisé en faux échec
+     *   simplement parce qu'une nouvelle requête Moneroo/FedaPay échoue ;
+     * - cette branche reste protégée par assertPaymentOwnership() juste
+     *   au-dessus, donc elle n'expose pas une commande à un tiers.
+     *
+     * ticketsIssuedAt sert uniquement à indiquer si les billets sont déjà
+     * prêts au téléchargement. Il ne doit PAS conditionner le succès du
+     * paiement lui-même.
      */
     if (
       payment.status ===
         PaymentStatus.SUCCESS &&
       payment.order.status ===
-        "PAID" &&
-      payment.order
-        .ticketsIssuedAt
+        "PAID"
     ) {
+      const ticketsAreReady =
+        Boolean(
+          payment.order
+            .ticketsIssuedAt,
+        );
+
       return jsonResponse({
         success:
           true,
@@ -1199,7 +1216,9 @@ export async function POST(
           "PAYMENT_ALREADY_SUCCESSFUL",
 
         message:
-          "Le paiement est déjà confirmé et les billets sont disponibles.",
+          ticketsAreReady
+            ? "Le paiement est confirmé et les billets sont disponibles."
+            : "Le paiement est déjà confirmé. Vos billets sont en cours de préparation.",
 
         data:
           buildSuccessData({
