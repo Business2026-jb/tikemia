@@ -2,6 +2,11 @@
   "name": "tikemia",
   "version": "0.1.0",
   "private": true,
+
+  "engines": {
+    "node": "20.x"
+  },
+
   "scripts": {
     "dev": "next dev",
     "build": "next build",
@@ -9,9 +14,11 @@
     "lint": "eslint",
     "db:seed": "prisma db seed"
   },
+
   "prisma": {
     "seed": "tsx prisma/seed.ts"
   },
+
   "dependencies": {
     "@next/third-parties": "^16.3.0",
     "@prisma/client": "6.19.0",
@@ -35,6 +42,7 @@
     "tailwindcss": "^4.3.3",
     "zod": "^4.4.3"
   },
+
   "devDependencies": {
     "@types/node": "^20",
     "@types/qrcode": "^1.5.6",
