@@ -49,6 +49,9 @@ const DEFAULT_RESERVATION_MINUTES = 15;
 const PAYMENT_RETURN_TOKEN_TTL_MS =
   24 * 60 * 60 * 1000;
 
+const GUEST_PAYMENT_COOKIE_PREFIX =
+  "tikemia_guest_payment_";
+
 const paymentMethodSchema = z.enum([
   "MONEROO_CHECKOUT",
   "FEDAPAY_CHECKOUT",
@@ -283,6 +286,43 @@ function createPaymentReturnToken({
     .digest("base64url");
 
   return `${encodedPayload}.${signature}`;
+}
+
+
+function getGuestPaymentCookieName(
+  paymentId: string,
+): string {
+  return `${GUEST_PAYMENT_COOKIE_PREFIX}${paymentId}`;
+}
+
+function attachGuestPaymentVerificationCookie({
+  response,
+  paymentId,
+  returnToken,
+  expiresAt,
+}: {
+  response: NextResponse;
+  paymentId: string;
+  returnToken: string;
+  expiresAt: number;
+}): NextResponse {
+  response.cookies.set({
+    name:
+      getGuestPaymentCookieName(paymentId),
+    value:
+      returnToken,
+    httpOnly: true,
+    secure:
+      process.env.NODE_ENV ===
+      "production",
+    sameSite: "lax",
+    path:
+      "/api/client/payments/verify",
+    expires:
+      new Date(expiresAt),
+  });
+
+  return response;
 }
 
 
@@ -571,12 +611,10 @@ function buildReturnUrl({
   baseUrl,
   paymentId,
   orderId,
-  returnToken,
 }: {
   baseUrl: string;
   paymentId: string;
   orderId: string;
-  returnToken?: string | null;
 }): string {
   const url =
     new URL(
@@ -592,13 +630,6 @@ function buildReturnUrl({
     "orderId",
     orderId,
   );
-
-  if (returnToken) {
-    url.searchParams.set(
-      "returnToken",
-      returnToken,
-    );
-  }
 
   return url.toString();
 }
@@ -1122,37 +1153,79 @@ export async function POST(request: Request) {
           now.getTime()
       )
     ) {
-      return jsonResponse({
-        success: true,
-        code:
-          "PAYMENT_ALREADY_PREPARED",
-        message:
-          "Le paiement est déjà prêt.",
-        payment: {
-          id: order.payment.id,
-          status:
-            order.payment.status,
-          provider:
-            order.payment.provider,
-          method:
-            order.payment.method,
-          checkoutUrl:
-            order.payment.checkoutUrl,
-          amount:
-            order.payment.amount
-              .toFixed(2),
-          currency:
-            order.payment.currency,
-          couponCode:
-            storedCouponCode,
-          expiresAt:
+      const response =
+        jsonResponse({
+          success: true,
+          code:
+            "PAYMENT_ALREADY_PREPARED",
+          message:
+            "Le paiement est déjà prêt.",
+          payment: {
+            id: order.payment.id,
+            status:
+              order.payment.status,
+            provider:
+              order.payment.provider,
+            method:
+              order.payment.method,
+            checkoutUrl:
+              order.payment.checkoutUrl,
+            amount:
+              order.payment.amount
+                .toFixed(2),
+            currency:
+              order.payment.currency,
+            couponCode:
+              storedCouponCode,
+            expiresAt:
+              order.payment.expiresAt
+                ?.toISOString() ?? null,
+            orderId: order.id,
+            orderReference:
+              order.reference,
+          },
+        });
+
+      const isGuestOrder =
+        !customer &&
+        !order.customerId;
+
+      if (
+        isGuestOrder &&
+        order.checkoutTokenHash
+      ) {
+        const returnTokenExpiresAt =
+          Math.max(
             order.payment.expiresAt
-              ?.toISOString() ?? null,
-          orderId: order.id,
-          orderReference:
-            order.reference,
-        },
-      });
+              ?.getTime() ??
+              0,
+            now.getTime() +
+              PAYMENT_RETURN_TOKEN_TTL_MS,
+          );
+
+        const returnToken =
+          createPaymentReturnToken({
+            checkoutTokenHash:
+              order.checkoutTokenHash,
+            paymentId:
+              order.payment.id,
+            orderId:
+              order.id,
+            expiresAt:
+              returnTokenExpiresAt,
+          });
+
+        return attachGuestPaymentVerificationCookie({
+          response,
+          paymentId:
+            order.payment.id,
+          returnToken,
+          expiresAt:
+            returnTokenExpiresAt,
+        });
+      }
+
+      return response;
     }
 
     const validatedCoupon =
@@ -1546,44 +1619,18 @@ export async function POST(request: Request) {
     attemptId = prepared.attemptId;
 
     /*
-     * Retour sécurisé du paiement.
+     * IMPORTANT :
      *
-     * - Client connecté : la session authentifiée suffit à autoriser
-     *   la vérification de sa commande. Aucun returnToken n'est nécessaire.
+     * L'URL transmise au prestataire reste volontairement courte :
+     * uniquement paymentId + orderId.
      *
-     * - Client invité : le checkoutToken brut n'est JAMAIS placé dans l'URL.
-     *   On génère à la place un returnToken signé avec checkoutTokenHash.
-     *   Ce token autorise uniquement la vérification de CETTE commande ;
-     *   il ne constitue jamais une preuve de paiement.
+     * Pour une commande invitée, l'autorisation de retour est conservée
+     * séparément dans un cookie HttpOnly sécurisé créé après l'initialisation
+     * du paiement. Le checkoutToken brut n'est jamais placé dans l'URL.
      *
      * La preuve réelle du paiement reste exclusivement côté serveur
      * (webhook + vérification directe auprès du prestataire).
      */
-    const isGuestOrder =
-      !customer &&
-      !order.customerId;
-
-    const returnTokenExpiresAt =
-      Math.max(
-        paymentExpiresAt.getTime(),
-        now.getTime() +
-          PAYMENT_RETURN_TOKEN_TTL_MS,
-      );
-
-    const returnToken =
-      isGuestOrder &&
-      order.checkoutTokenHash
-        ? createPaymentReturnToken({
-            checkoutTokenHash:
-              order.checkoutTokenHash,
-            paymentId,
-            orderId:
-              order.id,
-            expiresAt:
-              returnTokenExpiresAt,
-          })
-        : null;
-
     const returnUrl =
       buildReturnUrl({
         baseUrl:
@@ -1591,7 +1638,6 @@ export async function POST(request: Request) {
         paymentId,
         orderId:
           order.id,
-        returnToken,
       });
 
     const cancelUrl =
@@ -1731,36 +1777,74 @@ export async function POST(request: Request) {
       },
     );
 
-    return jsonResponse(
-      {
-        success: true,
-        message:
-          "Le paiement sécurisé a été préparé.",
-        payment: {
-          id: paymentId,
-          orderId: order.id,
-          orderReference:
-            order.reference,
-          provider:
-            hostedCheckout.provider,
-          method: paymentMethod,
-          status:
-            hostedCheckout.status,
-          amount:
-            payableAmount.toFixed(2),
-          currency:
-            order.currency,
-          coupon:
-            couponSnapshot,
-          checkoutUrl,
-          returnUrl,
-          cancelUrl,
-          expiresAt:
-            paymentExpiresAt.toISOString(),
+    const response =
+      jsonResponse(
+        {
+          success: true,
+          message:
+            "Le paiement sécurisé a été préparé.",
+          payment: {
+            id: paymentId,
+            orderId: order.id,
+            orderReference:
+              order.reference,
+            provider:
+              hostedCheckout.provider,
+            method: paymentMethod,
+            status:
+              hostedCheckout.status,
+            amount:
+              payableAmount.toFixed(2),
+            currency:
+              order.currency,
+            coupon:
+              couponSnapshot,
+            checkoutUrl,
+            returnUrl,
+            cancelUrl,
+            expiresAt:
+              paymentExpiresAt.toISOString(),
+          },
         },
-      },
-      201,
-    );
+        201,
+      );
+
+    const isGuestOrder =
+      !customer &&
+      !order.customerId;
+
+    if (
+      isGuestOrder &&
+      order.checkoutTokenHash
+    ) {
+      const returnTokenExpiresAt =
+        Math.max(
+          paymentExpiresAt.getTime(),
+          now.getTime() +
+            PAYMENT_RETURN_TOKEN_TTL_MS,
+        );
+
+      const returnToken =
+        createPaymentReturnToken({
+          checkoutTokenHash:
+            order.checkoutTokenHash,
+          paymentId,
+          orderId:
+            order.id,
+          expiresAt:
+            returnTokenExpiresAt,
+        });
+
+      return attachGuestPaymentVerificationCookie({
+        response,
+        paymentId,
+        returnToken,
+        expiresAt:
+          returnTokenExpiresAt,
+      });
+    }
+
+    return response;
   } catch (error) {
     const paymentError =
       getPaymentError(error, {

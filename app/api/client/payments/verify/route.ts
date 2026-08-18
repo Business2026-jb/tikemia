@@ -37,6 +37,16 @@ const DEFAULT_CLIENT_SESSION_COOKIE_NAME =
 const LEGACY_SESSION_COOKIE_NAME =
   "tikemia_session";
 
+const GUEST_PAYMENT_COOKIE_PREFIX =
+  "tikemia_guest_payment_";
+
+function getGuestPaymentCookieName(
+  paymentId: string,
+): string {
+  return `${GUEST_PAYMENT_COOKIE_PREFIX}${paymentId}`;
+}
+
+
 const verifyPaymentSchema = z
   .object({
     /*
@@ -1158,6 +1168,33 @@ export async function POST(
     requestedOrderId =
       payment.orderId;
 
+    /*
+     * Pour les commandes invitées, le nouveau flux conserve le jeton signé
+     * dans un cookie HttpOnly Tikemia afin de garder l'URL Moneroo courte.
+     *
+     * Compatibilité :
+     * - checkoutToken du sessionStorage : conservé ;
+     * - returnToken fourni par les anciens flux : conservé ;
+     * - cookie HttpOnly du nouveau flux : ajouté comme secours sécurisé.
+     */
+    const cookieStore =
+      await cookies();
+
+    const guestCookieToken =
+      normalizeText(
+        cookieStore.get(
+          getGuestPaymentCookieName(
+            payment.id,
+          ),
+        )?.value,
+      );
+
+    const effectiveReturnToken =
+      normalizeText(
+        input.returnToken,
+      ) ||
+      guestCookieToken;
+
     assertPaymentOwnership({
       customer,
 
@@ -1167,9 +1204,7 @@ export async function POST(
         ),
 
       returnToken:
-        normalizeText(
-          input.returnToken,
-        ),
+        effectiveReturnToken,
 
       paymentId:
         payment.id,
