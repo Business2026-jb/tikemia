@@ -23,7 +23,15 @@ import {
 
 const MONEROO_PROVIDER = "MONEROO";
 
-const MAX_TRANSACTION_ATTEMPTS = 3;
+const MAX_TRANSACTION_ATTEMPTS = 5;
+
+const MAX_POST_COMPLETION_ATTEMPTS = 5;
+
+const RETRY_BASE_DELAY_MS = 120;
+
+const DELIVERY_SETTLE_ATTEMPTS = 6;
+
+const DELIVERY_SETTLE_DELAY_MS = 300;
 
 type CouponPaymentSnapshot = Readonly<{
   promoCodeId: string;
@@ -268,13 +276,133 @@ function readCouponSnapshot(
   };
 }
 
+function getKnownPrismaErrorCode(
+  error: unknown,
+): string | null {
+  let current:
+    unknown =
+      error;
+
+  for (
+    let depth = 0;
+    depth < 5;
+    depth += 1
+  ) {
+    if (
+      current instanceof
+        Prisma.PrismaClientKnownRequestError
+    ) {
+      return current.code;
+    }
+
+    if (
+      current instanceof
+        SuccessfulPaymentCompletionError
+    ) {
+      current =
+        current.causeValue;
+
+      continue;
+    }
+
+    if (
+      current instanceof Error
+    ) {
+      current =
+        current.cause;
+
+      continue;
+    }
+
+    break;
+  }
+
+  return null;
+}
+
 function isRetryableTransactionError(
   error: unknown,
 ): boolean {
   return (
+    getKnownPrismaErrorCode(
+      error,
+    ) === "P2034"
+  );
+}
+
+function isRetryableCompletionError(
+  error: unknown,
+): boolean {
+  if (
+    isRetryableTransactionError(
+      error,
+    )
+  ) {
+    return true;
+  }
+
+  return (
     error instanceof
-      Prisma.PrismaClientKnownRequestError &&
-    error.code === "P2034"
+      SuccessfulPaymentCompletionError &&
+    (
+      error.code ===
+        "TICKET_RESERVATION_CONCURRENT_UPDATE" ||
+      error.code ===
+        "PAYMENT_COUPON_CONCURRENT_UPDATE"
+    )
+  );
+}
+
+function isRetryablePostCompletionError(
+  error: unknown,
+): boolean {
+  const code =
+    getKnownPrismaErrorCode(
+      error,
+    );
+
+  return (
+    code === "P2034" ||
+    code === "P2002"
+  );
+}
+
+function getRetryDelayMs(
+  attempt: number,
+): number {
+  const exponent =
+    Math.max(
+      0,
+      attempt - 1,
+    );
+
+  const baseDelay =
+    Math.min(
+      1_200,
+      RETRY_BASE_DELAY_MS *
+        2 ** exponent,
+    );
+
+  const jitter =
+    Math.floor(
+      Math.random() * 90,
+    );
+
+  return baseDelay + jitter;
+}
+
+async function waitForRetry(
+  attempt: number,
+): Promise<void> {
+  await new Promise<void>(
+    (resolve) => {
+      setTimeout(
+        resolve,
+        getRetryDelayMs(
+          attempt,
+        ),
+      );
+    },
   );
 }
 
@@ -1451,12 +1579,16 @@ async function prepareSuccessfulPayment({
       });
     } catch (error) {
       if (
-        isRetryableTransactionError(
+        isRetryableCompletionError(
           error,
         ) &&
         attempt <
           MAX_TRANSACTION_ATTEMPTS
       ) {
+        await waitForRetry(
+          attempt,
+        );
+
         continue;
       }
 
@@ -1469,6 +1601,52 @@ async function prepareSuccessfulPayment({
     "PAYMENT_COMPLETION_TRANSACTION_FAILED",
   );
 }
+
+async function generateOrderTicketsWithRetry({
+  orderId,
+  issuedAt,
+}: {
+  orderId: string;
+  issuedAt: Date;
+}): Promise<GenerateOrderTicketsResult> {
+  for (
+    let attempt = 1;
+    attempt <=
+      MAX_POST_COMPLETION_ATTEMPTS;
+    attempt += 1
+  ) {
+    try {
+      return await generateOrderTickets({
+        orderId,
+        issuedAt,
+        createQrDocumentRecord:
+          true,
+      });
+    } catch (error) {
+      if (
+        isRetryablePostCompletionError(
+          error,
+        ) &&
+        attempt <
+          MAX_POST_COMPLETION_ATTEMPTS
+      ) {
+        await waitForRetry(
+          attempt,
+        );
+
+        continue;
+      }
+
+      throw error;
+    }
+  }
+
+  throw new SuccessfulPaymentCompletionError(
+    "Impossible de générer les billets après plusieurs tentatives.",
+    "PAYMENT_TICKET_ISSUANCE_RETRY_EXHAUSTED",
+  );
+}
+
 
 type DeliveryCandidate = Readonly<{
   userId: string | null;
@@ -1804,6 +1982,52 @@ async function ensureDeliveryLogs({
 }
 
 
+async function ensureDeliveryLogsWithRetry({
+  orderId,
+  ticketResult,
+}: {
+  orderId: string;
+  ticketResult: GenerateOrderTicketsResult;
+}): Promise<void> {
+  for (
+    let attempt = 1;
+    attempt <=
+      MAX_POST_COMPLETION_ATTEMPTS;
+    attempt += 1
+  ) {
+    try {
+      await ensureDeliveryLogs({
+        orderId,
+        ticketResult,
+      });
+
+      return;
+    } catch (error) {
+      if (
+        isRetryablePostCompletionError(
+          error,
+        ) &&
+        attempt <
+          MAX_POST_COMPLETION_ATTEMPTS
+      ) {
+        await waitForRetry(
+          attempt,
+        );
+
+        continue;
+      }
+
+      throw error;
+    }
+  }
+
+  throw new SuccessfulPaymentCompletionError(
+    "Impossible de préparer les livraisons après plusieurs tentatives.",
+    "PAYMENT_DELIVERY_PREPARATION_RETRY_EXHAUSTED",
+  );
+}
+
+
 async function hasSentTicketEmail({
   orderId,
 }: {
@@ -1840,26 +2064,103 @@ async function hasSentTicketEmail({
   );
 }
 
+async function waitForSentTicketEmail({
+  orderId,
+}: {
+  orderId: string;
+}): Promise<boolean> {
+  for (
+    let attempt = 1;
+    attempt <=
+      DELIVERY_SETTLE_ATTEMPTS;
+    attempt += 1
+  ) {
+    if (
+      await hasSentTicketEmail({
+        orderId,
+      })
+    ) {
+      return true;
+    }
+
+    if (
+      attempt <
+        DELIVERY_SETTLE_ATTEMPTS
+    ) {
+      await new Promise<void>(
+        (resolve) => {
+          setTimeout(
+            resolve,
+            DELIVERY_SETTLE_DELAY_MS,
+          );
+        },
+      );
+    }
+  }
+
+  return false;
+}
+
+
 async function sendTicketEmailImmediately({
   orderId,
   orderReference,
+  waitForExistingDelivery = false,
 }: {
   orderId: string;
   orderReference: string;
+  waitForExistingDelivery?: boolean;
 }): Promise<void> {
-  const result =
-    await processEmailDeliveries({
+  if (
+    waitForExistingDelivery &&
+    await waitForSentTicketEmail({
       orderId,
+    })
+  ) {
+    return;
+  }
 
-      limit:
-        1,
+  let result:
+    Awaited<
+      ReturnType<
+        typeof processEmailDeliveries
+      >
+    >;
 
-      maxAttempts:
-        5,
+  try {
+    result =
+      await processEmailDeliveries({
+        orderId,
 
-      forceResend:
-        false,
-    });
+        limit:
+          1,
+
+        maxAttempts:
+          5,
+
+        forceResend:
+          false,
+      });
+  } catch (error) {
+    /*
+     * Un autre traitement peut avoir finalisé exactement le même e-mail
+     * pendant notre tentative. Avant de considérer l'envoi comme échoué,
+     * on laisse brièvement le DeliveryLog concurrent se stabiliser.
+     */
+    if (
+      await waitForSentTicketEmail({
+        orderId,
+      })
+    ) {
+      return;
+    }
+
+    throw new SuccessfulPaymentCompletionError(
+      "L'e-mail contenant les billets n'a pas pu être envoyé pour le moment.",
+      "PAYMENT_EMAIL_DELIVERY_NOT_SENT",
+      error,
+    );
+  }
 
   if (
     result.sentOrders > 0
@@ -1868,12 +2169,11 @@ async function sendTicketEmailImmediately({
   }
 
   /*
-   * Lors d'un nouvel appel du webhook, l'e-mail peut déjà avoir été envoyé.
-   * Dans ce cas, aucun journal PENDING n'est sélectionné, mais la livraison
-   * réussie existe déjà et il ne faut surtout pas envoyer un doublon.
+   * Lors d'un rejeu du webhook ou d'une vérification navigateur concurrente,
+   * l'e-mail peut déjà avoir été envoyé par l'autre traitement.
    */
   const alreadySent =
-    await hasSentTicketEmail({
+    await waitForSentTicketEmail({
       orderId,
     });
 
@@ -1971,15 +2271,12 @@ export async function completeSuccessfulPayment(
 
   try {
     ticketResult =
-      await generateOrderTickets({
+      await generateOrderTicketsWithRetry({
         orderId:
           prepared.orderId,
 
         issuedAt:
           paidAt,
-
-        createQrDocumentRecord:
-          true,
       });
   } catch (error) {
     throw new SuccessfulPaymentCompletionError(
@@ -2001,49 +2298,98 @@ export async function completeSuccessfulPayment(
     );
   }
 
+  let deliveriesPrepared =
+    true;
+
   try {
-    await ensureDeliveryLogs({
+    await ensureDeliveryLogsWithRetry({
       orderId:
         prepared.orderId,
 
       ticketResult,
     });
   } catch (error) {
+    deliveriesPrepared =
+      false;
+
     /*
-     * Le paiement et les billets sont déjà confirmés.
-     * L’erreur est remontée afin que le webhook ou la réconciliation
-     * puisse relancer uniquement la préparation des livraisons.
+     * Le paiement et les billets sont déjà définitivement confirmés.
+     * Une panne ou une concurrence sur la couche de livraison ne doit donc
+     * jamais transformer la page de succès du paiement en erreur.
+     *
+     * Les DeliveryLog restent réconciliables séparément et un rejeu futur
+     * de completeSuccessfulPayment() peut à nouveau préparer l'envoi.
      */
-    throw new SuccessfulPaymentCompletionError(
-      "Le paiement et les billets sont confirmés, mais les livraisons doivent être préparées à nouveau.",
-      "PAYMENT_DELIVERY_PREPARATION_FAILED",
-      error,
+    console.error(
+      "[PAYMENT_DELIVERY_PREPARATION_DEFERRED]",
+      {
+        paymentId,
+        orderId:
+          prepared.orderId,
+        orderReference:
+          prepared.orderReference,
+        error:
+          error instanceof Error
+            ? {
+                name:
+                  error.name,
+                message:
+                  error.message,
+              }
+            : {
+                message:
+                  String(error),
+              },
+      },
     );
   }
 
-  /*
-   * L'envoi des billets est vérifié explicitement.
-   *
-   * Avant cette correction, processEmailDeliveries() pouvait retourner
-   * failedOrders = 1 sans lever d'exception. Le résultat était ignoré,
-   * la fonction retournait un succès et les DeliveryLog restaient PENDING
-   * ou FAILED sans que le webhook relance correctement l'envoi.
-   *
-   * Désormais, l'exécution ne se termine avec succès que si :
-   * - un e-mail de billets vient d'être envoyé ; ou
-   * - un e-mail de billets SENT existe déjà pour cette commande.
-   *
-   * En cas d'échec, une erreur est remontée au webhook. Le paiement et les
-   * billets restent confirmés, mais l'appel pourra être rejoué sans double
-   * envoi grâce au contrôle du DeliveryLog déjà SENT.
-   */
-  await sendTicketEmailImmediately({
-    orderId:
-      prepared.orderId,
+  if (deliveriesPrepared) {
+    try {
+      await sendTicketEmailImmediately({
+        orderId:
+          prepared.orderId,
 
-    orderReference:
-      prepared.orderReference,
-  });
+        orderReference:
+          prepared.orderReference,
+
+        /*
+         * Lorsqu'un autre appel a déjà marqué la commande PAID, on lui laisse
+         * d'abord le temps de terminer son envoi avant de tenter le nôtre.
+         */
+        waitForExistingDelivery:
+          prepared.alreadyCompleted,
+      });
+    } catch (error) {
+      /*
+       * Même principe : le paiement et les billets restent valides.
+       * L'e-mail est un effet secondaire réessayable et ne doit pas produire
+       * PAYMENT_INTERNAL_ERROR côté client après un paiement réussi.
+       */
+      console.error(
+        "[PAYMENT_EMAIL_DELIVERY_DEFERRED]",
+        {
+          paymentId,
+          orderId:
+            prepared.orderId,
+          orderReference:
+            prepared.orderReference,
+          error:
+            error instanceof Error
+              ? {
+                  name:
+                    error.name,
+                  message:
+                    error.message,
+                }
+              : {
+                  message:
+                    String(error),
+                },
+        },
+      );
+    }
+  }
 
   return Object.freeze({
     paymentId,

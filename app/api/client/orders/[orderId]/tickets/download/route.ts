@@ -69,7 +69,8 @@ function sanitizeFileName(
       )
       .replace(
         /^[-.]+|[-.]+$/g,
-        "");
+        "",
+      );
 
   return (
     normalized.slice(
@@ -255,38 +256,47 @@ export async function GET(
     params,
   }: DownloadOrderTicketsRouteProps,
 ) {
+  /*
+   * IMPORTANT :
+   *
+   * requireCurrentClient() peut appeler redirect().
+   * Avec Next.js, redirect() interrompt volontairement l'exécution avec
+   * NEXT_REDIRECT. Il ne faut donc pas placer cet appel dans le try/catch
+   * métier ci-dessous, sinon une redirection normale est journalisée puis
+   * transformée à tort en erreur HTTP 500.
+   */
+  const {
+    orderId: rawOrderId,
+  } =
+    await params;
+
+  const orderId =
+    normalizeText(
+      rawOrderId,
+    );
+
+  if (
+    !orderId
+  ) {
+    return createJsonError({
+      code:
+        "ORDER_ID_REQUIRED",
+
+      message:
+        "L’identifiant de la commande est obligatoire.",
+
+      status:
+        400,
+    });
+  }
+
+  const client =
+    await requireCurrentClient({
+      redirectTo:
+        "/account/orders",
+    });
+
   try {
-    const {
-      orderId: rawOrderId,
-    } =
-      await params;
-
-    const orderId =
-      normalizeText(
-        rawOrderId,
-      );
-
-    if (
-      !orderId
-    ) {
-      return createJsonError({
-        code:
-          "ORDER_ID_REQUIRED",
-
-        message:
-          "L’identifiant de la commande est obligatoire.",
-
-        status:
-          400,
-      });
-    }
-
-    const client =
-      await requireCurrentClient({
-        redirectTo:
-          `/account/orders`,
-      });
-
     const order =
       await prisma.order.findUnique({
         where: {
