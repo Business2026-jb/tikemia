@@ -1,5 +1,6 @@
 import {
   createHash,
+  createHmac,
   timingSafeEqual,
 } from "node:crypto";
 
@@ -44,6 +45,9 @@ const LEGACY_SESSION_COOKIE_NAME =
   "tikemia_session";
 
 const DEFAULT_RESERVATION_MINUTES = 15;
+
+const PAYMENT_RETURN_TOKEN_TTL_MS =
+  24 * 60 * 60 * 1000;
 
 const paymentMethodSchema = z.enum([
   "MONEROO_CHECKOUT",
@@ -241,6 +245,44 @@ function secureHashEquals(
     leftBuffer,
     rightBuffer,
   );
+}
+
+type PaymentReturnTokenPayload = Readonly<{
+  paymentId: string;
+  orderId: string;
+  expiresAt: number;
+}>;
+
+function createPaymentReturnToken({
+  checkoutTokenHash,
+  paymentId,
+  orderId,
+  expiresAt,
+}: {
+  checkoutTokenHash: string;
+  paymentId: string;
+  orderId: string;
+  expiresAt: number;
+}): string {
+  const payload: PaymentReturnTokenPayload = {
+    paymentId,
+    orderId,
+    expiresAt,
+  };
+
+  const encodedPayload = Buffer.from(
+    JSON.stringify(payload),
+    "utf8",
+  ).toString("base64url");
+
+  const signature = createHmac(
+    "sha256",
+    checkoutTokenHash,
+  )
+    .update(encodedPayload, "utf8")
+    .digest("base64url");
+
+  return `${encodedPayload}.${signature}`;
 }
 
 
@@ -529,10 +571,12 @@ function buildReturnUrl({
   baseUrl,
   paymentId,
   orderId,
+  returnToken,
 }: {
   baseUrl: string;
   paymentId: string;
   orderId: string;
+  returnToken?: string | null;
 }): string {
   const url =
     new URL(
@@ -548,6 +592,13 @@ function buildReturnUrl({
     "orderId",
     orderId,
   );
+
+  if (returnToken) {
+    url.searchParams.set(
+      "returnToken",
+      returnToken,
+    );
+  }
 
   return url.toString();
 }
@@ -1495,14 +1546,44 @@ export async function POST(request: Request) {
     attemptId = prepared.attemptId;
 
     /*
-     * IMPORTANT :
+     * Retour sécurisé du paiement.
      *
-     * L'URL envoyée au prestataire reste volontairement courte et stable.
-     * Aucun checkoutToken ni returnToken n'est exposé dans l'URL Moneroo.
+     * - Client connecté : la session authentifiée suffit à autoriser
+     *   la vérification de sa commande. Aucun returnToken n'est nécessaire.
+     *
+     * - Client invité : le checkoutToken brut n'est JAMAIS placé dans l'URL.
+     *   On génère à la place un returnToken signé avec checkoutTokenHash.
+     *   Ce token autorise uniquement la vérification de CETTE commande ;
+     *   il ne constitue jamais une preuve de paiement.
      *
      * La preuve réelle du paiement reste exclusivement côté serveur
-     * (webhook + vérification du paiement chez le prestataire).
+     * (webhook + vérification directe auprès du prestataire).
      */
+    const isGuestOrder =
+      !customer &&
+      !order.customerId;
+
+    const returnTokenExpiresAt =
+      Math.max(
+        paymentExpiresAt.getTime(),
+        now.getTime() +
+          PAYMENT_RETURN_TOKEN_TTL_MS,
+      );
+
+    const returnToken =
+      isGuestOrder &&
+      order.checkoutTokenHash
+        ? createPaymentReturnToken({
+            checkoutTokenHash:
+              order.checkoutTokenHash,
+            paymentId,
+            orderId:
+              order.id,
+            expiresAt:
+              returnTokenExpiresAt,
+          })
+        : null;
+
     const returnUrl =
       buildReturnUrl({
         baseUrl:
@@ -1510,6 +1591,7 @@ export async function POST(request: Request) {
         paymentId,
         orderId:
           order.id,
+        returnToken,
       });
 
     const cancelUrl =
