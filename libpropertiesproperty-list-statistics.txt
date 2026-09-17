@@ -1,0 +1,860 @@
+import "server-only";
+
+import { db } from "../db";
+
+import type {
+  PropertyListStatistics,
+} from "../../types/property-list";
+
+/**
+ * ============================================================================
+ * CONFIGURATION
+ * ============================================================================
+ */
+
+/**
+ * Fuseau utilisé uniquement lorsqu'aucun fuseau valide
+ * n'est disponible dans AgencySetting.
+ *
+ * Le schéma Prisma utilise déjà Africa/Porto-Novo
+ * comme valeur par défaut.
+ */
+const DEFAULT_AGENCY_TIME_ZONE =
+  "Africa/Porto-Novo";
+
+/**
+ * Statuts qui correspondent aux biens actifs dans
+ * les statistiques générales.
+ *
+ * ARCHIVED est volontairement exclu.
+ */
+const NON_ARCHIVED_PROPERTY_STATUSES = [
+  "AVAILABLE",
+  "OCCUPIED",
+  "RESERVED",
+  "UNDER_MAINTENANCE",
+  "SOLD",
+] as const;
+
+/**
+ * Usages considérés comme louables.
+ *
+ * RENT_AND_SALE est volontairement inclus :
+ * le bien peut être loué même s'il est aussi à vendre.
+ */
+const RENTABLE_PROPERTY_PURPOSES = [
+  "RENT",
+  "RENT_AND_SALE",
+] as const;
+
+/**
+ * Usages considérés comme destinés à la vente.
+ */
+const SALE_PROPERTY_PURPOSES = [
+  "SALE",
+  "RENT_AND_SALE",
+] as const;
+
+/**
+ * ============================================================================
+ * TYPES INTERNES
+ * ============================================================================
+ */
+
+type AgencyMonthBoundaries =
+  Readonly<{
+    timeZone: string;
+
+    currentMonthStart:
+      Date;
+
+    nextMonthStart:
+      Date;
+  }>;
+
+/**
+ * ============================================================================
+ * VALIDATION
+ * ============================================================================
+ */
+
+/**
+ * Cette fonction est interne au serveur.
+ *
+ * agencyId doit toujours provenir de la session authentifiée
+ * et jamais directement de l'URL ou du navigateur.
+ */
+function normalizeAgencyId(
+  agencyId: string,
+): string {
+  const normalizedAgencyId =
+    agencyId.trim();
+
+  if (!normalizedAgencyId) {
+    throw new TypeError(
+      "agencyId est obligatoire pour calculer les statistiques des biens.",
+    );
+  }
+
+  return normalizedAgencyId;
+}
+
+/**
+ * ============================================================================
+ * NOMBRES
+ * ============================================================================
+ */
+
+function normalizeCount(
+  value: number,
+): number {
+  if (
+    !Number.isSafeInteger(
+      value,
+    ) ||
+    value < 0
+  ) {
+    return 0;
+  }
+
+  return value;
+}
+
+/**
+ * Calcule un pourcentage sécurisé compris entre 0 et 100.
+ *
+ * Lorsque aucun bien louable n'existe, on retourne null.
+ */
+function calculateOccupancyRate(
+  occupiedPropertiesCount:
+    number,
+  rentablePropertiesCount:
+    number,
+): number | null {
+  const occupiedCount =
+    normalizeCount(
+      occupiedPropertiesCount,
+    );
+
+  const rentableCount =
+    normalizeCount(
+      rentablePropertiesCount,
+    );
+
+  if (
+    rentableCount <= 0
+  ) {
+    return null;
+  }
+
+  const safeOccupiedCount =
+    Math.min(
+      occupiedCount,
+      rentableCount,
+    );
+
+  return Math.round(
+    (
+      safeOccupiedCount /
+      rentableCount
+    ) * 100,
+  );
+}
+
+/**
+ * ============================================================================
+ * FUSEAU HORAIRE
+ * ============================================================================
+ */
+
+/**
+ * Vérifie qu'un fuseau horaire IANA est reconnu
+ * par l'environnement Node.js.
+ */
+function isValidTimeZone(
+  value: string,
+): boolean {
+  try {
+    new Intl.DateTimeFormat(
+      "fr-FR",
+      {
+        timeZone: value,
+      },
+    );
+
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Extrait les composants d'une date tels qu'ils sont
+ * vus dans un fuseau horaire précis.
+ */
+function getDatePartsInTimeZone(
+  date: Date,
+  timeZone: string,
+): Readonly<{
+  year: number;
+  month: number;
+  day: number;
+  hour: number;
+  minute: number;
+  second: number;
+}> {
+  const formatter =
+    new Intl.DateTimeFormat(
+      "en-CA",
+      {
+        timeZone,
+        year: "numeric",
+        month: "2-digit",
+        day: "2-digit",
+        hour: "2-digit",
+        minute: "2-digit",
+        second: "2-digit",
+        hourCycle: "h23",
+      },
+    );
+
+  const parts =
+    formatter.formatToParts(
+      date,
+    );
+
+  const values =
+    new Map<
+      string,
+      string
+    >();
+
+  for (
+    const part of parts
+  ) {
+    if (
+      part.type !==
+      "literal"
+    ) {
+      values.set(
+        part.type,
+        part.value,
+      );
+    }
+  }
+
+  const year =
+    Number(
+      values.get("year"),
+    );
+
+  const month =
+    Number(
+      values.get("month"),
+    );
+
+  const day =
+    Number(
+      values.get("day"),
+    );
+
+  const hour =
+    Number(
+      values.get("hour"),
+    );
+
+  const minute =
+    Number(
+      values.get("minute"),
+    );
+
+  const second =
+    Number(
+      values.get("second"),
+    );
+
+  if (
+    !Number.isInteger(
+      year,
+    ) ||
+    !Number.isInteger(
+      month,
+    ) ||
+    !Number.isInteger(
+      day,
+    ) ||
+    !Number.isInteger(
+      hour,
+    ) ||
+    !Number.isInteger(
+      minute,
+    ) ||
+    !Number.isInteger(
+      second,
+    )
+  ) {
+    throw new Error(
+      "Impossible de déterminer la date locale de l’agence.",
+    );
+  }
+
+  return {
+    year,
+    month,
+    day,
+    hour,
+    minute,
+    second,
+  };
+}
+
+/**
+ * Retourne le décalage UTC du fuseau demandé
+ * à une date donnée.
+ */
+function getTimeZoneOffsetMilliseconds(
+  date: Date,
+  timeZone: string,
+): number {
+  const parts =
+    getDatePartsInTimeZone(
+      date,
+      timeZone,
+    );
+
+  const equivalentUtc =
+    Date.UTC(
+      parts.year,
+      parts.month - 1,
+      parts.day,
+      parts.hour,
+      parts.minute,
+      parts.second,
+    );
+
+  return (
+    equivalentUtc -
+    date.getTime()
+  );
+}
+
+/**
+ * Convertit une date/heure locale du fuseau de l'agence
+ * en véritable Date UTC.
+ *
+ * Deux passages sont utilisés afin de rester correct
+ * avec les fuseaux ayant des changements d'heure.
+ */
+function createUtcDateFromZonedDateTime(
+  input: Readonly<{
+    year: number;
+    month: number;
+    day: number;
+    hour?: number;
+    minute?: number;
+    second?: number;
+  }>,
+  timeZone: string,
+): Date {
+  const utcGuess =
+    Date.UTC(
+      input.year,
+      input.month - 1,
+      input.day,
+      input.hour ?? 0,
+      input.minute ?? 0,
+      input.second ?? 0,
+    );
+
+  const firstOffset =
+    getTimeZoneOffsetMilliseconds(
+      new Date(
+        utcGuess,
+      ),
+      timeZone,
+    );
+
+  let resolvedTimestamp =
+    utcGuess -
+    firstOffset;
+
+  const secondOffset =
+    getTimeZoneOffsetMilliseconds(
+      new Date(
+        resolvedTimestamp,
+      ),
+      timeZone,
+    );
+
+  if (
+    secondOffset !==
+    firstOffset
+  ) {
+    resolvedTimestamp =
+      utcGuess -
+      secondOffset;
+  }
+
+  return new Date(
+    resolvedTimestamp,
+  );
+}
+
+/**
+ * ============================================================================
+ * MOIS COURANT DE L'AGENCE
+ * ============================================================================
+ */
+
+/**
+ * Récupère le fuseau horaire réel configuré
+ * pour l'agence.
+ */
+async function getAgencyTimeZone(
+  agencyId: string,
+): Promise<string> {
+  const settings =
+    await db.agencySetting.findUnique({
+      where: {
+        agencyId,
+      },
+
+      select: {
+        timezone: true,
+      },
+    });
+
+  const configuredTimeZone =
+    settings?.timezone
+      ?.trim();
+
+  if (
+    configuredTimeZone &&
+    isValidTimeZone(
+      configuredTimeZone,
+    )
+  ) {
+    return configuredTimeZone;
+  }
+
+  return DEFAULT_AGENCY_TIME_ZONE;
+}
+
+/**
+ * Construit les limites du mois courant
+ * dans le fuseau réel de l'agence.
+ *
+ * Exemple :
+ *
+ * currentMonthStart <= createdAt < nextMonthStart
+ *
+ * Cela évite les erreurs de bord autour de minuit.
+ */
+async function getAgencyMonthBoundaries(
+  agencyId: string,
+  referenceDate =
+    new Date(),
+): Promise<AgencyMonthBoundaries> {
+  const timeZone =
+    await getAgencyTimeZone(
+      agencyId,
+    );
+
+  const currentParts =
+    getDatePartsInTimeZone(
+      referenceDate,
+      timeZone,
+    );
+
+  const currentMonthStart =
+    createUtcDateFromZonedDateTime(
+      {
+        year:
+          currentParts.year,
+
+        month:
+          currentParts.month,
+
+        day: 1,
+      },
+      timeZone,
+    );
+
+  let nextMonthYear =
+    currentParts.year;
+
+  let nextMonth =
+    currentParts.month +
+    1;
+
+  if (
+    nextMonth > 12
+  ) {
+    nextMonth = 1;
+    nextMonthYear += 1;
+  }
+
+  const nextMonthStart =
+    createUtcDateFromZonedDateTime(
+      {
+        year:
+          nextMonthYear,
+
+        month:
+          nextMonth,
+
+        day: 1,
+      },
+      timeZone,
+    );
+
+  return {
+    timeZone,
+    currentMonthStart,
+    nextMonthStart,
+  };
+}
+
+/**
+ * ============================================================================
+ * STATISTIQUES
+ * ============================================================================
+ */
+
+/**
+ * Calcule les statistiques principales de :
+ *
+ * /agence/biens
+ *
+ * IMPORTANT :
+ *
+ * - agencyId vient exclusivement de la session serveur ;
+ * - tous les biens archivés sont exclus ;
+ * - RENT_AND_SALE compte dans Location ET Vente ;
+ * - le taux d'occupation utilise uniquement les biens louables ;
+ * - les créations du mois respectent le fuseau de l'agence ;
+ * - aucun chiffre n'est simulé.
+ */
+export async function getPropertyListStatistics(
+  agencyId: string,
+): Promise<PropertyListStatistics> {
+  const normalizedAgencyId =
+    normalizeAgencyId(
+      agencyId,
+    );
+
+  const {
+    currentMonthStart,
+    nextMonthStart,
+  } =
+    await getAgencyMonthBoundaries(
+      normalizedAgencyId,
+    );
+
+  /**
+   * Filtre commun à tous les biens réellement actifs
+   * dans la liste principale.
+   */
+  const nonArchivedWhere =
+    {
+      agencyId:
+        normalizedAgencyId,
+
+      status: {
+        in:
+          NON_ARCHIVED_PROPERTY_STATUSES,
+      },
+    } as const;
+
+  /**
+   * Toutes les requêtes indépendantes sont exécutées
+   * en parallèle.
+   */
+  const [
+    propertiesCount,
+    propertiesCreatedThisMonth,
+
+    rentalPropertiesCount,
+    rentalPropertiesCreatedThisMonth,
+
+    salePropertiesCount,
+    salePropertiesCreatedThisMonth,
+
+    ownersCount,
+    ownersCreatedThisMonth,
+
+    rentablePropertiesCount,
+    occupiedPropertiesCount,
+  ] =
+    await Promise.all([
+      /**
+       * --------------------------------------------------
+       * TOTAL DES BIENS
+       * --------------------------------------------------
+       */
+
+      db.property.count({
+        where:
+          nonArchivedWhere,
+      }),
+
+      db.property.count({
+        where: {
+          ...nonArchivedWhere,
+
+          createdAt: {
+            gte:
+              currentMonthStart,
+
+            lt:
+              nextMonthStart,
+          },
+        },
+      }),
+
+      /**
+       * --------------------------------------------------
+       * BIENS EN LOCATION
+       * --------------------------------------------------
+       *
+       * RENT_AND_SALE est inclus.
+       */
+
+      db.property.count({
+        where: {
+          ...nonArchivedWhere,
+
+          purpose: {
+            in:
+              RENTABLE_PROPERTY_PURPOSES,
+          },
+        },
+      }),
+
+      db.property.count({
+        where: {
+          ...nonArchivedWhere,
+
+          purpose: {
+            in:
+              RENTABLE_PROPERTY_PURPOSES,
+          },
+
+          createdAt: {
+            gte:
+              currentMonthStart,
+
+            lt:
+              nextMonthStart,
+          },
+        },
+      }),
+
+      /**
+       * --------------------------------------------------
+       * BIENS À VENDRE
+       * --------------------------------------------------
+       *
+       * RENT_AND_SALE est également inclus.
+       */
+
+      db.property.count({
+        where: {
+          ...nonArchivedWhere,
+
+          purpose: {
+            in:
+              SALE_PROPERTY_PURPOSES,
+          },
+        },
+      }),
+
+      db.property.count({
+        where: {
+          ...nonArchivedWhere,
+
+          purpose: {
+            in:
+              SALE_PROPERTY_PURPOSES,
+          },
+
+          createdAt: {
+            gte:
+              currentMonthStart,
+
+            lt:
+              nextMonthStart,
+          },
+        },
+      }),
+
+      /**
+       * --------------------------------------------------
+       * PROPRIÉTAIRES
+       * --------------------------------------------------
+       *
+       * On exclut les propriétaires archivés.
+       */
+
+      db.owner.count({
+        where: {
+          agencyId:
+            normalizedAgencyId,
+
+          archivedAt:
+            null,
+        },
+      }),
+
+      db.owner.count({
+        where: {
+          agencyId:
+            normalizedAgencyId,
+
+          archivedAt:
+            null,
+
+          createdAt: {
+            gte:
+              currentMonthStart,
+
+            lt:
+              nextMonthStart,
+          },
+        },
+      }),
+
+      /**
+       * --------------------------------------------------
+       * BIENS LOUABLES
+       * --------------------------------------------------
+       *
+       * Ce compteur sert de dénominateur
+       * au taux d'occupation.
+       */
+
+      db.property.count({
+        where: {
+          ...nonArchivedWhere,
+
+          purpose: {
+            in:
+              RENTABLE_PROPERTY_PURPOSES,
+          },
+        },
+      }),
+
+      /**
+       * --------------------------------------------------
+       * BIENS LOUABLES OCCUPÉS
+       * --------------------------------------------------
+       *
+       * Un bien SALE seul n'entre jamais dans
+       * le calcul du taux d'occupation.
+       */
+
+      db.property.count({
+        where: {
+          ...nonArchivedWhere,
+
+          purpose: {
+            in:
+              RENTABLE_PROPERTY_PURPOSES,
+          },
+
+          status:
+            "OCCUPIED",
+        },
+      }),
+    ]);
+
+  const normalizedPropertiesCount =
+    normalizeCount(
+      propertiesCount,
+    );
+
+  const normalizedPropertiesCreatedThisMonth =
+    normalizeCount(
+      propertiesCreatedThisMonth,
+    );
+
+  const normalizedRentalPropertiesCount =
+    normalizeCount(
+      rentalPropertiesCount,
+    );
+
+  const normalizedRentalPropertiesCreatedThisMonth =
+    normalizeCount(
+      rentalPropertiesCreatedThisMonth,
+    );
+
+  const normalizedSalePropertiesCount =
+    normalizeCount(
+      salePropertiesCount,
+    );
+
+  const normalizedSalePropertiesCreatedThisMonth =
+    normalizeCount(
+      salePropertiesCreatedThisMonth,
+    );
+
+  const normalizedOwnersCount =
+    normalizeCount(
+      ownersCount,
+    );
+
+  const normalizedOwnersCreatedThisMonth =
+    normalizeCount(
+      ownersCreatedThisMonth,
+    );
+
+  const normalizedRentablePropertiesCount =
+    normalizeCount(
+      rentablePropertiesCount,
+    );
+
+  const normalizedOccupiedPropertiesCount =
+    normalizeCount(
+      occupiedPropertiesCount,
+    );
+
+  const occupancyRate =
+    calculateOccupancyRate(
+      normalizedOccupiedPropertiesCount,
+      normalizedRentablePropertiesCount,
+    );
+
+  return {
+    propertiesCount:
+      normalizedPropertiesCount,
+
+    propertiesCreatedThisMonth:
+      normalizedPropertiesCreatedThisMonth,
+
+    rentalPropertiesCount:
+      normalizedRentalPropertiesCount,
+
+    rentalPropertiesCreatedThisMonth:
+      normalizedRentalPropertiesCreatedThisMonth,
+
+    salePropertiesCount:
+      normalizedSalePropertiesCount,
+
+    salePropertiesCreatedThisMonth:
+      normalizedSalePropertiesCreatedThisMonth,
+
+    ownersCount:
+      normalizedOwnersCount,
+
+    ownersCreatedThisMonth:
+      normalizedOwnersCreatedThisMonth,
+
+    rentablePropertiesCount:
+      normalizedRentablePropertiesCount,
+
+    occupiedPropertiesCount:
+      normalizedOccupiedPropertiesCount,
+
+    occupancyRate,
+  };
+}

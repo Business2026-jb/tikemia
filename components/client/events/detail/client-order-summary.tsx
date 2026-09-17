@@ -7,6 +7,11 @@ import {
   Ticket,
 } from "lucide-react";
 
+import {
+  calculateOrderPricing,
+  isFcfaCurrency,
+} from "@/lib/payments/service-fee";
+
 export type ClientOrderSummaryItem = {
   id: string;
   name: string;
@@ -19,6 +24,14 @@ export type ClientOrderSummaryProps = {
 
   currency?: string;
 
+  /*
+   * Conservées temporairement pour compatibilité
+   * avec d'éventuels composants existants.
+   *
+   * Elles ne participent plus au calcul.
+   * La règle officielle est centralisée dans :
+   * lib/payments/service-fee.ts
+   */
   platformFeeRate?: number;
   fixedFeeAmount?: number;
 
@@ -50,20 +63,40 @@ function cn(
 function normalizeAmount(
   value: number,
 ): number {
-  return Number.isFinite(value)
-    ? Math.max(value, 0)
+  return Number.isFinite(
+    value,
+  )
+    ? Math.max(
+        value,
+        0,
+      )
     : 0;
 }
 
 function normalizeQuantity(
   value: number,
 ): number {
-  return Number.isFinite(value)
+  return Number.isFinite(
+    value,
+  )
     ? Math.max(
-        Math.trunc(value),
+        Math.trunc(
+          value,
+        ),
         0,
       )
     : 0;
+}
+
+function normalizeCurrency(
+  value: string,
+): string {
+  return (
+    value
+      .trim()
+      .toUpperCase() ||
+    "XOF"
+  );
 }
 
 function formatMoney({
@@ -73,6 +106,11 @@ function formatMoney({
   amount: number;
   currency: string;
 }): string {
+  const normalizedCurrency =
+    normalizeCurrency(
+      currency,
+    );
+
   try {
     return new Intl.NumberFormat(
       "fr-FR",
@@ -80,14 +118,15 @@ function formatMoney({
         style:
           "currency",
 
-        currency,
+        currency:
+          normalizedCurrency,
 
         maximumFractionDigits:
           [
             "XOF",
             "XAF",
           ].includes(
-            currency,
+            normalizedCurrency,
           )
             ? 0
             : 2,
@@ -102,7 +141,7 @@ function formatMoney({
       amount,
     ).toLocaleString(
       "fr-FR",
-    )} ${currency}`;
+    )} ${normalizedCurrency}`;
   }
 }
 
@@ -111,9 +150,6 @@ export default function ClientOrderSummary({
 
   currency =
     "XOF",
-
-  platformFeeRate = 0,
-  fixedFeeAmount = 0,
 
   title =
     "Résumé de la commande",
@@ -133,6 +169,11 @@ export default function ClientOrderSummary({
 
   onCheckout,
 }: ClientOrderSummaryProps) {
+  const normalizedCurrency =
+    normalizeCurrency(
+      currency,
+    );
+
   const normalizedItems =
     items
       .map(
@@ -183,35 +224,29 @@ export default function ClientOrderSummary({
       0,
     );
 
-  const normalizedFeeRate =
-    Number.isFinite(
-      platformFeeRate,
-    )
-      ? Math.max(
-          platformFeeRate,
-          0,
-        )
-      : 0;
-
-  const percentageFee =
-    subtotal *
-    (
-      normalizedFeeRate /
-      100
-    );
-
-  const fixedFee =
-    normalizeAmount(
-      fixedFeeAmount,
+  /*
+   * Même règle utilisée par :
+   *
+   * - la barre mobile
+   * - l'API de création de commande
+   *
+   * Tikemia :
+   * 3 % de frais de service.
+   *
+   * XOF / XAF :
+   * plafond global de 5 000 F.
+   */
+  const pricing =
+    calculateOrderPricing(
+      subtotal,
+      normalizedCurrency,
     );
 
   const serviceFee =
-    percentageFee +
-    fixedFee;
+    pricing.serviceFee;
 
   const total =
-    subtotal +
-    serviceFee;
+    pricing.total;
 
   const hasSelection =
     selectedTicketsCount >
@@ -222,6 +257,11 @@ export default function ClientOrderSummary({
     loading ||
     !hasSelection ||
     !onCheckout;
+
+  const fcfaCurrency =
+    isFcfaCurrency(
+      normalizedCurrency,
+    );
 
   async function handleCheckout(): Promise<void> {
     if (
@@ -303,7 +343,8 @@ export default function ClientOrderSummary({
                           amount:
                             item.unitPrice,
 
-                          currency,
+                          currency:
+                            normalizedCurrency,
                         })
                       }
                     </p>
@@ -317,7 +358,8 @@ export default function ClientOrderSummary({
                         item.unitPrice *
                         item.quantity,
 
-                      currency,
+                      currency:
+                        normalizedCurrency,
                     })
                   }
                 </p>
@@ -354,24 +396,37 @@ export default function ClientOrderSummary({
                 amount:
                   subtotal,
 
-                currency,
+                currency:
+                  normalizedCurrency,
               })
             }
           </strong>
         </div>
 
         <div className="flex items-center justify-between gap-3 text-sm">
-          <span className="text-neutral-500">
-            Frais de service
-          </span>
+          <div className="min-w-0">
+            <span className="text-neutral-500">
+              Frais de service
+            </span>
 
-          <strong className="font-black text-white">
+            {subtotal >
+              0 && (
+              <p className="mt-0.5 text-[10px] leading-4 text-neutral-700">
+                {fcfaCurrency
+                  ? "3 % · plafonnés à 5 000 FCFA"
+                  : "3 % de frais de service"}
+              </p>
+            )}
+          </div>
+
+          <strong className="shrink-0 font-black text-white">
             {
               formatMoney({
                 amount:
                   serviceFee,
 
-                currency,
+                currency:
+                  normalizedCurrency,
               })
             }
           </strong>
@@ -404,7 +459,8 @@ export default function ClientOrderSummary({
                 amount:
                   total,
 
-                currency,
+                currency:
+                  normalizedCurrency,
               })
             }
           </p>

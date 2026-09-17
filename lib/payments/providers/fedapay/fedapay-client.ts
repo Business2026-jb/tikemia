@@ -4,6 +4,7 @@ import {
   getFedaPayConfig,
   type FedaPayConfig,
 } from "@/lib/payments/providers/fedapay/config";
+
 import {
   PaymentProviderError,
   PaymentValidationError,
@@ -24,6 +25,7 @@ export type FedaPayCustomerInput = {
   email?: string;
   firstname?: string;
   lastname?: string;
+
   phoneNumber?: {
     number: string;
     country: string;
@@ -81,7 +83,12 @@ export type FedaPayPaymentLink = {
 };
 
 type FedaPayRequestOptions = {
-  method?: "GET" | "POST" | "PUT" | "DELETE";
+  method?:
+    | "GET"
+    | "POST"
+    | "PUT"
+    | "DELETE";
+
   body?: Record<string, unknown>;
   idempotencyKey?: string;
   signal?: AbortSignal;
@@ -115,8 +122,7 @@ function normalizeText(
 }
 
 function normalizeCurrency(
-  value:
-    string,
+  value: string,
 ): string {
   const currency =
     normalizeText(
@@ -152,17 +158,14 @@ function normalizePositiveInteger({
   value,
   field,
 }: {
-  value:
-    number;
-  field:
-    string;
+  value: number;
+  field: string;
 }): number {
   if (
     !Number.isSafeInteger(
       value,
     ) ||
-    value <=
-      0
+    value <= 0
   ) {
     throw new PaymentValidationError({
       code:
@@ -184,19 +187,18 @@ function normalizePositiveInteger({
 }
 
 function normalizeTransactionId(
-  value:
-    number,
+  value: number,
 ): number {
   return normalizePositiveInteger({
     value,
+
     field:
       "transactionId",
   });
 }
 
 function normalizeDescription(
-  value:
-    string,
+  value: string,
 ): string {
   const description =
     normalizeText(
@@ -204,10 +206,8 @@ function normalizeDescription(
     );
 
   if (
-    description.length <
-      3 ||
-    description.length >
-      255
+    description.length < 3 ||
+    description.length > 255
   ) {
     throw new PaymentValidationError({
       code:
@@ -233,13 +233,10 @@ function normalizeAbsoluteUrl({
   value,
   field,
 }: {
-  value:
-    string;
-  field:
-    string;
+  value: string;
+  field: string;
 }): string {
-  let parsedUrl:
-    URL;
+  let parsedUrl: URL;
 
   try {
     parsedUrl =
@@ -302,17 +299,17 @@ function normalizeAbsoluteUrl({
 }
 
 function sanitizeMetadataValue(
-  value:
-    unknown,
+  value: unknown,
   depth = 0,
 ): unknown {
-  if (depth > 4) {
+  if (
+    depth > 4
+  ) {
     return "[TRUNCATED]";
   }
 
   if (
-    value ===
-      null ||
+    value === null ||
     typeof value ===
       "string" ||
     typeof value ===
@@ -324,8 +321,7 @@ function sanitizeMetadataValue(
   }
 
   if (
-    value instanceof
-    Date
+    value instanceof Date
   ) {
     return value.toISOString();
   }
@@ -346,15 +342,14 @@ function sanitizeMetadataValue(
         ) =>
           sanitizeMetadataValue(
             item,
-            depth +
-              1,
+            depth + 1,
           ),
       );
   }
 
   if (
     typeof value ===
-      "object"
+    "object"
   ) {
     return Object.fromEntries(
       Object.entries(
@@ -373,12 +368,13 @@ function sanitizeMetadataValue(
             item,
           ]) => [
             key,
+
             sanitizeMetadataValue(
               item,
-              depth +
-                1,
+              depth + 1,
             ),
-          ]),
+          ],
+        ),
     );
   }
 
@@ -389,10 +385,12 @@ function sanitizeMetadataValue(
 
 function sanitizeMetadata(
   metadata:
-    Record<string, unknown>
+    | Record<string, unknown>
     | undefined,
 ): Record<string, unknown> | undefined {
-  if (!metadata) {
+  if (
+    !metadata
+  ) {
     return undefined;
   }
 
@@ -420,16 +418,18 @@ function sanitizeMetadata(
 
 function normalizeCustomer(
   customer:
-    FedaPayCustomerInput
+    | FedaPayCustomerInput
     | undefined,
 ): Record<string, unknown> | undefined {
-  if (!customer) {
+  if (
+    !customer
+  ) {
     return undefined;
   }
 
   if (
     customer.id !==
-      undefined
+    undefined
   ) {
     return {
       id:
@@ -496,8 +496,7 @@ function normalizeCustomer(
 }
 
 function isRecord(
-  value:
-    unknown,
+  value: unknown,
 ): value is Record<
   string,
   unknown
@@ -517,8 +516,7 @@ function isRecord(
 function readString(
   record:
     Record<string, unknown>,
-  key:
-    string,
+  key: string,
 ): string | null {
   const value =
     record[
@@ -534,8 +532,7 @@ function readString(
 function readNumber(
   record:
     Record<string, unknown>,
-  key:
-    string,
+  key: string,
 ): number | null {
   const value =
     record[
@@ -576,8 +573,7 @@ function readNumber(
 function readObject(
   record:
     Record<string, unknown>,
-  key:
-    string,
+  key: string,
 ): Record<string, unknown> | null {
   const value =
     record[
@@ -595,10 +591,8 @@ function unwrapRecordPayload({
   payload,
   preferredKeys,
 }: {
-  payload:
-    unknown;
-  preferredKeys:
-    readonly string[];
+  payload: unknown;
+  preferredKeys: readonly string[];
 }): Record<string, unknown> | null {
   if (
     !isRecord(
@@ -629,8 +623,7 @@ function unwrapRecordPayload({
 }
 
 function getTransactionPayload(
-  payload:
-    unknown,
+  payload: unknown,
 ): Record<string, unknown> | null {
   return unwrapRecordPayload({
     payload,
@@ -647,8 +640,7 @@ function getTransactionPayload(
 }
 
 function getPaymentLinkPayload(
-  payload:
-    unknown,
+  payload: unknown,
 ): Record<string, unknown> | null {
   return unwrapRecordPayload({
     payload,
@@ -701,8 +693,7 @@ function normalizeTransactionStatus(
 }
 
 function parseTransaction(
-  payload:
-    unknown,
+  payload: unknown,
 ): FedaPayTransaction {
   const transactionPayload =
     getTransactionPayload(
@@ -758,11 +749,9 @@ function parseTransaction(
     );
 
   if (
-    id ===
-      null ||
+    id === null ||
     !reference ||
-    amount ===
-      null ||
+    amount === null ||
     !description ||
     !rawStatus
   ) {
@@ -781,8 +770,7 @@ function parseTransaction(
 
       details: {
         hasId:
-          id !==
-          null,
+          id !== null,
 
         hasReference:
           Boolean(
@@ -790,8 +778,7 @@ function parseTransaction(
           ),
 
         hasAmount:
-          amount !==
-          null,
+          amount !== null,
 
         hasDescription:
           Boolean(
@@ -981,8 +968,7 @@ function parseTransaction(
 }
 
 function parsePaymentLink(
-  payload:
-    unknown,
+  payload: unknown,
 ): FedaPayPaymentLink {
   const paymentLinkPayload =
     getPaymentLinkPayload(
@@ -1038,8 +1024,7 @@ function parsePaymentLink(
     });
   }
 
-  let parsedUrl:
-    URL;
+  let parsedUrl: URL;
 
   try {
     parsedUrl =
@@ -1064,7 +1049,7 @@ function parsePaymentLink(
 
   if (
     parsedUrl.protocol !==
-      "https:"
+    "https:"
   ) {
     throw new PaymentProviderError({
       code:
@@ -1083,16 +1068,15 @@ function parsePaymentLink(
 
   return {
     token,
+
     url:
       parsedUrl.toString(),
   };
 }
 
 function extractProviderMessage(
-  payload:
-    unknown,
-  fallback:
-    string,
+  payload: unknown,
+  fallback: string,
 ): string {
   if (
     !isRecord(
@@ -1109,11 +1093,12 @@ function extractProviderMessage(
     typeof typedPayload
       .message ===
       "string"
-      ? typedPayload
-          .message
+      ? typedPayload.message
       : null;
 
-  if (directMessage) {
+  if (
+    directMessage
+  ) {
     return directMessage;
   }
 
@@ -1122,8 +1107,7 @@ function extractProviderMessage(
       .error ===
       "string"
   ) {
-    return typedPayload
-      .error;
+    return typedPayload.error;
   }
 
   if (
@@ -1137,7 +1121,9 @@ function extractProviderMessage(
         "message",
       );
 
-    if (nestedMessage) {
+    if (
+      nestedMessage
+    ) {
       return nestedMessage;
     }
   }
@@ -1146,8 +1132,7 @@ function extractProviderMessage(
 }
 
 async function readResponsePayload(
-  response:
-    Response,
+  response: Response,
 ): Promise<unknown> {
   const contentType =
     response.headers.get(
@@ -1208,7 +1193,7 @@ async function readResponsePayload(
 
         if (
           typeof firstPass ===
-            "string"
+          "string"
         ) {
           return JSON.parse(
             firstPass,
@@ -1231,43 +1216,32 @@ function createProviderErrorFromResponse({
   payload,
   providerReference,
 }: {
-  response:
-    Response;
-  payload:
-    unknown;
-  providerReference?:
-    string | null;
+  response: Response;
+  payload: unknown;
+  providerReference?: string | null;
 }): PaymentProviderError {
   const status =
     response.status;
 
   const fallbackMessage =
-    status ===
-      401
+    status === 401
       ? "L’authentification auprès de FedaPay a échoué."
-      : status ===
-          404
+      : status === 404
         ? "La transaction FedaPay est introuvable."
-        : status ===
-            429
+        : status === 429
           ? "FedaPay limite temporairement les requêtes."
-          : status >=
-              500
+          : status >= 500
             ? "FedaPay est temporairement indisponible."
             : "La requête envoyée à FedaPay a été refusée.";
 
   const code =
-    status ===
-      401
+    status === 401
       ? "PAYMENT_PROVIDER_AUTHENTICATION_FAILED"
-      : status ===
-          404
+      : status === 404
         ? "PAYMENT_PROVIDER_TRANSACTION_NOT_FOUND"
-        : status ===
-            429
+        : status === 429
           ? "PAYMENT_PROVIDER_RATE_LIMITED"
-          : status >=
-              500
+          : status >= 500
             ? "PAYMENT_PROVIDER_UNAVAILABLE"
             : "PAYMENT_PROVIDER_REQUEST_FAILED";
 
@@ -1281,26 +1255,19 @@ function createProviderErrorFromResponse({
       ),
 
     status:
-      status >=
-        400 &&
-      status <=
-        599
+      status >= 400 &&
+      status <= 599
         ? status
         : 502,
 
     retryable:
-      status ===
-        408 ||
-      status ===
-        425 ||
-      status ===
-        429 ||
-      status >=
-        500,
+      status === 408 ||
+      status === 425 ||
+      status === 429 ||
+      status >= 500,
 
     exposeMessage:
-      status !==
-      401,
+      status !== 401,
 
     provider:
       "FEDAPAY",
@@ -1324,19 +1291,16 @@ async function requestFedaPay<T>({
   parser,
   providerReference,
 }: {
-  config:
-    FedaPayConfig;
-  path:
-    string;
-  options?:
-    FedaPayRequestOptions;
+  config: FedaPayConfig;
+  path: string;
+  options?: FedaPayRequestOptions;
+
   parser:
     (
-      payload:
-        unknown,
+      payload: unknown,
     ) => T;
-  providerReference?:
-    string | null;
+
+  providerReference?: string | null;
 }): Promise<T> {
   const controller =
     new AbortController();
@@ -1355,7 +1319,9 @@ async function requestFedaPay<T>({
     () =>
       controller.abort();
 
-  if (externalSignal) {
+  if (
+    externalSignal
+  ) {
     if (
       externalSignal.aborted
     ) {
@@ -1476,12 +1442,14 @@ async function requestFedaPay<T>({
     return parser(
       payload,
     );
-  } catch (error) {
+  } catch (
+    error
+  ) {
     if (
       error instanceof
-      PaymentProviderError ||
-    error instanceof
-      PaymentValidationError
+        PaymentProviderError ||
+      error instanceof
+        PaymentValidationError
     ) {
       throw error;
     }
@@ -1565,6 +1533,7 @@ async function requestFedaPay<T>({
 export async function createFedaPayTransaction(
   input:
     CreateFedaPayTransactionInput,
+
   options?: {
     idempotencyKey?: string;
     signal?: AbortSignal;
@@ -1638,7 +1607,7 @@ export async function createFedaPayTransaction(
               metadata,
           }
         : {}),
-  };
+    };
 
   return requestFedaPay({
     config,
@@ -1669,10 +1638,8 @@ export async function createFedaPayTransaction(
 }
 
 function waitForRetry(
-  delayMs:
-    number,
-  signal?:
-    AbortSignal,
+  delayMs: number,
+  signal?: AbortSignal,
 ): Promise<void> {
   return new Promise(
     (
@@ -1691,11 +1658,6 @@ function waitForRetry(
 
         return;
       }
-
-      let timeout:
-        ReturnType<
-          typeof setTimeout
-        >;
 
       const handleAbort =
         () => {
@@ -1716,7 +1678,7 @@ function waitForRetry(
           );
         };
 
-      timeout =
+      const timeout =
         setTimeout(
           () => {
             signal?.removeEventListener(
@@ -1742,8 +1704,7 @@ function waitForRetry(
 }
 
 function isFedaPayTransactionNotFoundError(
-  error:
-    unknown,
+  error: unknown,
 ): boolean {
   return (
     error instanceof
@@ -1754,8 +1715,8 @@ function isFedaPayTransactionNotFoundError(
 }
 
 export async function createFedaPayPaymentLink(
-  transactionId:
-    number,
+  transactionId: number,
+
   options?: {
     signal?: AbortSignal;
     retryDelaysMs?: readonly number[];
@@ -1779,10 +1740,11 @@ export async function createFedaPayPaymentLink(
   for (
     let attemptIndex =
       0;
+
     attemptIndex <
     retryDelaysMs.length;
-    attemptIndex +=
-      1
+
+    attemptIndex += 1
   ) {
     const delayMs =
       retryDelaysMs[
@@ -1791,8 +1753,7 @@ export async function createFedaPayPaymentLink(
       0;
 
     if (
-      delayMs >
-      0
+      delayMs > 0
     ) {
       await waitForRetry(
         delayMs,
@@ -1875,8 +1836,8 @@ export async function createFedaPayPaymentLink(
 }
 
 export async function getFedaPayTransaction(
-  transactionId:
-    number,
+  transactionId: number,
+
   options?: {
     signal?: AbortSignal;
   },
@@ -1931,10 +1892,13 @@ export function assertFedaPayTransactionMatches({
 }: {
   transaction:
     FedaPayTransaction;
+
   expectedAmount:
     number;
+
   expectedCurrency?:
     string;
+
   expectedReference?:
     string;
 }): void {
@@ -2032,9 +1996,10 @@ export function assertFedaPayTransactionMatches({
   ) {
     /*
      * L’endpoint de consultation retourne actuellement currency_id
-     * plutôt que l’ISO de la devise. La comparaison stricte de devise
-     * doit donc aussi s’appuyer sur la devise déjà enregistrée dans
-     * Payment et sur les métadonnées Tikemia envoyées à la création.
+     * plutôt que l’ISO de la devise.
+     *
+     * La comparaison stricte s’appuie donc aussi sur les métadonnées
+     * Tikemia envoyées au moment de la création de la transaction.
      */
     const normalizedExpectedCurrency =
       normalizeCurrency(
@@ -2093,13 +2058,16 @@ export async function createFedaPayHostedCheckout({
 }: {
   transaction:
     CreateFedaPayTransactionInput;
+
   idempotencyKey?:
     string;
+
   signal?:
     AbortSignal;
 }): Promise<{
   transaction:
     FedaPayTransaction;
+
   paymentLink:
     FedaPayPaymentLink;
 }> {

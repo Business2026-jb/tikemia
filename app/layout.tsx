@@ -3,9 +3,25 @@ import type {
   Viewport,
 } from "next";
 
-import { GoogleAnalytics } from "@next/third-parties/google";
+import {
+  cookies,
+} from "next/headers";
+
+import {
+  NextIntlClientProvider,
+} from "next-intl";
+
+import {
+  GoogleAnalytics,
+} from "@next/third-parties/google";
 
 import "./globals.css";
+
+import {
+  DEFAULT_LOCALE,
+  SUPPORTED_LOCALES,
+  type AppLocale,
+} from "@/lib/i18n/config";
 
 const APP_NAME =
   "Tikemia";
@@ -36,7 +52,9 @@ const GOOGLE_ANALYTICS_ID =
 
 export const metadata: Metadata = {
   metadataBase:
-    new URL(APP_URL),
+    new URL(
+      APP_URL,
+    ),
 
   title: {
     default:
@@ -324,24 +342,93 @@ export const viewport:
     "dark",
 };
 
-export default function RootLayout({
+function isSupportedLocale(
+  value:
+    string | undefined,
+): value is AppLocale {
+  return SUPPORTED_LOCALES.includes(
+    value as AppLocale,
+  );
+}
+
+async function loadMessages(
+  locale:
+    AppLocale,
+) {
+  switch (
+    locale
+  ) {
+    case "en":
+      return (
+        await import(
+          "@/messages/en.json"
+        )
+      ).default;
+
+    case "fr":
+    default:
+      return (
+        await import(
+          "@/messages/fr.json"
+        )
+      ).default;
+  }
+}
+
+export default async function RootLayout({
   children,
 }: Readonly<{
   children:
     React.ReactNode;
 }>) {
+  const cookieStore =
+    await cookies();
+
+  const cookieLocale =
+    cookieStore.get(
+      "tikemia_locale",
+    )?.value;
+
+  const locale:
+    AppLocale =
+    isSupportedLocale(
+      cookieLocale,
+    )
+      ? cookieLocale
+      : DEFAULT_LOCALE;
+
+  const messages =
+    await loadMessages(
+      locale,
+    );
+
   return (
     <html
-      lang="fr"
+      lang={
+        locale
+      }
       suppressHydrationWarning
     >
       <body>
-        {children}
-      </body>
+        <NextIntlClientProvider
+          locale={
+            locale
+          }
+          messages={
+            messages
+          }
+        >
+          {
+            children
+          }
+        </NextIntlClientProvider>
 
-      <GoogleAnalytics
-        gaId={GOOGLE_ANALYTICS_ID}
-      />
+        <GoogleAnalytics
+          gaId={
+            GOOGLE_ANALYTICS_ID
+          }
+        />
+      </body>
     </html>
   );
 }

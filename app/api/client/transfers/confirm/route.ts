@@ -20,6 +20,7 @@ import {
 import { sendTransferSenderConfirmationEmail } from "@/lib/client/transfers/send-transfer-sender-confirmation-email";
 import { prisma } from "@/lib/prisma";
 import { generateTicketPdf } from "@/lib/tickets/generate-ticket-pdf";
+import { generateTicketQr } from "@/lib/tickets/generate-ticket-qr";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -30,6 +31,7 @@ const CLIENT_SESSION_COOKIE_NAME =
   "tikemia_client_session";
 
 const MAX_VERIFICATION_ATTEMPTS = 5;
+const MAX_TRANSACTION_RETRIES = 3;
 
 const ACTIVE_TRANSFER_STATUSES: TicketTransferStatus[] = [
   TicketTransferStatus.PENDING_VERIFICATION,
@@ -643,7 +645,8 @@ async function generateTransferredTicketPdfAttachments({
             /*
              * Le PDF est généré après la transaction.
              * Le billet contient donc déjà le nouveau
-             * propriétaire et les informations du destinataire.
+             * propriétaire, le nouveau QR code et les
+             * informations du destinataire.
              */
             return generateTicketPdf({
               ticketId,
@@ -726,6 +729,46 @@ async function generateTransferredTicketPdfAttachments({
           : "Impossible de générer les billets PDF transférés.",
     };
   }
+}
+
+async function executeTransferTransactionWithRetry<T>(
+  operation: () => Promise<T>,
+): Promise<T> {
+  let lastError: unknown;
+
+  for (
+    let attempt = 1;
+    attempt <= MAX_TRANSACTION_RETRIES;
+    attempt += 1
+  ) {
+    try {
+      return await operation();
+    } catch (error) {
+      lastError = error;
+
+      const shouldRetry =
+        error instanceof
+          Prisma.PrismaClientKnownRequestError &&
+        error.code ===
+          "P2034";
+
+      if (
+        !shouldRetry ||
+        attempt === MAX_TRANSACTION_RETRIES
+      ) {
+        throw error;
+      }
+
+      await new Promise<void>((resolve) =>
+        setTimeout(
+          resolve,
+          attempt * 100,
+        ),
+      );
+    }
+  }
+
+  throw lastError;
 }
 
 async function registerInvalidAttempt({
@@ -1224,10 +1267,12 @@ export async function POST(
     }
 
     const completedTransfer =
-      await prisma.$transaction(
-        async (
-          transaction,
-        ) => {
+      await executeTransferTransactionWithRetry(
+        () =>
+          prisma.$transaction(
+            async (
+              transaction,
+            ) => {
           const transfer =
             await transaction.ticketTransfer.findUnique({
               where: {
@@ -1357,6 +1402,23 @@ export async function POST(
 
                         holderPhone:
                           true,
+
+                        order: {
+                          select: {
+                            reference:
+                              true,
+
+                            currency:
+                              true,
+                          },
+                        },
+
+                        orderItem: {
+                          select: {
+                            unitPrice:
+                              true,
+                          },
+                        },
 
                         event: {
                           select: {
@@ -1672,6 +1734,45 @@ export async function POST(
             const item of
             transfer.items
           ) {
+            /*
+             * Rotation de sécurité du QR code.
+             *
+             * Le billet garde son id et son code métier, mais reçoit
+             * un nouveau nonce signé. Le qrTokenHash actif change donc
+             * immédiatement au moment du transfert. Tout ancien PDF
+             * reste physiquement chez l'ancien propriétaire, mais son
+             * QR ne correspond plus au hash actif enregistré en base.
+             */
+            const rotatedQr =
+              generateTicketQr({
+                ticketCode:
+                  item.ticket.code,
+
+                orderReference:
+                  item.ticket.order.reference,
+
+                eventId:
+                  item.ticket.event.id,
+
+                eventTitle:
+                  item.ticket.event.title,
+
+                ticketTypeId:
+                  item.ticket.ticketType.id,
+
+                ticketCategory:
+                  item.ticket.ticketType.name,
+
+                unitPrice:
+                  item.ticket.orderItem.unitPrice.toString(),
+
+                currency:
+                  item.ticket.order.currency,
+
+                issuedAt:
+                  transferredAt,
+              });
+
             const ticketUpdate =
               await transaction.ticket.updateMany({
                 where: {
@@ -1722,6 +1823,24 @@ export async function POST(
 
                   holderPhone:
                     transfer.recipient.phone,
+
+                  qrCodeValue:
+                    rotatedQr.value,
+
+                  qrTokenHash:
+                    rotatedQr.tokenHash,
+
+                  qrVersion:
+                    rotatedQr.version,
+
+                  qrGeneratedAt:
+                    transferredAt,
+
+                  pdfGeneratedAt:
+                    null,
+
+                  lastDownloadedAt:
+                    null,
                 },
               });
 
@@ -1876,18 +1995,19 @@ export async function POST(
             },
           });
         },
-        {
-          isolationLevel:
-            Prisma
-              .TransactionIsolationLevel
-              .Serializable,
+            {
+              isolationLevel:
+                Prisma
+                  .TransactionIsolationLevel
+                  .Serializable,
 
-          maxWait:
-            5000,
+              maxWait:
+                5000,
 
-          timeout:
-            15000,
-        },
+              timeout:
+                15000,
+            },
+          ),
       );
 
     const firstTransferredTicket =

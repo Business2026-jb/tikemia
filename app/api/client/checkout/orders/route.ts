@@ -18,6 +18,11 @@ import {
   getPaymentError,
   getPaymentErrorLogContext,
 } from "@/lib/payments/payment-errors";
+import {
+  SERVICE_FEE_CAP_FCFA,
+  SERVICE_FEE_RATE_PERCENT,
+  isFcfaCurrency,
+} from "@/lib/payments/service-fee";
 import { prisma } from "@/lib/prisma";
 
 export const runtime = "nodejs";
@@ -201,6 +206,31 @@ type NormalizedCustomerData = {
   customerPhone: string;
   countryCode: string;
 };
+
+type CalculatedItemWithoutFee = {
+  ticketType: {
+    id: string;
+    name: string;
+    price: Prisma.Decimal;
+    quantity: number;
+    sold: number;
+    reserved: number;
+    maxPerOrder: number;
+    saleStartsAt: Date | null;
+    saleEndsAt: Date | null;
+    isActive: boolean;
+  };
+
+  quantity: number;
+  unitPrice: Prisma.Decimal;
+  subtotal: Prisma.Decimal;
+};
+
+type CalculatedItem =
+  CalculatedItemWithoutFee & {
+    platformFee: Prisma.Decimal;
+    total: Prisma.Decimal;
+  };
 
 function jsonResponse(
   body: Record<string, unknown>,
@@ -390,10 +420,14 @@ async function getAuthenticatedCustomer(): Promise<
     await prisma.session
       .delete({
         where: {
-          id: session.id,
+          id:
+            session.id,
         },
       })
-      .catch(() => undefined);
+      .catch(
+        () =>
+          undefined,
+      );
 
     return null;
   }
@@ -443,17 +477,25 @@ function consolidateItems(
     CheckoutOrderInput["items"],
 ): ConsolidatedItem[] {
   const quantities =
-    new Map<string, number>();
+    new Map<
+      string,
+      number
+    >();
 
-  for (const item of items) {
+  for (
+    const item of
+    items
+  ) {
     quantities.set(
       item.ticketTypeId,
 
       (
         quantities.get(
           item.ticketTypeId,
-        ) ?? 0
-      ) + item.quantity,
+        ) ??
+        0
+      ) +
+        item.quantity,
     );
   }
 
@@ -526,16 +568,25 @@ function getIdempotencyKey({
     bodyValue;
 
   if (value) {
-    const parsed = z
-      .string()
-      .min(16)
-      .max(200)
-      .regex(
-        /^[A-Za-z0-9._:-]+$/,
-      )
-      .safeParse(value);
+    const parsed =
+      z
+        .string()
+        .min(
+          16,
+        )
+        .max(
+          200,
+        )
+        .regex(
+          /^[A-Za-z0-9._:-]+$/,
+        )
+        .safeParse(
+          value,
+        );
 
-    if (!parsed.success) {
+    if (
+      !parsed.success
+    ) {
       throw new PaymentValidationError({
         code:
           "PAYMENT_INVALID_REQUEST",
@@ -543,7 +594,8 @@ function getIdempotencyKey({
         message:
           "La clé d’idempotence de la commande est invalide.",
 
-        status: 400,
+        status:
+          400,
       });
     }
 
@@ -552,7 +604,9 @@ function getIdempotencyKey({
 
   return `checkout_${randomBytes(
     24,
-  ).toString("hex")}`;
+  ).toString(
+    "hex",
+  )}`;
 }
 
 function getCheckoutTokenSecret(): string {
@@ -566,7 +620,10 @@ function getCheckoutTokenSecret(): string {
         .SESSION_SECRET,
     );
 
-  if (secret.length < 32) {
+  if (
+    secret.length <
+    32
+  ) {
     throw new PaymentError({
       code:
         "PAYMENT_CONFIGURATION_ERROR",
@@ -576,8 +633,11 @@ function getCheckoutTokenSecret(): string {
 
       status: 500,
 
-      exposeMessage: false,
-      retryable: false,
+      exposeMessage:
+        false,
+
+      retryable:
+        false,
     });
   }
 
@@ -594,7 +654,9 @@ function createCheckoutToken(
     .update(
       `tikemia:checkout:${idempotencyKey}`,
     )
-    .digest("base64url");
+    .digest(
+      "base64url",
+    );
 }
 
 function createOrderReference(): string {
@@ -605,17 +667,28 @@ function createOrderReference(): string {
     date.getUTCFullYear(),
 
     String(
-      date.getUTCMonth() + 1,
-    ).padStart(2, "0"),
+      date.getUTCMonth() +
+        1,
+    ).padStart(
+      2,
+      "0",
+    ),
 
     String(
       date.getUTCDate(),
-    ).padStart(2, "0"),
+    ).padStart(
+      2,
+      "0",
+    ),
   ].join("");
 
   const randomPart =
-    randomBytes(5)
-      .toString("hex")
+    randomBytes(
+      5,
+    )
+      .toString(
+        "hex",
+      )
       .toUpperCase();
 
   return `TKM-${datePart}-${randomPart}`;
@@ -656,7 +729,9 @@ function normalizeCustomerData({
       customer.countryCode,
     ).toUpperCase();
 
-  if (authenticatedCustomer) {
+  if (
+    authenticatedCustomer
+  ) {
     /*
      * Le compte connecté reste propriétaire de la commande.
      *
@@ -709,7 +784,8 @@ function normalizeCustomerData({
   }
 
   return {
-    customerId: null,
+    customerId:
+      null,
 
     customerName:
       `${submittedFirstName} ${submittedLastName}`
@@ -730,24 +806,206 @@ function normalizeCustomerData({
   };
 }
 
+function getCurrencyDecimalPlaces(
+  currency: string,
+): number {
+  return isFcfaCurrency(
+    currency,
+  )
+    ? 0
+    : 2;
+}
+
+/**
+ * Frais de service Tikemia.
+ *
+ * Règle actuelle :
+ * - 3 % du sous-total
+ * - plafond global de 5 000 F pour XOF / XAF
+ *
+ * Le calcul serveur reste en Prisma.Decimal afin
+ * d’éviter les imprécisions des nombres JavaScript.
+ */
 function calculatePlatformFee({
   subtotal,
-  rate,
+  currency,
 }: {
   subtotal:
     Prisma.Decimal;
 
-  rate:
-    Prisma.Decimal;
+  currency:
+    string;
 }): Prisma.Decimal {
-  return subtotal
-    .mul(rate)
-    .div(100)
-    .toDecimalPlaces(
-      2,
-      Prisma.Decimal
-        .ROUND_HALF_UP,
+  if (
+    subtotal.lte(
+      0,
+    )
+  ) {
+    return new Prisma.Decimal(
+      0,
     );
+  }
+
+  const decimalPlaces =
+    getCurrencyDecimalPlaces(
+      currency,
+    );
+
+  let platformFee =
+    subtotal
+      .mul(
+        SERVICE_FEE_RATE_PERCENT,
+      )
+      .div(
+        100,
+      )
+      .toDecimalPlaces(
+        decimalPlaces,
+        Prisma.Decimal
+          .ROUND_UP,
+      );
+
+  if (
+    isFcfaCurrency(
+      currency,
+    )
+  ) {
+    const cap =
+      new Prisma.Decimal(
+        SERVICE_FEE_CAP_FCFA,
+      );
+
+    if (
+      platformFee.gt(
+        cap,
+      )
+    ) {
+      platformFee =
+        cap;
+    }
+  }
+
+  return platformFee;
+}
+
+/**
+ * Répartit les frais globaux de la commande entre
+ * les OrderItem proportionnellement à leur sous-total.
+ *
+ * Important :
+ *
+ * somme(OrderItem.platformFee)
+ * ===
+ * Order.platformFee
+ *
+ * Le dernier item reçoit le reliquat d’arrondi.
+ */
+function allocatePlatformFees({
+  itemSubtotals,
+  subtotal,
+  platformFee,
+  currency,
+}: {
+  itemSubtotals:
+    readonly Prisma.Decimal[];
+
+  subtotal:
+    Prisma.Decimal;
+
+  platformFee:
+    Prisma.Decimal;
+
+  currency:
+    string;
+}): Prisma.Decimal[] {
+  if (
+    itemSubtotals.length ===
+    0
+  ) {
+    return [];
+  }
+
+  if (
+    subtotal.lte(
+      0,
+    ) ||
+    platformFee.lte(
+      0,
+    )
+  ) {
+    return itemSubtotals.map(
+      () =>
+        new Prisma.Decimal(
+          0,
+        ),
+    );
+  }
+
+  const decimalPlaces =
+    getCurrencyDecimalPlaces(
+      currency,
+    );
+
+  let allocatedFee =
+    new Prisma.Decimal(
+      0,
+    );
+
+  return itemSubtotals.map(
+    (
+      itemSubtotal,
+      index,
+    ) => {
+      const isLastItem =
+        index ===
+        itemSubtotals.length -
+          1;
+
+      if (
+        isLastItem
+      ) {
+        const remainder =
+          platformFee
+            .minus(
+              allocatedFee,
+            )
+            .toDecimalPlaces(
+              decimalPlaces,
+              Prisma.Decimal
+                .ROUND_HALF_UP,
+            );
+
+        return remainder.lt(
+          0,
+        )
+          ? new Prisma.Decimal(
+              0,
+            )
+          : remainder;
+      }
+
+      const itemFee =
+        platformFee
+          .mul(
+            itemSubtotal,
+          )
+          .div(
+            subtotal,
+          )
+          .toDecimalPlaces(
+            decimalPlaces,
+            Prisma.Decimal
+              .ROUND_DOWN,
+          );
+
+      allocatedFee =
+        allocatedFee.plus(
+          itemFee,
+        );
+
+      return itemFee;
+    },
+  );
 }
 
 async function releaseExpiredReservations({
@@ -770,13 +1028,16 @@ async function releaseExpiredReservations({
       .findMany({
         where: {
           ticketTypeId: {
-            in: ticketTypeIds,
+            in:
+              ticketTypeIds,
           },
 
-          status: "PENDING",
+          status:
+            "PENDING",
 
           expiresAt: {
-            lte: now,
+            lte:
+              now,
           },
         },
 
@@ -795,7 +1056,10 @@ async function releaseExpiredReservations({
   }
 
   const quantitiesByTicketType =
-    new Map<string, number>();
+    new Map<
+      string,
+      number
+    >();
 
   for (
     const reservation of
@@ -807,7 +1071,8 @@ async function releaseExpiredReservations({
       (
         quantitiesByTicketType.get(
           reservation.ticketTypeId,
-        ) ?? 0
+        ) ??
+        0
       ) +
         reservation.quantity,
     );
@@ -817,27 +1082,33 @@ async function releaseExpiredReservations({
     const [
       ticketTypeId,
       quantity,
-    ] of quantitiesByTicketType
+    ] of
+    quantitiesByTicketType
   ) {
     const ticketType =
       await transaction
         .ticketType
         .findUnique({
           where: {
-            id: ticketTypeId,
+            id:
+              ticketTypeId,
           },
 
           select: {
-            reserved: true,
+            reserved:
+              true,
           },
         });
 
-    if (ticketType) {
+    if (
+      ticketType
+    ) {
       await transaction
         .ticketType
         .update({
           where: {
-            id: ticketTypeId,
+            id:
+              ticketTypeId,
           },
 
           data: {
@@ -866,12 +1137,16 @@ async function releaseExpiredReservations({
             ),
         },
 
-        status: "PENDING",
+        status:
+          "PENDING",
       },
 
       data: {
-        status: "EXPIRED",
-        releasedAt: now,
+        status:
+          "EXPIRED",
+
+        releasedAt:
+          now,
       },
     });
 }
@@ -935,7 +1210,9 @@ async function findExistingOrder({
       },
     });
 
-  if (!order) {
+  if (
+    !order
+  ) {
     return null;
   }
 
@@ -949,7 +1226,9 @@ async function findExistingOrder({
           .toLowerCase() ===
           guestEmail.toLowerCase();
 
-  if (!belongsToRequester) {
+  if (
+    !belongsToRequester
+  ) {
     throw new PaymentValidationError({
       code:
         "PAYMENT_IDEMPOTENCY_CONFLICT",
@@ -957,8 +1236,11 @@ async function findExistingOrder({
       message:
         "Cette clé d’idempotence est déjà utilisée par une autre commande.",
 
-      status: 409,
-      orderId: order.id,
+      status:
+        409,
+
+      orderId:
+        order.id,
     });
   }
 
@@ -1000,22 +1282,32 @@ function serializeOrder(
   checkoutToken: string,
 ) {
   return {
-    id: order.id,
+    id:
+      order.id,
+
     reference:
       order.reference,
+
     status:
       order.status,
+
     currency:
       order.currency,
 
     subtotal:
-      order.subtotal.toFixed(2),
+      order.subtotal.toFixed(
+        2,
+      ),
 
     platformFee:
-      order.platformFee.toFixed(2),
+      order.platformFee.toFixed(
+        2,
+      ),
 
     total:
-      order.total.toFixed(2),
+      order.total.toFixed(
+        2,
+      ),
 
     reservationExpiresAt:
       order.reservationExpiresAt
@@ -1028,30 +1320,43 @@ function serializeOrder(
       order.event,
 
     items:
-      order.items.map((item) => ({
-        id: item.id,
+      order.items.map(
+        (
+          item,
+        ) => ({
+          id:
+            item.id,
 
-        ticketTypeId:
-          item.ticketTypeId,
+          ticketTypeId:
+            item.ticketTypeId,
 
-        ticketTypeName:
-          item.ticketType.name,
+          ticketTypeName:
+            item.ticketType.name,
 
-        quantity:
-          item.quantity,
+          quantity:
+            item.quantity,
 
-        unitPrice:
-          item.unitPrice.toFixed(2),
+          unitPrice:
+            item.unitPrice.toFixed(
+              2,
+            ),
 
-        subtotal:
-          item.subtotal.toFixed(2),
+          subtotal:
+            item.subtotal.toFixed(
+              2,
+            ),
 
-        platformFee:
-          item.platformFee.toFixed(2),
+          platformFee:
+            item.platformFee.toFixed(
+              2,
+            ),
 
-        total:
-          item.total.toFixed(2),
-      })),
+          total:
+            item.total.toFixed(
+              2,
+            ),
+        }),
+      ),
   };
 }
 
@@ -1092,7 +1397,9 @@ async function createOrderInTransaction({
 
   const ticketTypeIds =
     items.map(
-      (item) =>
+      (
+        item,
+      ) =>
         item.ticketTypeId,
     );
 
@@ -1105,7 +1412,9 @@ async function createOrderInTransaction({
     });
 
   return prisma.$transaction(
-    async (transaction) => {
+    async (
+      transaction,
+    ) => {
       await releaseExpiredReservations({
         transaction,
         ticketTypeIds,
@@ -1158,7 +1467,9 @@ async function createOrderInTransaction({
             },
           });
 
-      if (!event) {
+      if (
+        !event
+      ) {
         throw new PaymentValidationError({
           code:
             "PAYMENT_ORDER_NOT_FOUND",
@@ -1166,7 +1477,8 @@ async function createOrderInTransaction({
           message:
             "Cet événement est introuvable ou indisponible.",
 
-          status: 404,
+          status:
+            404,
         });
       }
 
@@ -1182,7 +1494,8 @@ async function createOrderInTransaction({
           message:
             "La vente des billets n’a pas encore commencé.",
 
-          status: 409,
+          status:
+            409,
         });
       }
 
@@ -1198,7 +1511,8 @@ async function createOrderInTransaction({
           message:
             "La vente des billets est terminée.",
 
-          status: 409,
+          status:
+            409,
         });
       }
 
@@ -1213,7 +1527,8 @@ async function createOrderInTransaction({
           message:
             "Cet événement a déjà commencé et ne peut plus être commandé.",
 
-          status: 409,
+          status:
+            409,
         });
       }
 
@@ -1228,14 +1543,17 @@ async function createOrderInTransaction({
           message:
             "Un ou plusieurs types de billets sont invalides.",
 
-          status: 400,
+          status:
+            400,
         });
       }
 
       const ticketTypesById =
         new Map(
           event.ticketTypes.map(
-            (ticketType) => [
+            (
+              ticketType,
+            ) => [
               ticketType.id,
               ticketType,
             ],
@@ -1243,175 +1561,177 @@ async function createOrderInTransaction({
         );
 
       let subtotal =
-        new Prisma.Decimal(0);
+        new Prisma.Decimal(
+          0,
+        );
 
-      const calculatedItems =
-        items.map((item) => {
-          const ticketType =
-            ticketTypesById.get(
-              item.ticketTypeId,
-            );
-
-          if (!ticketType) {
-            throw new PaymentValidationError({
-              code:
-                "PAYMENT_INVALID_REQUEST",
-
-              message:
-                "Le type de billet sélectionné est invalide.",
-
-              status: 400,
-            });
-          }
-
-          if (!ticketType.isActive) {
-            throw new PaymentValidationError({
-              code:
-                "PAYMENT_ORDER_NOT_PAYABLE",
-
-              message:
-                `Le billet « ${ticketType.name} » n’est pas disponible à la vente.`,
-
-              status: 409,
-            });
-          }
-
-          if (
-            ticketType.saleStartsAt &&
-            ticketType.saleStartsAt >
-              now
-          ) {
-            throw new PaymentValidationError({
-              code:
-                "PAYMENT_ORDER_NOT_PAYABLE",
-
-              message:
-                `La vente du billet « ${ticketType.name} » n’a pas encore commencé.`,
-
-              status: 409,
-            });
-          }
-
-          if (
-            ticketType.saleEndsAt &&
-            ticketType.saleEndsAt <=
-              now
-          ) {
-            throw new PaymentValidationError({
-              code:
-                "PAYMENT_ORDER_EXPIRED",
-
-              message:
-                `La vente du billet « ${ticketType.name} » est terminée.`,
-
-              status: 409,
-            });
-          }
-
-          if (
-            item.quantity >
-            ticketType.maxPerOrder
-          ) {
-            throw new PaymentValidationError({
-              code:
-                "PAYMENT_INVALID_REQUEST",
-
-              message:
-                `Vous pouvez acheter au maximum ${ticketType.maxPerOrder} billet(s) de type « ${ticketType.name} » par commande.`,
-
-              status: 400,
-            });
-          }
-
-          const availableQuantity =
-            Math.max(
-              0,
-              ticketType.quantity -
-                ticketType.sold -
-                ticketType.reserved,
-            );
-
-          if (
-            item.quantity >
-            availableQuantity
-          ) {
-            throw new PaymentValidationError({
-              code:
-                "PAYMENT_STOCK_INSUFFICIENT",
-
-              message:
-                `Il ne reste pas assez de billets « ${ticketType.name} ». Quantité disponible : ${availableQuantity}.`,
-
-              status: 409,
-              retryable: false,
-
-              details: {
-                ticketTypeId:
-                  ticketType.id,
-
-                requestedQuantity:
-                  item.quantity,
-
-                availableQuantity,
-              },
-            });
-          }
-
-          const itemSubtotal =
-            ticketType.price
-              .mul(
-                item.quantity,
-              )
-              .toDecimalPlaces(
-                2,
-                Prisma.Decimal
-                  .ROUND_HALF_UP,
+      /*
+       * Étape 1 :
+       * validation de tous les billets et calcul
+       * uniquement de leurs sous-totaux.
+       *
+       * Les frais de service sont calculés ensuite
+       * au niveau global de la commande afin que
+       * le plafond de 5 000 F soit un plafond de
+       * commande et non un plafond par ligne.
+       */
+      const calculatedItemsWithoutFees: CalculatedItemWithoutFee[] =
+        items.map(
+          (
+            item,
+          ) => {
+            const ticketType =
+              ticketTypesById.get(
+                item.ticketTypeId,
               );
 
-          const itemPlatformFee =
-            calculatePlatformFee({
+            if (
+              !ticketType
+            ) {
+              throw new PaymentValidationError({
+                code:
+                  "PAYMENT_INVALID_REQUEST",
+
+                message:
+                  "Le type de billet sélectionné est invalide.",
+
+                status:
+                  400,
+              });
+            }
+
+            if (
+              !ticketType.isActive
+            ) {
+              throw new PaymentValidationError({
+                code:
+                  "PAYMENT_ORDER_NOT_PAYABLE",
+
+                message:
+                  `Le billet « ${ticketType.name} » n’est pas disponible à la vente.`,
+
+                status:
+                  409,
+              });
+            }
+
+            if (
+              ticketType.saleStartsAt &&
+              ticketType.saleStartsAt >
+                now
+            ) {
+              throw new PaymentValidationError({
+                code:
+                  "PAYMENT_ORDER_NOT_PAYABLE",
+
+                message:
+                  `La vente du billet « ${ticketType.name} » n’a pas encore commencé.`,
+
+                status:
+                  409,
+              });
+            }
+
+            if (
+              ticketType.saleEndsAt &&
+              ticketType.saleEndsAt <=
+                now
+            ) {
+              throw new PaymentValidationError({
+                code:
+                  "PAYMENT_ORDER_EXPIRED",
+
+                message:
+                  `La vente du billet « ${ticketType.name} » est terminée.`,
+
+                status:
+                  409,
+              });
+            }
+
+            if (
+              item.quantity >
+              ticketType.maxPerOrder
+            ) {
+              throw new PaymentValidationError({
+                code:
+                  "PAYMENT_INVALID_REQUEST",
+
+                message:
+                  `Vous pouvez acheter au maximum ${ticketType.maxPerOrder} billet(s) de type « ${ticketType.name} » par commande.`,
+
+                status:
+                  400,
+              });
+            }
+
+            const availableQuantity =
+              Math.max(
+                0,
+                ticketType.quantity -
+                  ticketType.sold -
+                  ticketType.reserved,
+              );
+
+            if (
+              item.quantity >
+              availableQuantity
+            ) {
+              throw new PaymentValidationError({
+                code:
+                  "PAYMENT_STOCK_INSUFFICIENT",
+
+                message:
+                  `Il ne reste pas assez de billets « ${ticketType.name} ». Quantité disponible : ${availableQuantity}.`,
+
+                status:
+                  409,
+
+                retryable:
+                  false,
+
+                details: {
+                  ticketTypeId:
+                    ticketType.id,
+
+                  requestedQuantity:
+                    item.quantity,
+
+                  availableQuantity,
+                },
+              });
+            }
+
+            const itemSubtotal =
+              ticketType.price
+                .mul(
+                  item.quantity,
+                )
+                .toDecimalPlaces(
+                  2,
+                  Prisma.Decimal
+                    .ROUND_HALF_UP,
+                );
+
+            subtotal =
+              subtotal.plus(
+                itemSubtotal,
+              );
+
+            return {
+              ticketType,
+
+              quantity:
+                item.quantity,
+
+              unitPrice:
+                ticketType.price,
+
               subtotal:
                 itemSubtotal,
-
-              rate:
-                event.platformFeeRate,
-            });
-
-          const itemTotal =
-            itemSubtotal
-              .plus(
-                itemPlatformFee,
-              )
-              .toDecimalPlaces(
-                2,
-                Prisma.Decimal
-                  .ROUND_HALF_UP,
-              );
-
-          subtotal =
-            subtotal.plus(
-              itemSubtotal,
-            );
-
-          return {
-            ticketType,
-
-            quantity:
-              item.quantity,
-
-            unitPrice:
-              ticketType.price,
-
-            subtotal:
-              itemSubtotal,
-
-            platformFee:
-              itemPlatformFee,
-
-            total:
-              itemTotal,
-          };
-        });
+            };
+          },
+        );
 
       subtotal =
         subtotal.toDecimalPlaces(
@@ -1420,13 +1740,86 @@ async function createOrderInTransaction({
             .ROUND_HALF_UP,
         );
 
+      const orderCurrency =
+        event.currency
+          .trim()
+          .toUpperCase();
+
+      /*
+       * Étape 2 :
+       * calcul global des frais de service.
+       *
+       * Tikemia :
+       * 3 % du sous-total.
+       * Maximum 5 000 F pour XOF / XAF.
+       */
       const platformFee =
         calculatePlatformFee({
           subtotal,
 
-          rate:
-            event.platformFeeRate,
+          currency:
+            orderCurrency,
         });
+
+      /*
+       * Étape 3 :
+       * répartition des frais globaux entre
+       * les différentes lignes de commande.
+       */
+      const allocatedPlatformFees =
+        allocatePlatformFees({
+          itemSubtotals:
+            calculatedItemsWithoutFees.map(
+              (
+                item,
+              ) =>
+                item.subtotal,
+            ),
+
+          subtotal,
+
+          platformFee,
+
+          currency:
+            orderCurrency,
+        });
+
+      const calculatedItems: CalculatedItem[] =
+        calculatedItemsWithoutFees.map(
+          (
+            item,
+            index,
+          ) => {
+            const itemPlatformFee =
+              allocatedPlatformFees[
+                index
+              ] ??
+              new Prisma.Decimal(
+                0,
+              );
+
+            const itemTotal =
+              item.subtotal
+                .plus(
+                  itemPlatformFee,
+                )
+                .toDecimalPlaces(
+                  2,
+                  Prisma.Decimal
+                    .ROUND_HALF_UP,
+                );
+
+            return {
+              ...item,
+
+              platformFee:
+                itemPlatformFee,
+
+              total:
+                itemTotal,
+            };
+          },
+        );
 
       const total =
         subtotal
@@ -1463,9 +1856,7 @@ async function createOrderInTransaction({
                 customerData.customerPhone,
 
               currency:
-                event.currency
-                  .trim()
-                  .toUpperCase(),
+                orderCurrency,
 
               subtotal,
               platformFee,
@@ -1489,7 +1880,9 @@ async function createOrderInTransaction({
               items: {
                 create:
                   calculatedItems.map(
-                    (item) => ({
+                    (
+                      item,
+                    ) => ({
                       ticketTypeId:
                         item.ticketType.id,
 
@@ -1514,7 +1907,9 @@ async function createOrderInTransaction({
               reservations: {
                 create:
                   calculatedItems.map(
-                    (item) => ({
+                    (
+                      item,
+                    ) => ({
                       ticketTypeId:
                         item.ticketType.id,
 
@@ -1569,6 +1964,13 @@ async function createOrderInTransaction({
             },
           });
 
+      /*
+       * Les réservations ne sont incrémentées
+       * qu'après la création complète de la commande.
+       *
+       * Toute erreur provoque le rollback intégral
+       * grâce à la transaction Serializable.
+       */
       for (
         const item of
         calculatedItems
@@ -1598,8 +2000,11 @@ async function createOrderInTransaction({
           .TransactionIsolationLevel
           .Serializable,
 
-      timeout: 20_000,
-      maxWait: 10_000,
+      timeout:
+        20_000,
+
+      maxWait:
+        10_000,
     },
   );
 }
@@ -1623,8 +2028,11 @@ async function createOrderWithRetry(
       return await createOrderInTransaction(
         parameters,
       );
-    } catch (error) {
-      lastError = error;
+    } catch (
+      error
+    ) {
+      lastError =
+        error;
 
       const shouldRetry =
         error instanceof
@@ -1641,10 +2049,13 @@ async function createOrderWithRetry(
       }
 
       await new Promise<void>(
-        (resolve) =>
+        (
+          resolve,
+        ) =>
           setTimeout(
             resolve,
-            attempt * 100,
+            attempt *
+              100,
           ),
       );
     }
@@ -1666,7 +2077,8 @@ export async function POST(
     } catch {
       return jsonResponse(
         {
-          success: false,
+          success:
+            false,
 
           error: {
             code:
@@ -1685,10 +2097,13 @@ export async function POST(
         rawBody,
       );
 
-    if (!parsedBody.success) {
+    if (
+      !parsedBody.success
+    ) {
       return jsonResponse(
         {
-          success: false,
+          success:
+            false,
 
           error: {
             code:
@@ -1727,7 +2142,8 @@ export async function POST(
     const idempotencyKey =
       getIdempotencyKey({
         request,
-        body: input,
+        body:
+          input,
       });
 
     const checkoutToken =
@@ -1745,9 +2161,12 @@ export async function POST(
           input.customer.email,
       });
 
-    if (existingOrder) {
+    if (
+      existingOrder
+    ) {
       return jsonResponse({
-        success: true,
+        success:
+          true,
 
         code:
           "ORDER_ALREADY_CREATED",
@@ -1775,7 +2194,8 @@ export async function POST(
 
       return jsonResponse(
         {
-          success: true,
+          success:
+            true,
 
           code:
             "ORDER_CREATED",
@@ -1791,10 +2211,13 @@ export async function POST(
         },
         201,
       );
-    } catch (error) {
+    } catch (
+      error
+    ) {
       /*
-       * Protection contre deux requêtes simultanées utilisant
-       * exactement la même clé d’idempotence.
+       * Protection contre deux requêtes simultanées
+       * utilisant exactement la même clé
+       * d’idempotence.
        */
       if (
         error instanceof
@@ -1816,7 +2239,8 @@ export async function POST(
           orderCreatedByConcurrentRequest
         ) {
           return jsonResponse({
-            success: true,
+            success:
+              true,
 
             code:
               "ORDER_ALREADY_CREATED",
@@ -1835,19 +2259,26 @@ export async function POST(
 
       throw error;
     }
-  } catch (error) {
+  } catch (
+    error
+  ) {
     const paymentError =
-      getPaymentError(error, {
-        code:
-          "PAYMENT_INTERNAL_ERROR",
+      getPaymentError(
+        error,
+        {
+          code:
+            "PAYMENT_INTERNAL_ERROR",
 
-        message:
-          "Impossible de préparer cette commande pour le moment.",
+          message:
+            "Impossible de préparer cette commande pour le moment.",
 
-        status: 500,
+          status:
+            500,
 
-        exposeMessage: false,
-      });
+          exposeMessage:
+            false,
+        },
+      );
 
     console.error(
       "[CLIENT_CHECKOUT_ORDER_CREATE_ERROR]",

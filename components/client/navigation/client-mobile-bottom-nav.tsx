@@ -1,15 +1,24 @@
 "use client";
 
 import Link from "next/link";
+
 import {
+  CalendarDays,
+  Compass,
   Heart,
   Home,
-  Search,
   ShoppingBag,
   Ticket,
-  User,
+  UserRound,
 } from "lucide-react";
-import { usePathname } from "next/navigation";
+
+import {
+  usePathname,
+} from "next/navigation";
+
+import {
+  useTranslations,
+} from "next-intl";
 
 export type ClientMobileBottomNavUser = {
   id: string;
@@ -22,35 +31,63 @@ export type ClientMobileBottomNavProps = {
   exploreHref?: string;
   favoritesHref?: string;
   ticketsHref?: string;
+  eventsHref?: string;
+  profileHref?: string;
 
   /**
-   * Cette prop conserve son nom actuel pour rester compatible
+   * Cette prop est conservée pour rester compatible
    * avec app/(client)/layout.tsx.
    *
-   * Quand le client est connecté, elle doit contenir :
+   * Elle représente maintenant directement la route
+   * "Mes commandes".
+   *
+   * Valeur attendue :
    * /account/orders
    */
   accountHref?: string;
 
   loginHref?: string;
+
+  /**
+   * Badges optionnels.
+   *
+   * Ils peuvent être branchés plus tard sur les vraies
+   * statistiques du client sans modifier le composant.
+   */
+  ordersCount?: number;
+  favoritesCount?: number;
+
+  /**
+   * Affiche le petit indicateur vert sur le profil.
+   * Par défaut il est actif lorsqu'un utilisateur est connecté.
+   */
+  profileOnline?: boolean;
+
   hiddenPathPrefixes?: string[];
+
   className?: string;
 };
 
-type NavigationIconName =
+type NavigationItemId =
   | "home"
-  | "search"
-  | "heart"
-  | "ticket"
+  | "explore"
+  | "favorites"
+  | "tickets"
+  | "events"
   | "orders"
-  | "user";
+  | "profile";
 
 type NavigationItem = {
-  id: string;
-  label: string;
+  id: NavigationItemId;
   href: string;
-  icon: NavigationIconName;
+  label: string;
   requiresAuthentication?: boolean;
+
+  /**
+   * Certains raccourcis peuvent mener vers une variante
+   * de /events sans avoir besoin d'un second état actif.
+   */
+  showActiveState?: boolean;
 };
 
 const DEFAULT_HIDDEN_PATH_PREFIXES = [
@@ -79,7 +116,9 @@ function normalizePath(
       ?.trim() ||
     "/";
 
-  if (pathname === "/") {
+  if (
+    pathname === "/"
+  ) {
     return "/";
   }
 
@@ -97,17 +136,26 @@ function isPathActive({
   href: string;
 }): boolean {
   const currentPath =
-    normalizePath(pathname);
+    normalizePath(
+      pathname,
+    );
 
   const targetPath =
-    normalizePath(href);
+    normalizePath(
+      href,
+    );
 
-  if (targetPath === "/") {
-    return currentPath === "/";
+  if (
+    targetPath === "/"
+  ) {
+    return (
+      currentPath === "/"
+    );
   }
 
   return (
-    currentPath === targetPath ||
+    currentPath ===
+      targetPath ||
     currentPath.startsWith(
       `${targetPath}/`,
     )
@@ -142,39 +190,48 @@ function createProtectedHref({
   return href;
 }
 
-function renderNavigationIcon({
-  icon,
+function NavigationIcon({
+  id,
   active,
 }: {
-  icon: NavigationIconName;
+  id: NavigationItemId;
   active: boolean;
 }) {
   const className =
     cn(
-      "h-[19px] w-[19px] transition duration-200",
+      "h-[22px] w-[22px]",
+      "stroke-[2]",
+      "transition-all duration-300",
+
       active
-        ? "text-lime-400"
-        : "text-neutral-500 group-hover:text-neutral-300",
+        ? "scale-[1.04] text-[#9cff57]"
+        : "text-white/78 group-hover:text-white",
     );
 
-  switch (icon) {
+  switch (
+    id
+  ) {
     case "home":
       return (
         <Home
           aria-hidden="true"
-          className={className}
+          className={cn(
+            className,
+            active &&
+              "fill-[#9cff57]",
+          )}
         />
       );
 
-    case "search":
+    case "explore":
       return (
-        <Search
+        <Compass
           aria-hidden="true"
           className={className}
         />
       );
 
-    case "heart":
+    case "favorites":
       return (
         <Heart
           aria-hidden="true"
@@ -182,9 +239,17 @@ function renderNavigationIcon({
         />
       );
 
-    case "ticket":
+    case "tickets":
       return (
         <Ticket
+          aria-hidden="true"
+          className="h-[29px] w-[29px] stroke-[2.7] text-[#071008]"
+        />
+      );
+
+    case "events":
+      return (
+        <CalendarDays
           aria-hidden="true"
           className={className}
         />
@@ -198,14 +263,49 @@ function renderNavigationIcon({
         />
       );
 
+    case "profile":
     default:
       return (
-        <User
+        <UserRound
           aria-hidden="true"
           className={className}
         />
       );
   }
+}
+
+function NavigationBadge({
+  count,
+}: {
+  count: number;
+}) {
+  if (
+    count <= 0
+  ) {
+    return null;
+  }
+
+  return (
+    <span
+      aria-label={`${count}`}
+      className={cn(
+        "absolute -right-2 -top-2",
+        "flex h-[20px] min-w-[20px]",
+        "items-center justify-center",
+        "rounded-full",
+        "border-2 border-[#050b10]",
+        "bg-[#ff3159]",
+        "px-1",
+        "text-[9px] font-black",
+        "leading-none text-white",
+        "shadow-[0_4px_14px_rgba(255,49,89,0.38)]",
+      )}
+    >
+      {count > 99
+        ? "99+"
+        : count}
+    </span>
+  );
 }
 
 export default function ClientMobileBottomNav({
@@ -215,8 +315,31 @@ export default function ClientMobileBottomNav({
   exploreHref = "/events",
   favoritesHref = "/favorites",
   ticketsHref = "/account/tickets",
+
+  /**
+   * Route distincte conservée pour proposer un accès
+   * direct aux événements populaires.
+   *
+   * La route principale /events reste utilisée par Explorer.
+   */
+  eventsHref = "/events?sort=popular",
+
+  /**
+   * On utilise accountHref pour Mes commandes afin de
+   * préserver la compatibilité avec le layout existant.
+   */
   accountHref = "/account/orders",
+
+  profileHref = "/account/profile",
+
   loginHref = "/login",
+
+  ordersCount = 0,
+  favoritesCount = 0,
+
+  profileOnline = Boolean(
+    user,
+  ),
 
   hiddenPathPrefixes = [
     ...DEFAULT_HIDDEN_PATH_PREFIXES,
@@ -227,8 +350,20 @@ export default function ClientMobileBottomNav({
   const pathname =
     usePathname();
 
+  const tNavigation =
+    useTranslations(
+      "navigation",
+    );
+
+  const tEvents =
+    useTranslations(
+      "events",
+    );
+
   const normalizedPath =
-    normalizePath(pathname);
+    normalizePath(
+      pathname,
+    );
 
   const shouldHide =
     hiddenPathPrefixes.some(
@@ -236,7 +371,9 @@ export default function ClientMobileBottomNav({
         prefix,
       ) => {
         const normalizedPrefix =
-          normalizePath(prefix);
+          normalizePath(
+            prefix,
+          );
 
         return (
           normalizedPath ===
@@ -248,163 +385,445 @@ export default function ClientMobileBottomNav({
       },
     );
 
-  if (shouldHide) {
+  if (
+    shouldHide
+  ) {
     return null;
   }
 
-  const navigationItems: NavigationItem[] = [
-    {
-      id: "home",
-      label: "Accueil",
-      href: homeHref,
-      icon: "home",
-    },
-    {
-      id: "explore",
-      label: "Explorer",
-      href: exploreHref,
-      icon: "search",
-    },
-    {
-      id: "favorites",
-      label: "Favoris",
-      href: favoritesHref,
-      icon: "heart",
-      requiresAuthentication: true,
-    },
-    {
-      id: "tickets",
-      label: "Billets",
-      href: ticketsHref,
-      icon: "ticket",
-      requiresAuthentication: true,
-    },
-    {
-      id:
-        user
-          ? "orders"
-          : "login",
+  const navigationItems:
+    NavigationItem[] = [
+      {
+        id: "home",
 
-      label:
-        user
-          ? "Mes commandes"
-          : "Connexion",
+        href:
+          homeHref,
 
-      href:
-        user
-          ? accountHref
-          : loginHref,
+        label:
+          tNavigation(
+            "home",
+          ),
+      },
 
-      icon:
-        user
-          ? "orders"
-          : "user",
+      {
+        id:
+          "explore",
 
-      requiresAuthentication:
-        Boolean(user),
-    },
-  ];
+        href:
+          exploreHref,
+
+        label:
+          tNavigation(
+            "explore",
+          ),
+      },
+
+      {
+        id:
+          "favorites",
+
+        href:
+          favoritesHref,
+
+        label:
+          tNavigation(
+            "favorites",
+          ),
+
+        requiresAuthentication:
+          true,
+      },
+
+      {
+        id:
+          "tickets",
+
+        href:
+          ticketsHref,
+
+        label:
+          tNavigation(
+            "myTickets",
+          ),
+
+        requiresAuthentication:
+          true,
+      },
+
+      {
+        id:
+          "events",
+
+        href:
+          eventsHref,
+
+        label:
+          tEvents(
+            "title",
+          ),
+
+        /*
+         * Explorer et Événements partagent /events.
+         *
+         * Explorer reste l'état actif principal afin d'éviter
+         * que les deux boutons deviennent verts simultanément.
+         */
+        showActiveState:
+          false,
+      },
+
+      {
+        id:
+          "orders",
+
+        href:
+          accountHref,
+
+        label:
+          tNavigation(
+            "myOrders",
+          ),
+
+        requiresAuthentication:
+          true,
+      },
+
+      {
+        id:
+          "profile",
+
+        href:
+          profileHref,
+
+        label:
+          user
+            ? tNavigation(
+                "profile",
+              )
+            : tNavigation(
+                "login",
+              ),
+
+        requiresAuthentication:
+          true,
+      },
+    ];
 
   return (
-    <nav
-      aria-label="Navigation mobile principale"
+    <div
       className={cn(
-        "fixed inset-x-0 bottom-0 z-[70] border-t border-white/[0.09] bg-[#03070a]/95 px-2 pt-2 shadow-[0_-14px_45px_rgba(0,0,0,0.38)] backdrop-blur-2xl supports-[backdrop-filter]:bg-[#03070a]/84 lg:hidden",
-        "pb-[max(8px,env(safe-area-inset-bottom))]",
+        "fixed inset-x-0 bottom-0 z-[70]",
+        "pointer-events-none",
+        "px-2",
+        "pb-[max(7px,env(safe-area-inset-bottom))]",
+        "lg:hidden",
         className,
       )}
     >
-      <div className="mx-auto grid w-full max-w-md grid-cols-5 gap-1">
-        {navigationItems.map(
-          (
-            item,
-          ) => {
-            const resolvedHref =
-              createProtectedHref({
-                href:
-                  item.href,
+      <nav
+        aria-label="Navigation mobile"
+        className={cn(
+          "pointer-events-auto",
+          "relative mx-auto",
+          "w-full max-w-[720px]",
+          "overflow-visible",
 
-                requiresAuthentication:
-                  item.requiresAuthentication,
+          "rounded-[28px]",
 
-                user,
+          "border border-[#2b4050]/80",
 
-                loginHref,
-              });
+          "bg-[#050b10]/96",
 
-            const active =
-              isPathActive({
-                pathname,
+          "px-1.5 pb-1.5 pt-2",
 
-                href:
-                  item.href,
-              });
+          "shadow-[0_22px_65px_rgba(0,0,0,0.72)]",
 
-            return (
-              <Link
-                key={
-                  item.id
-                }
-                href={
-                  resolvedHref
-                }
-                aria-current={
-                  active
-                    ? "page"
-                    : undefined
-                }
-                aria-label={
-                  item.label
-                }
-                className={cn(
-                  "group relative flex min-w-0 flex-col items-center justify-center gap-1 rounded-xl px-1 py-2 text-center outline-none transition duration-200",
-                  "focus-visible:ring-2 focus-visible:ring-lime-400/70 focus-visible:ring-offset-2 focus-visible:ring-offset-[#03070a]",
-                  "active:scale-95",
-                  active
-                    ? "bg-emerald-500/[0.08]"
-                    : "hover:bg-white/[0.035]",
-                )}
-              >
-                {active && (
-                  <span
-                    aria-hidden="true"
-                    className="absolute -top-2 left-1/2 h-0.5 w-7 -translate-x-1/2 rounded-full bg-gradient-to-r from-lime-400 via-orange-400 to-red-500"
-                  />
-                )}
+          "backdrop-blur-2xl",
 
-                <span
-                  className={cn(
-                    "flex h-8 w-8 items-center justify-center rounded-xl border transition duration-200",
+          "supports-[backdrop-filter]:bg-[#050b10]/90",
+        )}
+      >
+        {/* Bordure intérieure premium */}
+        <div
+          aria-hidden="true"
+          className="pointer-events-none absolute inset-[1px] rounded-[27px] border border-white/[0.025]"
+        />
+
+        {/* Ligne lumineuse Tikemia */}
+        <div
+          aria-hidden="true"
+          className="pointer-events-none absolute inset-x-8 top-0 h-px bg-gradient-to-r from-transparent via-[#7dff42]/55 to-transparent"
+        />
+
+        {/* Halo derrière le bouton central */}
+        <div
+          aria-hidden="true"
+          className="pointer-events-none absolute left-1/2 top-0 h-20 w-28 -translate-x-1/2 -translate-y-6 rounded-full bg-[#7dff42]/[0.08] blur-2xl"
+        />
+
+        <div className="relative grid grid-cols-7 items-end gap-0">
+          {navigationItems.map(
+            (
+              item,
+            ) => {
+              const resolvedHref =
+                createProtectedHref({
+                  href:
+                    item.href,
+
+                  requiresAuthentication:
+                    item.requiresAuthentication,
+
+                  user,
+
+                  loginHref,
+                });
+
+              const pathActive =
+                isPathActive({
+                  pathname,
+
+                  href:
+                    item.href,
+                });
+
+              const active =
+                item.showActiveState ===
+                false
+                  ? false
+                  : pathActive;
+
+              const isCenter =
+                item.id ===
+                "tickets";
+
+              return (
+                <Link
+                  key={
+                    item.id
+                  }
+                  href={
+                    resolvedHref
+                  }
+                  aria-current={
                     active
-                      ? "border-emerald-500/20 bg-emerald-500/[0.09]"
-                      : "border-transparent bg-transparent group-hover:border-white/[0.06] group-hover:bg-white/[0.025]",
-                  )}
-                >
-                  {renderNavigationIcon({
-                    icon:
-                      item.icon,
-
-                    active,
-                  })}
-                </span>
-
-                <span
-                  className={cn(
-                    "max-w-full truncate text-[9px] font-bold transition duration-200 sm:text-[10px]",
-                    active
-                      ? "text-emerald-300"
-                      : "text-neutral-600 group-hover:text-neutral-300",
-                  )}
-                >
-                  {
+                      ? "page"
+                      : undefined
+                  }
+                  aria-label={
                     item.label
                   }
-                </span>
-              </Link>
-            );
-          },
-        )}
-      </div>
-    </nav>
+                  className={cn(
+                    "group relative flex min-w-0",
+
+                    "flex-col items-center justify-end",
+
+                    "outline-none",
+
+                    "transition-transform duration-200",
+
+                    "focus-visible:ring-2",
+
+                    "focus-visible:ring-[#8dff4f]/60",
+
+                    "focus-visible:ring-offset-2",
+
+                    "focus-visible:ring-offset-[#050b10]",
+
+                    "active:scale-[0.94]",
+
+                    isCenter
+                      ? "pb-0"
+                      : "min-h-[67px] pb-[7px] pt-[6px]",
+                  )}
+                >
+                  {isCenter ? (
+                    /*
+                     * ======================================================
+                     * BOUTON CENTRAL — MES BILLETS
+                     * ======================================================
+                     */
+                    <div className="relative -mt-[31px] flex flex-col items-center">
+                      {/* Glow */}
+                      <span
+                        aria-hidden="true"
+                        className="absolute left-1/2 top-[11px] h-[62px] w-[62px] -translate-x-1/2 rounded-full bg-[#8dff4f]/25 blur-2xl"
+                      />
+
+                      {/* Anneau extérieur */}
+                      <span
+                        aria-hidden="true"
+                        className="absolute left-1/2 top-0 h-[78px] w-[78px] -translate-x-1/2 rounded-full border border-[#7dff42]/35"
+                      />
+
+                      {/* Cercle principal */}
+                      <span
+                        className={cn(
+                          "relative flex h-[68px] w-[68px]",
+
+                          "items-center justify-center",
+
+                          "rounded-full",
+
+                          "border-[3px] border-[#72c932]",
+
+                          "bg-gradient-to-br",
+
+                          "from-[#a9ff68]",
+
+                          "via-[#8dff4f]",
+
+                          "to-[#73e93a]",
+
+                          "shadow-[0_0_0_6px_rgba(75,145,25,0.22),0_0_30px_rgba(132,255,73,0.30),0_14px_28px_rgba(0,0,0,0.45)]",
+
+                          "transition duration-300",
+
+                          "group-hover:scale-[1.04]",
+                        )}
+                      >
+                        <NavigationIcon
+                          id="tickets"
+                          active
+                        />
+                      </span>
+
+                      <span
+                        className={cn(
+                          "mt-[7px]",
+
+                          "max-w-[76px] truncate",
+
+                          "text-center",
+
+                          "text-[9.5px]",
+
+                          "font-bold",
+
+                          "leading-none",
+
+                          "text-white",
+
+                          "sm:text-[11px]",
+                        )}
+                      >
+                        {
+                          item.label
+                        }
+                      </span>
+                    </div>
+                  ) : (
+                    /*
+                     * ======================================================
+                     * ONGLETS LATÉRAUX
+                     * ======================================================
+                     */
+                    <>
+                      {active ? (
+                        <>
+                          <span
+                            aria-hidden="true"
+                            className="absolute inset-x-1 bottom-0 h-[3px] rounded-full bg-gradient-to-r from-[#76ff3b] via-[#9cff57] to-[#e6ff4d] shadow-[0_0_12px_rgba(126,255,62,0.55)]"
+                          />
+
+                          <span
+                            aria-hidden="true"
+                            className="absolute bottom-0 left-1/2 h-10 w-12 -translate-x-1/2 bg-[#8dff4f]/[0.05] blur-xl"
+                          />
+                        </>
+                      ) : null}
+
+                      <span className="relative flex h-8 w-9 items-center justify-center">
+                        <NavigationIcon
+                          id={
+                            item.id
+                          }
+                          active={
+                            active
+                          }
+                        />
+
+                        {item.id ===
+                          "favorites" ? (
+                          <NavigationBadge
+                            count={
+                              favoritesCount
+                            }
+                          />
+                        ) : null}
+
+                        {item.id ===
+                          "orders" ? (
+                          <NavigationBadge
+                            count={
+                              ordersCount
+                            }
+                          />
+                        ) : null}
+
+                        {item.id ===
+                          "profile" &&
+                        profileOnline ? (
+                          <span
+                            aria-label="En ligne"
+                            className={cn(
+                              "absolute -right-1 top-0",
+
+                              "h-2.5 w-2.5",
+
+                              "rounded-full",
+
+                              "border-2 border-[#050b10]",
+
+                              "bg-[#7dff42]",
+
+                              "shadow-[0_0_8px_rgba(125,255,66,0.55)]",
+                            )}
+                          />
+                        ) : null}
+                      </span>
+
+                      <span
+                        className={cn(
+                          "mt-[5px]",
+
+                          "max-w-full truncate",
+
+                          "px-0.5",
+
+                          "text-center",
+
+                          "text-[8px]",
+
+                          "font-medium",
+
+                          "leading-none",
+
+                          "tracking-[-0.01em]",
+
+                          "transition-colors duration-200",
+
+                          "min-[390px]:text-[8.5px]",
+
+                          "sm:text-[10px]",
+
+                          active
+                            ? "font-bold text-[#a7ff68]"
+                            : "text-white/65 group-hover:text-white",
+                        )}
+                      >
+                        {
+                          item.label
+                        }
+                      </span>
+                    </>
+                  )}
+                </Link>
+              );
+            },
+          )}
+        </div>
+      </nav>
+    </div>
   );
 }

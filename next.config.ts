@@ -2,14 +2,12 @@ import type {
   NextConfig,
 } from "next";
 
+import createNextIntlPlugin from "next-intl/plugin";
+
 const nextConfig: NextConfig = {
   reactStrictMode: true,
 
   images: {
-    /*
-     * Les images distantes restent limitées
-     * au projet Supabase Tikemia.
-     */
     remotePatterns: [
       {
         protocol:
@@ -26,13 +24,16 @@ const nextConfig: NextConfig = {
       },
     ],
 
-    /*
-     * Désactive l’optimisation interne Next.js
-     * pour les images distantes Supabase.
-     */
     unoptimized:
       true,
   },
 };
 
-export default nextConfig;
+const withNextIntl =
+  createNextIntlPlugin(
+    "./lib/i18n/request.ts",
+  );
+
+export default withNextIntl(
+  nextConfig,
+);

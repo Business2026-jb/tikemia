@@ -1,13 +1,14 @@
 "use client";
 
 import {
-  useEffect,
   useMemo,
   useState,
 } from "react";
+
 import {
   useRouter,
 } from "next/navigation";
+
 import {
   AlertCircle,
 } from "lucide-react";
@@ -16,20 +17,29 @@ import ClientEventDescription from "@/components/client/events/detail/client-eve
 import ClientEventGallery from "@/components/client/events/detail/client-event-gallery";
 import ClientEventLocation from "@/components/client/events/detail/client-event-location";
 import ClientEventSummary from "@/components/client/events/detail/client-event-summary";
+
 import ClientGuestInformationForm, {
   type ClientGuestInformation,
   type ClientGuestInformationErrors,
 } from "@/components/client/events/detail/client-guest-information-form";
+
 import ClientMobileCheckoutBar from "@/components/client/events/detail/client-mobile-checkout-bar";
+
 import ClientOrderSummary, {
   type ClientOrderSummaryItem,
 } from "@/components/client/events/detail/client-order-summary";
+
 import ClientTicketSelector, {
   type ClientTicketSelection,
 } from "@/components/client/events/detail/client-ticket-selector";
+
 import type {
   ClientEventDetail,
 } from "@/lib/client/get-client-event-detail";
+
+import {
+  calculateOrderPricing,
+} from "@/lib/payments/service-fee";
 
 export type ClientEventDetailCheckoutClient = {
   id: string;
@@ -42,7 +52,10 @@ export type ClientEventDetailCheckoutClient = {
 
 export type ClientEventDetailCheckoutProps = {
   event: ClientEventDetail;
-  currentClient?: ClientEventDetailCheckoutClient | null;
+
+  currentClient?:
+    | ClientEventDetailCheckoutClient
+    | null;
 };
 
 type CheckoutOrderItem = {
@@ -69,7 +82,11 @@ type CheckoutOrderResponse = {
     subtotal: string;
     platformFee: string;
     total: string;
-    reservationExpiresAt: string | null;
+
+    reservationExpiresAt:
+      | string
+      | null;
+
     checkoutToken: string;
 
     event: {
@@ -101,8 +118,12 @@ function createInitialGuestInformation(
     | null
     | undefined,
 ): ClientGuestInformation {
-  if (!currentClient) {
-    return EMPTY_GUEST_INFORMATION;
+  if (
+    !currentClient
+  ) {
+    return {
+      ...EMPTY_GUEST_INFORMATION,
+    };
   }
 
   return {
@@ -131,7 +152,10 @@ function normalizeText(
   value: string,
 ): string {
   return value
-    .replace(/\s+/g, " ")
+    .replace(
+      /\s+/g,
+      " ",
+    )
     .trim();
 }
 
@@ -199,10 +223,10 @@ function validateGuestInformation(
 
 function scrollToSection(
   id: string,
+
   block:
     | "start"
-    | "center" =
-    "start",
+    | "center" = "start",
 ): void {
   document
     .getElementById(
@@ -234,8 +258,7 @@ function createCheckoutIdempotencyKey(
   }
 
   const randomValue =
-    typeof crypto !==
-      "undefined" &&
+    typeof crypto !== "undefined" &&
     "randomUUID" in crypto
       ? crypto.randomUUID()
       : `${Date.now()}_${Math.random()
@@ -284,6 +307,13 @@ export default function ClientEventDetailCheckout({
       {},
     );
 
+  /*
+   * currentClient est fourni directement par la page serveur.
+   * On initialise donc le formulaire ici sans useEffect.
+   *
+   * Cela évite un setState synchrone dans un effet React,
+   * tout en gardant le même comportement lors du chargement.
+   */
   const [
     guestInformation,
     setGuestInformation,
@@ -319,22 +349,6 @@ export default function ClientEventDetailCheckout({
       false,
     );
 
-  useEffect(() => {
-    if (!currentClient) {
-      return;
-    }
-
-    setGuestInformation(
-      createInitialGuestInformation(
-        currentClient,
-      ),
-    );
-
-    setGuestErrors(
-      {},
-    );
-  }, [currentClient]);
-
   const selectedItems =
     useMemo<ClientOrderSummaryItem[]>(
       () =>
@@ -352,8 +366,7 @@ export default function ClientEventDetailCheckout({
               quantity:
                 ticketSelection[
                   ticketType.id
-                ] ??
-                0,
+                ] ?? 0,
 
               unitPrice:
                 ticketType.price,
@@ -407,26 +420,31 @@ export default function ClientEventDetailCheckout({
       ],
     );
 
-  const normalizedPlatformFeeRate =
-    Number.isFinite(
-      event.platformFeeRate,
-    )
-      ? Math.max(
-          event.platformFeeRate,
-          0,
-        )
-      : 0;
-
-  const serviceFee =
-    subtotal *
-    (
-      normalizedPlatformFeeRate /
-      100
+  /*
+   * Même règle de tarification que :
+   *
+   * - ClientOrderSummary
+   * - API /api/client/checkout/orders
+   *
+   * Tikemia :
+   * - 3 % de frais de service
+   * - plafond global de 5 000 F pour XOF / XAF
+   */
+  const pricing =
+    useMemo(
+      () =>
+        calculateOrderPricing(
+          subtotal,
+          event.currency,
+        ),
+      [
+        subtotal,
+        event.currency,
+      ],
     );
 
   const totalAmount =
-    subtotal +
-    serviceFee;
+    pricing.total;
 
   const checkoutDisabled =
     !event.sales.isOpen ||
@@ -445,8 +463,7 @@ export default function ClientEventDetailCheckout({
     );
 
     if (
-      selectedTicketsCount <=
-      0
+      selectedTicketsCount <= 0
     ) {
       scrollToSection(
         "client-event-ticket-selector",
@@ -467,8 +484,7 @@ export default function ClientEventDetailCheckout({
     if (
       Object.keys(
         errors,
-      ).length >
-      0
+      ).length > 0
     ) {
       scrollToSection(
         "client-event-guest-information",
@@ -555,9 +571,17 @@ export default function ClientEventDetailCheckout({
           },
         );
 
-      const payload =
-        await response
-          .json() as CheckoutOrderResponse;
+      let payload:
+        CheckoutOrderResponse;
+
+      try {
+        payload =
+          await response.json() as CheckoutOrderResponse;
+      } catch {
+        throw new Error(
+          "La réponse du serveur est invalide.",
+        );
+      }
 
       if (
         !response.ok ||
@@ -580,6 +604,18 @@ export default function ClientEventDetailCheckout({
         );
       }
 
+      /*
+       * À partir d'ici, les valeurs retournées
+       * par l'API serveur deviennent la source
+       * de vérité du checkout :
+       *
+       * subtotal
+       * platformFee
+       * total
+       * currency
+       * reservationExpiresAt
+       * checkoutToken
+       */
       const checkoutOrder = {
         ...payload.order,
 
@@ -622,6 +658,11 @@ export default function ClientEventDetailCheckout({
         }),
       );
 
+      /*
+       * La commande vient d'être créée correctement.
+       * L'ancienne clé d'idempotence locale peut donc
+       * être supprimée avant la navigation.
+       */
       clearCheckoutIdempotencyKey(
         event.id,
       );
@@ -635,8 +676,7 @@ export default function ClientEventDetailCheckout({
       error
     ) {
       setCheckoutError(
-        error instanceof
-          Error
+        error instanceof Error
           ? error.message
           : "Impossible de préparer la commande.",
       );
@@ -699,6 +739,10 @@ export default function ClientEventDetailCheckout({
                     null,
                   );
 
+                  /*
+                   * Une modification des billets doit produire
+                   * une nouvelle commande/idempotency key.
+                   */
                   clearCheckoutIdempotencyKey(
                     event.id,
                   );
@@ -712,9 +756,6 @@ export default function ClientEventDetailCheckout({
               }
               currency={
                 event.currency
-              }
-              platformFeeRate={
-                normalizedPlatformFeeRate
               }
               loading={
                 isPreparingCheckout
@@ -741,7 +782,9 @@ export default function ClientEventDetailCheckout({
                 />
 
                 <span>
-                  {checkoutError}
+                  {
+                    checkoutError
+                  }
                 </span>
               </div>
             )}
@@ -776,6 +819,10 @@ export default function ClientEventDetailCheckout({
                     null,
                   );
 
+                  /*
+                   * Les données du client font partie
+                   * de la commande idempotente.
+                   */
                   clearCheckoutIdempotencyKey(
                     event.id,
                   );
@@ -783,8 +830,7 @@ export default function ClientEventDetailCheckout({
                   if (
                     Object.keys(
                       guestErrors,
-                    ).length >
-                    0
+                    ).length > 0
                   ) {
                     setGuestErrors(
                       {},
