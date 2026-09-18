@@ -10,22 +10,21 @@ const nextConfig: NextConfig = {
   images: {
     remotePatterns: [
       {
-        protocol:
-          "https",
-
-        hostname:
-          "lyrtjzazxwflkkvfdzxk.supabase.co",
-
-        port:
-          "",
-
-        pathname:
-          "/storage/v1/object/public/**",
+        protocol: "https",
+        hostname: "lyrtjzazxwflkkvfdzxk.supabase.co",
+        port: "",
+        pathname: "/storage/v1/object/public/**",
       },
     ],
 
-    unoptimized:
-      true,
+    /*
+     * Important pour Tikemia :
+     * les images Supabase sont servies directement.
+     *
+     * Quand l'optimisation Next.js était activée,
+     * /_next/image provoquait des timeouts et des erreurs 500.
+     */
+    unoptimized: true,
   },
 };
 
