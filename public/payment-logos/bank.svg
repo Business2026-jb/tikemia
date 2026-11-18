@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 256 256" role="img" aria-labelledby="title desc">
+  <title id="title">Compte bancaire</title>
+  <desc id="desc">Icône de banque bleu marine sur fond blanc, pour les moyens de retrait bancaires TIKEMIA.</desc>
+  <rect width="256" height="256" rx="48" fill="#FFFFFF"/>
+  <path d="M34 99 128 42l94 57" fill="none" stroke="#0C1947" stroke-width="13" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M40 105h176" stroke="#0C1947" stroke-width="11" stroke-linecap="round"/>
+  <path d="M54 118v76m49-76v76m50-76v76m49-76v76" stroke="#0C1947" stroke-width="12" stroke-linecap="round"/>
+  <path d="M43 201h170M34 219h188" stroke="#0C1947" stroke-width="12" stroke-linecap="round"/>
+  <circle cx="128" cy="81" r="9" fill="#08A42D"/>
+</svg>

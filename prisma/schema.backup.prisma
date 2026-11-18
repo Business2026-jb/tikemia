@@ -1,0 +1,1818 @@
+//
+// TIKEMIA — PRISMA 7 / POSTGRESQL
+//
+// Montants en unités mineures :
+// XOF : 1 = 1 FCFA
+// EUR : 100 = 1 EUR
+// USD : 100 = 1 USD
+//
+// Les dates sont stockées comme instants.
+// L'affichage utilise le fuseau de l'événement.
+//
+
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// ============================================
+// ENUMERATIONS — ROLES
+// ============================================
+
+enum RoleType {
+  CLIENT
+  ORGANIZER
+  SCAN_AGENT
+  ADMIN
+  SUPER_ADMIN
+}
+
+enum VerificationStatus {
+  PENDING
+  UNDER_REVIEW
+  VERIFIED
+  REJECTED
+  EXPIRED
+}
+
+// ============================================
+// ENUMERATIONS — EVENEMENTS
+// ============================================
+
+enum EventStatus {
+  DRAFT
+  PENDING_REVIEW
+  PUBLISHED
+  SUSPENDED
+  COMPLETED
+  CANCELLED
+  ARCHIVED
+}
+
+enum ScheduleKind {
+  SINGLE_DATE
+  DATE_RANGE
+  CONTINUOUS
+}
+
+enum TicketValidity {
+  ENTIRE_EVENT
+  SESSION
+}
+
+enum ReservationStatus {
+  ACTIVE
+  CONSUMED
+  RELEASED
+  EXPIRED
+}
+
+// ============================================
+// ENUMERATIONS — COMMANDES ET BILLETS
+// ============================================
+
+enum OrderStatus {
+  PENDING
+  PAID
+  FAILED
+  CANCELLED
+  PARTIALLY_REFUNDED
+  REFUNDED
+}
+
+enum TicketStatus {
+  VALID
+  TRANSFER_PENDING
+  TRANSFERRED
+  USED
+  CANCELLED
+  REFUNDED
+  EXPIRED
+  BLOCKED
+}
+
+enum TransferStatus {
+  PENDING
+  ACCEPTED
+  CANCELLED
+  EXPIRED
+  REJECTED
+}
+
+enum ScanResult {
+  VALID
+  ALREADY_USED
+  INVALID
+  WRONG_EVENT
+  CANCELLED
+  EXPIRED
+  BLOCKED
+  UNAUTHORIZED
+}
+
+// ============================================
+// ENUMERATIONS — CAGNOTTES
+// ============================================
+
+enum CampaignStatus {
+  DRAFT
+  PENDING_REVIEW
+  PUBLISHED
+  SUSPENDED
+  CLOSED
+  CANCELLED
+  REJECTED
+  ARCHIVED
+}
+
+enum DonationStatus {
+  PENDING
+  CONFIRMED
+  FAILED
+  CANCELLED
+  REFUNDED
+}
+
+// ============================================
+// ENUMERATIONS — PAIEMENTS
+// ============================================
+
+enum PaymentPurpose {
+  TICKET_ORDER
+  DONATION
+}
+
+enum PaymentStatus {
+  INITIATED
+  PENDING
+  SUCCEEDED
+  FAILED
+  CANCELLED
+  PARTIALLY_REFUNDED
+  REFUNDED
+  CHARGEBACK
+}
+
+enum RefundStatus {
+  REQUESTED
+  PENDING
+  SUCCEEDED
+  FAILED
+  REJECTED
+  CANCELLED
+}
+
+// ============================================
+// ENUMERATIONS — RETRAITS
+// ============================================
+
+enum PayoutStatus {
+  REQUESTED
+  UNDER_REVIEW
+  APPROVED
+  PROCESSING
+  COMPLETED
+  FAILED
+  REJECTED
+  CANCELLED
+}
+
+enum PayoutPurpose {
+  EVENT_REVENUE
+  CAMPAIGN_FUNDS
+}
+
+// ============================================
+// ENUMERATIONS — COMPTABILITE
+// ============================================
+
+enum LedgerType {
+  TICKET_SALE
+  DONATION
+  SERVICE_FEE
+  PSP_FEE
+  REFUND
+  PAYOUT
+  RESERVE
+  RESERVE_RELEASE
+  ADJUSTMENT
+}
+
+// ============================================
+// ENUMERATIONS — EMAILS
+// ============================================
+
+enum EmailStatus {
+  QUEUED
+  SENDING
+  SENT
+  FAILED
+}
+
+// ============================================
+// ENUMERATIONS — MODERATION
+// ============================================
+
+enum ModerationDecision {
+  APPROVED
+  REJECTED
+  SUSPENDED
+  REQUESTED_CHANGES
+}
+
+// ============================================
+// ENUMERATIONS — NOTIFICATIONS
+// ============================================
+
+enum NotificationType {
+  ORDER
+  TICKET
+  TRANSFER
+  EVENT
+  CAMPAIGN
+  DONATION
+  PAYMENT
+  PAYOUT
+  SECURITY
+  GENERAL
+}
+
+// ============================================
+// UTILISATEURS
+// ============================================
+
+model User {
+  id String @id @default(uuid()) @db.Uuid
+
+  fullName  String
+  firstName String?
+  lastName  String?
+
+  email            String  @unique
+  phoneE164        String?
+  avatarStorageKey String?
+
+  countryCode String? @db.VarChar(2)
+
+  passwordHash    String?
+  emailVerifiedAt DateTime?
+
+  preferredLocale String @default("fr") @db.VarChar(2)
+
+  isActive  Boolean @default(true)
+  isBlocked Boolean @default(false)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  roles         UserRole[]
+  verifications UserEmailVerification[]
+  sessions      Session[]
+
+  ownedOrganizations Organization[]    @relation("OrgOwner")
+  memberships        OrganizerMember[]
+
+  createdEvents    Event[]    @relation("EventCreator")
+  createdCampaigns Campaign[] @relation("CampaignCreator")
+
+  orders    Order[]
+  tickets   Ticket[]
+  donations Donation[]
+
+  transfersSent     TicketTransfer[] @relation("TransferSender")
+  transfersReceived TicketTransfer[] @relation("TransferRecipient")
+
+  scanAssignments EventScanAgent[]
+  ticketScans     TicketScan[]
+
+  notifications           Notification[]
+  notificationPreferences UserNotificationPreference?
+
+  emails         EmailDelivery[]
+  auditLogs      AuditLog[]
+  securityEvents SecurityEvent[]
+
+  @@index([createdAt])
+}
+
+// ============================================
+// ROLES UTILISATEURS
+// ============================================
+
+model UserRole {
+  id     String @id @default(uuid()) @db.Uuid
+  userId String @db.Uuid
+
+  role RoleType
+
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, role])
+  @@index([role])
+}
+
+// ============================================
+// VERIFICATION EMAIL
+// ============================================
+
+model UserEmailVerification {
+  id     String @id @default(uuid()) @db.Uuid
+  userId String @db.Uuid
+
+  email    String
+  codeHash String
+
+  attempts Int @default(0)
+
+  expiresAt  DateTime
+  consumedAt DateTime?
+
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, expiresAt])
+}
+
+// ============================================
+// SESSIONS
+// ============================================
+
+model Session {
+  id     String @id @default(uuid()) @db.Uuid
+  userId String @db.Uuid
+
+  tokenHash String @unique
+
+  expiresAt DateTime
+  revokedAt DateTime?
+
+  ipAddress String?
+  userAgent String?
+
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([expiresAt])
+}
+
+// ============================================
+// ORGANISATIONS
+// ============================================
+
+model Organization {
+  id      String @id @default(uuid()) @db.Uuid
+  ownerId String @db.Uuid
+
+  name           String
+  description    String? @db.Text
+  logoStorageKey String?
+
+  email     String?
+  phoneE164 String?
+
+  countryCode String? @db.VarChar(2)
+  city        String?
+
+  isActive Boolean @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  owner User @relation("OrgOwner", fields: [ownerId], references: [id])
+
+  members      OrganizerMember[]
+  verification OrganizerVerification?
+
+  events    Event[]
+  campaigns Campaign[]
+
+  payoutDestinations PayoutDestination[]
+  payouts            Payout[]
+  ledgerEntries      FinancialLedgerEntry[]
+
+  @@index([ownerId])
+}
+
+// ============================================
+// MEMBRES D'ORGANISATION
+// ============================================
+
+model OrganizerMember {
+  id             String @id @default(uuid()) @db.Uuid
+  organizationId String @db.Uuid
+  userId         String @db.Uuid
+
+  role     String  @default("MEMBER")
+  isActive Boolean @default(true)
+
+  createdAt DateTime @default(now())
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([organizationId, userId])
+}
+
+// ============================================
+// VERIFICATION ORGANISATEUR
+// ============================================
+
+model OrganizerVerification {
+  id             String @id @default(uuid()) @db.Uuid
+  organizationId String @unique @db.Uuid
+
+  status VerificationStatus @default(PENDING)
+
+  documentType String?
+  documentKey  String?
+  reason       String?
+
+  submittedAt DateTime?
+  verifiedAt  DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+}
+
+// ============================================
+// EVENEMENTS
+// ============================================
+
+model Event {
+  id String @id @default(uuid()) @db.Uuid
+
+  organizationId String @db.Uuid
+  createdById    String @db.Uuid
+
+  title       String
+  slug        String @unique
+  category    String
+  description String @db.Text
+
+  status EventStatus @default(DRAFT)
+
+  scheduleKind   ScheduleKind   @default(SINGLE_DATE)
+  ticketValidity TicketValidity @default(ENTIRE_EVENT)
+
+  currency String @default("XOF") @db.VarChar(3)
+  timeZone String @default("Africa/Porto-Novo")
+
+  capacity Int @default(0)
+
+  publishedAt DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id])
+
+  createdBy User @relation("EventCreator", fields: [createdById], references: [id])
+
+  images     EventImage[]
+  venue      Venue?
+  schedules  EventSchedule[]
+  categories TicketCategory[]
+
+  reservations InventoryReservation[]
+  orderLines   OrderLine[]
+  tickets      Ticket[]
+
+  scanAgents EventScanAgent[]
+  scans      TicketScan[]
+
+  moderation EventModeration[]
+
+  ledgerEntries FinancialLedgerEntry[]
+  payouts       Payout[]
+
+  @@index([organizationId, status])
+  @@index([category, status])
+  @@index([publishedAt])
+}
+
+// ============================================
+// IMAGES EVENEMENTS
+// ============================================
+
+model EventImage {
+  id      String @id @default(uuid()) @db.Uuid
+  eventId String @db.Uuid
+
+  storageKey String
+  isPrimary  Boolean @default(false)
+  position   Int     @default(0)
+
+  createdAt DateTime @default(now())
+
+  event Event @relation(fields: [eventId], references: [id], onDelete: Cascade)
+
+  @@index([eventId, position])
+}
+
+// ============================================
+// LIEUX EVENEMENTS
+// ============================================
+
+model Venue {
+  id      String @id @default(uuid()) @db.Uuid
+  eventId String @unique @db.Uuid
+
+  name    String
+  address String
+  city    String
+  country String
+
+  imageKey String?
+
+  event Event @relation(fields: [eventId], references: [id], onDelete: Cascade)
+}
+
+// ============================================
+// DATES EVENEMENTS
+// ============================================
+
+model EventSchedule {
+  id      String @id @default(uuid()) @db.Uuid
+  eventId String @db.Uuid
+
+  startsAt DateTime
+  endsAt   DateTime?
+
+  label String?
+
+  createdAt DateTime @default(now())
+
+  event Event @relation(fields: [eventId], references: [id], onDelete: Cascade)
+
+  tickets Ticket[]
+
+  @@index([eventId, startsAt])
+}
+
+// ============================================
+// CATEGORIES DE BILLETS
+// ============================================
+
+model TicketCategory {
+  id      String @id @default(uuid()) @db.Uuid
+  eventId String @db.Uuid
+
+  name        String
+  description String?
+
+  price    BigInt
+  currency String @db.VarChar(3)
+
+  capacity Int
+
+  isActive Boolean @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  event Event @relation(fields: [eventId], references: [id])
+
+  reservations InventoryReservation[]
+  orderLines   OrderLine[]
+  tickets      Ticket[]
+
+  @@index([eventId])
+}
+
+// ============================================
+// RESERVATIONS TEMPORAIRES
+// ============================================
+
+model InventoryReservation {
+  id String @id @default(uuid()) @db.Uuid
+
+  eventId          String  @db.Uuid
+  ticketCategoryId String  @db.Uuid
+  orderId          String? @db.Uuid
+
+  quantity Int
+
+  status ReservationStatus @default(ACTIVE)
+
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+
+  event Event @relation(fields: [eventId], references: [id])
+
+  category TicketCategory @relation(fields: [ticketCategoryId], references: [id])
+
+  order Order? @relation(fields: [orderId], references: [id])
+
+  @@index([ticketCategoryId, status, expiresAt])
+  @@index([orderId])
+}
+
+// ============================================
+// COMMANDES
+// ============================================
+
+model Order {
+  id String @id @default(uuid()) @db.Uuid
+
+  reference String @unique
+
+  buyerId String? @db.Uuid
+
+  guestEmail     String
+  guestPhoneE164 String?
+
+  status OrderStatus @default(PENDING)
+
+  currency String @db.VarChar(3)
+
+  subtotal   BigInt
+  serviceFee BigInt
+  total      BigInt
+
+  serviceFeeBps Int @default(500)
+
+  paidAt DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  buyer User? @relation(fields: [buyerId], references: [id], onDelete: SetNull)
+
+  lines        OrderLine[]
+  reservations InventoryReservation[]
+  payments     Payment[]
+  tickets      Ticket[]
+
+  ledgerEntries FinancialLedgerEntry[]
+
+  @@index([buyerId])
+  @@index([guestEmail])
+  @@index([status, createdAt])
+}
+
+// ============================================
+// LIGNES DE COMMANDES
+// ============================================
+
+model OrderLine {
+  id String @id @default(uuid()) @db.Uuid
+
+  orderId          String @db.Uuid
+  eventId          String @db.Uuid
+  ticketCategoryId String @db.Uuid
+
+  categoryName String
+  eventTitle   String
+
+  quantity Int
+
+  unitPrice BigInt
+  subtotal  BigInt
+
+  currency String @db.VarChar(3)
+
+  order Order @relation(fields: [orderId], references: [id])
+
+  event Event @relation(fields: [eventId], references: [id])
+
+  category TicketCategory @relation(fields: [ticketCategoryId], references: [id])
+
+  tickets Ticket[]
+
+  @@index([orderId])
+  @@index([eventId])
+}
+
+// ============================================
+// BILLETS QR CODE
+// ============================================
+
+model Ticket {
+  id String @id @default(uuid()) @db.Uuid
+
+  number String @unique
+
+  eventId          String @db.Uuid
+  ticketCategoryId String @db.Uuid
+
+  orderId     String @db.Uuid
+  orderLineId String @db.Uuid
+
+  scheduleId String? @db.Uuid
+  ownerId    String? @db.Uuid
+
+  guestEmail String?
+
+  status TicketStatus @default(VALID)
+
+  qrTokenHash   String  @unique
+  pdfStorageKey String?
+
+  issuedAt DateTime  @default(now())
+  usedAt   DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  event Event @relation(fields: [eventId], references: [id])
+
+  category TicketCategory @relation(fields: [ticketCategoryId], references: [id])
+
+  order Order @relation(fields: [orderId], references: [id])
+
+  orderLine OrderLine @relation(fields: [orderLineId], references: [id])
+
+  schedule EventSchedule? @relation(fields: [scheduleId], references: [id])
+
+  owner User? @relation(fields: [ownerId], references: [id], onDelete: SetNull)
+
+  transfers TicketTransfer[]
+  scans     TicketScan[]
+
+  @@index([eventId, status])
+  @@index([ownerId])
+  @@index([guestEmail])
+  @@index([orderId])
+}
+
+// ============================================
+// TRANSFERT DE BILLETS
+// ============================================
+
+model TicketTransfer {
+  id String @id @default(uuid()) @db.Uuid
+
+  ticketId    String  @db.Uuid
+  senderId    String? @db.Uuid
+  recipientId String? @db.Uuid
+
+  recipientName  String
+  recipientEmail String
+
+  tokenHash String @unique
+
+  status TransferStatus @default(PENDING)
+
+  expiresAt   DateTime
+  acceptedAt  DateTime?
+  cancelledAt DateTime?
+
+  createdAt DateTime @default(now())
+
+  ticket Ticket @relation(fields: [ticketId], references: [id])
+
+  sender User? @relation("TransferSender", fields: [senderId], references: [id], onDelete: SetNull)
+
+  recipient User? @relation("TransferRecipient", fields: [recipientId], references: [id], onDelete: SetNull)
+
+  @@index([ticketId, status])
+  @@index([recipientEmail])
+}
+
+// ============================================
+// AGENTS DE SCAN
+// ============================================
+
+model EventScanAgent {
+  id String @id @default(uuid()) @db.Uuid
+
+  eventId String @db.Uuid
+  userId  String @db.Uuid
+
+  isActive  Boolean   @default(true)
+  expiresAt DateTime?
+
+  createdAt DateTime @default(now())
+
+  event Event @relation(fields: [eventId], references: [id])
+
+  user User @relation(fields: [userId], references: [id])
+
+  @@unique([eventId, userId])
+  @@index([userId, isActive])
+}
+
+// ============================================
+// HISTORIQUE DES SCANS
+// ============================================
+
+model TicketScan {
+  id String @id @default(uuid()) @db.Uuid
+
+  ticketId    String? @db.Uuid
+  eventId     String  @db.Uuid
+  scannedById String  @db.Uuid
+
+  result ScanResult
+
+  tokenDigest String?
+
+  scannedAt DateTime @default(now())
+
+  ticket Ticket? @relation(fields: [ticketId], references: [id])
+
+  event Event @relation(fields: [eventId], references: [id])
+
+  scannedBy User @relation(fields: [scannedById], references: [id])
+
+  @@index([ticketId, scannedAt])
+  @@index([eventId, scannedAt])
+}
+
+// ============================================
+// CAGNOTTES
+// ============================================
+
+model Campaign {
+  id String @id @default(uuid()) @db.Uuid
+
+  organizationId String @db.Uuid
+  createdById    String @db.Uuid
+
+  title String
+  slug  String @unique
+
+  description String @db.Text
+  goalAmount  BigInt
+
+  country String? @db.VarChar(2)
+  city    String?
+
+  currency String @default("XOF") @db.VarChar(3)
+
+  status CampaignStatus @default(DRAFT)
+
+  publishedAt DateTime?
+  closedAt    DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id])
+
+  createdBy User @relation("CampaignCreator", fields: [createdById], references: [id])
+
+  images     CampaignImage[]
+  donations  Donation[]
+  moderation CampaignModeration[]
+
+  beneficiary BeneficiaryVerification?
+
+  payouts       Payout[]
+  ledgerEntries FinancialLedgerEntry[]
+
+  @@index([organizationId, status])
+  @@index([publishedAt])
+}
+
+// ============================================
+// IMAGES CAGNOTTES
+// ============================================
+
+model CampaignImage {
+  id         String @id @default(uuid()) @db.Uuid
+  campaignId String @db.Uuid
+
+  storageKey String
+
+  isPrimary Boolean @default(false)
+  position  Int     @default(0)
+
+  createdAt DateTime @default(now())
+
+  campaign Campaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+
+  @@index([campaignId, position])
+}
+
+// ============================================
+// VERIFICATION DES BENEFICIAIRES
+// ============================================
+
+model BeneficiaryVerification {
+  id         String @id @default(uuid()) @db.Uuid
+  campaignId String @unique @db.Uuid
+
+  fullName    String?
+  documentKey String?
+
+  status VerificationStatus @default(PENDING)
+
+  reason     String?
+  verifiedAt DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  campaign Campaign @relation(fields: [campaignId], references: [id])
+}
+
+// ============================================
+// DONS
+// ============================================
+
+model Donation {
+  id String @id @default(uuid()) @db.Uuid
+
+  reference String @unique
+
+  campaignId String  @db.Uuid
+  donorId    String? @db.Uuid
+
+  donorName      String?
+  donorEmail     String?
+  donorPhoneE164 String?
+
+  isAnonymous Boolean @default(false)
+
+  amount   BigInt
+  currency String @db.VarChar(3)
+
+  status DonationStatus @default(PENDING)
+
+  confirmedAt DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  campaign Campaign @relation(fields: [campaignId], references: [id])
+
+  donor User? @relation(fields: [donorId], references: [id], onDelete: SetNull)
+
+  payments      Payment[]
+  ledgerEntries FinancialLedgerEntry[]
+
+  @@index([campaignId, status])
+  @@index([donorId])
+  @@index([confirmedAt])
+}
+
+// ============================================
+// PAIEMENTS
+// ============================================
+
+model Payment {
+  id String @id @default(uuid()) @db.Uuid
+
+  reference String @unique
+
+  purpose PaymentPurpose
+
+  orderId    String? @db.Uuid
+  donationId String? @db.Uuid
+
+  provider    String
+  providerRef String?
+  method      String?
+
+  status PaymentStatus @default(INITIATED)
+
+  amount   BigInt
+  currency String @db.VarChar(3)
+
+  paidAt DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  order Order? @relation(fields: [orderId], references: [id])
+
+  donation Donation? @relation(fields: [donationId], references: [id])
+
+  webhooks PaymentWebhookEvent[]
+  refunds  Refund[]
+
+  ledgerEntries FinancialLedgerEntry[]
+
+  @@unique([provider, providerRef])
+  @@index([orderId])
+  @@index([donationId])
+  @@index([status, createdAt])
+  payAttempts      PayPaymentAttempt[]
+
+  payRoutingDecisions PayRoutingDecision[]
+
+}
+
+// ============================================
+// EVENEMENTS WEBHOOKS PAIEMENTS
+// ============================================
+
+model PaymentWebhookEvent {
+  id String @id @default(uuid()) @db.Uuid
+
+  paymentId String? @db.Uuid
+
+  provider        String
+  providerEventId String
+  eventType       String
+
+  payload Json
+
+  processed   Boolean   @default(false)
+  processedAt DateTime?
+
+  receivedAt DateTime @default(now())
+
+  payment Payment? @relation(fields: [paymentId], references: [id])
+
+  @@unique([provider, providerEventId])
+  @@index([processed, receivedAt])
+}
+
+// ============================================
+// REMBOURSEMENTS
+// ============================================
+
+model Refund {
+  id String @id @default(uuid()) @db.Uuid
+
+  reference String @unique
+
+  paymentId String @db.Uuid
+
+  amount   BigInt
+  currency String @db.VarChar(3)
+
+  status RefundStatus @default(REQUESTED)
+
+  reason      String?
+  providerRef String?
+
+  completedAt DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  payment Payment @relation(fields: [paymentId], references: [id])
+
+  ledgerEntries FinancialLedgerEntry[]
+
+  @@index([paymentId])
+  @@index([status])
+  payRefundAttempts PayRefundAttempt[]
+
+}
+
+// ============================================
+// MOYENS DE RETRAIT INTERNATIONAUX
+//
+// Types prévus :
+// MOBILE_MONEY
+// BANK_ACCOUNT
+// CRYPTO
+//
+// Mobile Money : MTN, Moov, Wave,
+// Orange, Airtel, M-Pesa, etc.
+//
+// Banque : IBAN / BIC ou références
+// bancaires locales selon le pays.
+//
+// Crypto : BTC / USDT avec réseau.
+//
+// accountRefEncrypted contient les
+// informations sensibles chiffrées.
+// ============================================
+
+model PayoutDestination {
+  id String @id @default(uuid()) @db.Uuid
+
+  organizationId String @db.Uuid
+
+  provider String
+  type     String
+
+  accountName         String
+  accountRefEncrypted String
+
+  countryCode String @db.VarChar(2)
+  currency    String @db.VarChar(3)
+
+  isVerified Boolean @default(false)
+
+  label            String?
+  maskedAccountRef String?
+  bankName         String?
+
+  assetCode   String? @db.VarChar(10)
+  networkCode String? @db.VarChar(30)
+
+  isDefault Boolean @default(false)
+  isActive  Boolean @default(true)
+
+  verifiedAt DateTime?
+  lastUsedAt DateTime?
+
+  deletedAt DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id])
+
+  payouts Payout[]
+
+  @@index([organizationId])
+  @@index([organizationId, type, isActive])
+  @@index([organizationId, isDefault, deletedAt])
+}
+
+// ============================================
+// DEMANDES DE RETRAIT
+// ============================================
+
+model Payout {
+  id String @id @default(uuid()) @db.Uuid
+
+  reference String @unique
+
+  organizationId String @db.Uuid
+
+  eventId    String? @db.Uuid
+  campaignId String? @db.Uuid
+
+  destinationId String @db.Uuid
+
+  purpose PayoutPurpose
+
+  amount   BigInt
+  currency String @db.VarChar(3)
+
+  status PayoutStatus @default(REQUESTED)
+
+  providerRef String?
+
+  requestedAt DateTime  @default(now())
+  completedAt DateTime?
+  updatedAt   DateTime  @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id])
+
+  event Event? @relation(fields: [eventId], references: [id])
+
+  campaign Campaign? @relation(fields: [campaignId], references: [id])
+
+  destination PayoutDestination @relation(fields: [destinationId], references: [id])
+
+  ledgerEntries FinancialLedgerEntry[]
+
+  @@index([organizationId, status])
+  @@index([eventId])
+  @@index([campaignId])
+}
+
+// ============================================
+// COMPTABILITE FINANCIERE
+// ============================================
+
+model FinancialLedgerEntry {
+  id String @id @default(uuid()) @db.Uuid
+
+  organizationId String? @db.Uuid
+  eventId        String? @db.Uuid
+  campaignId     String? @db.Uuid
+
+  orderId    String? @db.Uuid
+  donationId String? @db.Uuid
+  paymentId  String? @db.Uuid
+
+  payoutId String? @db.Uuid
+  refundId String? @db.Uuid
+
+  type LedgerType
+
+  // Signé : crédits et débits.
+  amount BigInt
+
+  currency String @db.VarChar(3)
+
+  idempotencyKey String @unique
+
+  description String?
+
+  createdAt DateTime @default(now())
+
+  organization Organization? @relation(fields: [organizationId], references: [id])
+
+  event Event? @relation(fields: [eventId], references: [id])
+
+  campaign Campaign? @relation(fields: [campaignId], references: [id])
+
+  order Order? @relation(fields: [orderId], references: [id])
+
+  donation Donation? @relation(fields: [donationId], references: [id])
+
+  payment Payment? @relation(fields: [paymentId], references: [id])
+
+  payout Payout? @relation(fields: [payoutId], references: [id])
+
+  refund Refund? @relation(fields: [refundId], references: [id])
+
+  @@index([organizationId, createdAt])
+  @@index([campaignId, createdAt])
+  @@index([eventId, createdAt])
+  @@index([paymentId])
+}
+
+// ============================================
+// MODERATION EVENEMENTS
+// ============================================
+
+model EventModeration {
+  id String @id @default(uuid()) @db.Uuid
+
+  eventId String @db.Uuid
+
+  decision ModerationDecision
+
+  reason     String?
+  reviewerId String? @db.Uuid
+
+  createdAt DateTime @default(now())
+
+  event Event @relation(fields: [eventId], references: [id])
+
+  @@index([eventId, createdAt])
+}
+
+// ============================================
+// MODERATION CAGNOTTES
+// ============================================
+
+model CampaignModeration {
+  id String @id @default(uuid()) @db.Uuid
+
+  campaignId String @db.Uuid
+
+  decision ModerationDecision
+
+  reason     String?
+  reviewerId String? @db.Uuid
+
+  createdAt DateTime @default(now())
+
+  campaign Campaign @relation(fields: [campaignId], references: [id])
+
+  @@index([campaignId, createdAt])
+}
+
+// ============================================
+// NOTIFICATIONS
+// ============================================
+
+model Notification {
+  id String @id @default(uuid()) @db.Uuid
+
+  userId String @db.Uuid
+
+  type NotificationType
+
+  title   String
+  message String
+
+  data Json?
+
+  isRead Boolean @default(false)
+
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, isRead, createdAt])
+}
+
+// ============================================
+// PREFERENCES DE NOTIFICATIONS
+//
+// Une ligne par utilisateur.
+// Synchronisation entre les appareils.
+// Les notifications critiques de sécurité
+// restent obligatoires côté application.
+// ============================================
+
+model UserNotificationPreference {
+  id String @id @default(uuid()) @db.Uuid
+
+  userId String @unique @db.Uuid
+
+  emailTicketSales Boolean @default(true)
+  emailDonations   Boolean @default(true)
+  emailPayouts     Boolean @default(true)
+  emailEvents      Boolean @default(true)
+  emailCampaigns   Boolean @default(true)
+
+  inAppTicketSales Boolean @default(true)
+  inAppDonations   Boolean @default(true)
+  inAppPayouts     Boolean @default(true)
+  inAppEvents      Boolean @default(true)
+  inAppCampaigns   Boolean @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+// ============================================
+// ENVOIS EMAIL
+// ============================================
+
+model EmailDelivery {
+  id String @id @default(uuid()) @db.Uuid
+
+  userId String? @db.Uuid
+
+  recipient String
+  template  String
+
+  locale  String @default("fr") @db.VarChar(2)
+  subject String
+
+  status EmailStatus @default(QUEUED)
+
+  attempts Int @default(0)
+
+  providerMessageId String?
+  sentAt            DateTime?
+
+  createdAt DateTime @default(now())
+
+  user User? @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([status, createdAt])
+  @@index([recipient])
+}
+
+// ============================================
+// JOURNAL D'AUDIT
+// ============================================
+
+model AuditLog {
+  id String @id @default(uuid()) @db.Uuid
+
+  actorId String? @db.Uuid
+
+  action   String
+  entity   String
+  entityId String?
+
+  metadata  Json?
+  ipAddress String?
+
+  createdAt DateTime @default(now())
+
+  actor User? @relation(fields: [actorId], references: [id], onDelete: SetNull)
+
+  @@index([actorId, createdAt])
+  @@index([entity, entityId])
+}
+
+// ============================================
+// EVENEMENTS DE SECURITE
+// ============================================
+
+model SecurityEvent {
+  id String @id @default(uuid()) @db.Uuid
+
+  userId String? @db.Uuid
+
+  type String
+
+  ipAddress String?
+  userAgent String?
+
+  metadata Json?
+
+  createdAt DateTime @default(now())
+
+  user User? @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([userId, createdAt])
+  @@index([type, createdAt])
+}
+
+// ============================================
+// PARAMETRES GENERAUX DE LA PLATEFORME
+// ============================================
+
+model AppSetting {
+  id String @id @default(uuid()) @db.Uuid
+
+  key   String @unique
+  value Json
+
+  updatedAt DateTime @updatedAt
+}
+
+// ================================================================
+// TIKEMIA PAY — ORCHESTRATION DES PAIEMENTS
+// ================================================================
+// Modèles additifs : aucun ancien modèle ni champ n'est supprimé.
+// Les secrets et clés prestataires sont chiffrés PAR L'APPLICATION
+// avant insertion. Ils ne doivent jamais être envoyés au navigateur.
+// Les clés API marchands sont stockées sous forme d'empreintes.
+// Les montants sont en unités mineures (BigInt) ; pas de float.
+// Les confirmations restent fondées sur les webhooks authentifiés
+// et une vérification serveur du statut réel du prestataire.
+// ================================================================
+
+enum PayEnvironment {
+  SANDBOX
+  LIVE
+}
+
+enum PayMethodType {
+  MOBILE_MONEY
+  CARD
+  BANK_TRANSFER
+  WALLET
+  OTHER
+}
+
+enum PayConnectionStatus {
+  DRAFT
+  CONFIGURED
+  VERIFIED
+  SUSPENDED
+  ERROR
+}
+
+enum PayAttemptStatus {
+  CREATED
+  ROUTED
+  PENDING
+  SUCCEEDED
+  FAILED
+  CANCELLED
+  EXPIRED
+}
+
+enum PayWebhookStatus {
+  RECEIVED
+  VERIFIED
+  REJECTED
+  PROCESSED
+  FAILED
+  IGNORED
+}
+
+enum PayRoutingDecisionStatus {
+  SELECTED
+  NO_ROUTE
+  REJECTED
+}
+
+enum PayMerchantStatus {
+  ACTIVE
+  SUSPENDED
+  CLOSED
+}
+
+enum PayOperationSeverity {
+  INFO
+  WARNING
+  ERROR
+  SECURITY
+}
+
+// Prestataires : FedaPay, Flutterwave, CinetPay, Stripe, etc.
+// Les codes prestataires sont définis par l'application.
+model PayProvider {
+  id          String  @id @default(uuid()) @db.Uuid
+  code        String  @unique @db.VarChar(60)
+  name        String
+  description String?
+  isEnabled   Boolean @default(false)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  connections PayProviderConnection[]
+  webhooks    PayWebhookReceipt[]
+  operations  PayOperationLog[]
+
+  @@index([isEnabled])
+}
+
+// Compte / jeu de clés par prestataire, par environnement.
+// credentialsEncrypted : JSON de clés chiffré et authentifié
+// côté serveur (p. ex. AES-256-GCM avec version de clé).
+// webhookSecretEncrypted : secret de signature également chiffré.
+// Aucune valeur sensible en clair dans la base ou les réponses API.
+model PayProviderConnection {
+  id          String @id @default(uuid()) @db.Uuid
+  providerId  String @db.Uuid
+  environment PayEnvironment
+  label       String
+
+  credentialsEncrypted   String? @db.Text
+  webhookSecretEncrypted String? @db.Text
+  encryptionKeyVersion   Int @default(1)
+
+  status      PayConnectionStatus @default(DRAFT)
+  isEnabled   Boolean @default(false)
+  lastCheckedAt DateTime?
+  lastVerifiedAt DateTime?
+  lastErrorCode  String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  provider       PayProvider @relation(fields: [providerId], references: [id], onDelete: Restrict)
+  capabilities   PayProviderCapability[]
+  routingRules   PayRoutingRule[]
+  routingDecisions PayRoutingDecision[]
+  attempts      PayPaymentAttempt[]
+  webhooks      PayWebhookReceipt[]
+  refundAttempts PayRefundAttempt[]
+
+  @@unique([providerId, environment, label])
+  @@index([environment, isEnabled, status])
+}
+
+// Catalogue des moyens visibles au client : MTN, Moov, Wave,
+// Orange Money, Visa, Mastercard, virement, etc.
+model PayMethod {
+  id           String @id @default(uuid()) @db.Uuid
+  code         String @unique @db.VarChar(70)
+  name         String
+  type         PayMethodType
+  logoPath     String?
+  isEnabled    Boolean @default(false)
+  displayOrder Int @default(0)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  capabilities PayProviderCapability[]
+  routingRules PayRoutingRule[]
+  routingDecisions PayRoutingDecision[]
+  attempts     PayPaymentAttempt[]
+
+  @@index([isEnabled, displayOrder])
+}
+
+model PayCountry {
+  code      String @id @db.VarChar(2)
+  name      String
+  isEnabled Boolean @default(false)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  capabilities PayProviderCapability[]
+  routingRules PayRoutingRule[]
+  routingDecisions PayRoutingDecision[]
+
+  @@index([isEnabled])
+}
+
+// exponent = nombre de décimales de la devise, p.ex. XOF=0, EUR=2.
+model PayCurrency {
+  code      String @id @db.VarChar(3)
+  name      String
+  exponent  Int @default(2)
+  isEnabled Boolean @default(false)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  capabilities PayProviderCapability[]
+  routingRules PayRoutingRule[]
+  routingDecisions PayRoutingDecision[]
+
+  @@index([isEnabled])
+}
+
+// Capacité réellement configurée et vérifiée par connexion.
+// Un prestataire peut proposer des moyens différents selon le pays
+// et la devise. Les limites sont en unités mineures de currencyCode.
+model PayProviderCapability {
+  id           String @id @default(uuid()) @db.Uuid
+  connectionId String @db.Uuid
+  methodId     String @db.Uuid
+  countryCode  String @db.VarChar(2)
+  currencyCode String @db.VarChar(3)
+
+  isEnabled     Boolean @default(false)
+  minAmount     BigInt?
+  maxAmount     BigInt?
+  providerMethodCode String?
+  lastVerifiedAt DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  connection PayProviderConnection @relation(fields: [connectionId], references: [id], onDelete: Restrict)
+  method     PayMethod @relation(fields: [methodId], references: [id], onDelete: Restrict)
+  country    PayCountry @relation(fields: [countryCode], references: [code], onDelete: Restrict)
+  currency   PayCurrency @relation(fields: [currencyCode], references: [code], onDelete: Restrict)
+
+  @@unique([connectionId, methodId, countryCode, currencyCode])
+  @@index([countryCode, currencyCode, methodId, isEnabled])
+}
+
+// Priorités administrables. L'API doit aussi vérifier la capacité,
+// la santé du prestataire et l'environnement avant tout routage.
+model PayRoutingRule {
+  id           String @id @default(uuid()) @db.Uuid
+  connectionId String @db.Uuid
+  methodId     String @db.Uuid
+  countryCode  String @db.VarChar(2)
+  currencyCode String @db.VarChar(3)
+
+  priority      Int @default(100)
+  isEnabled     Boolean @default(false)
+  minAmount     BigInt?
+  maxAmount     BigInt?
+  allowFallback Boolean @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  connection PayProviderConnection @relation(fields: [connectionId], references: [id], onDelete: Restrict)
+  method     PayMethod @relation(fields: [methodId], references: [id], onDelete: Restrict)
+  country    PayCountry @relation(fields: [countryCode], references: [code], onDelete: Restrict)
+  currency   PayCurrency @relation(fields: [currencyCode], references: [code], onDelete: Restrict)
+  decisions  PayRoutingDecision[]
+
+  @@index([countryCode, currencyCode, methodId, isEnabled, priority])
+  @@index([connectionId])
+}
+
+// Justification d'une sélection, y compris lorsqu'aucune route ne
+// correspond. Ne pas inscrire de secret ou de données de carte.
+model PayRoutingDecision {
+  id           String @id @default(uuid()) @db.Uuid
+  paymentId    String @db.Uuid
+  methodId     String @db.Uuid
+  countryCode  String @db.VarChar(2)
+  currencyCode String @db.VarChar(3)
+  connectionId String? @db.Uuid
+  ruleId       String? @db.Uuid
+
+  status  PayRoutingDecisionStatus
+  reason  String?
+  amount  BigInt
+
+  createdAt DateTime @default(now())
+
+  payment    Payment @relation(fields: [paymentId], references: [id], onDelete: Restrict)
+  method     PayMethod @relation(fields: [methodId], references: [id], onDelete: Restrict)
+  country    PayCountry @relation(fields: [countryCode], references: [code], onDelete: Restrict)
+  currency   PayCurrency @relation(fields: [currencyCode], references: [code], onDelete: Restrict)
+  connection PayProviderConnection? @relation(fields: [connectionId], references: [id], onDelete: SetNull)
+  rule       PayRoutingRule? @relation(fields: [ruleId], references: [id], onDelete: SetNull)
+
+  @@index([paymentId, createdAt])
+  @@index([connectionId, createdAt])
+}
+
+// Une tentative pour chaque appel d'initiation au prestataire.
+// idempotencyKey : une clé par tentative, imposée par le moteur.
+model PayPaymentAttempt {
+  id           String @id @default(uuid()) @db.Uuid
+  paymentId    String @db.Uuid
+  connectionId String @db.Uuid
+  methodId     String @db.Uuid
+
+  idempotencyKey String @unique
+  providerReference String?
+  status         PayAttemptStatus @default(CREATED)
+  amount         BigInt
+  currency       String @db.VarChar(3)
+  failureCode    String?
+  expiresAt      DateTime?
+  completedAt    DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  payment    Payment @relation(fields: [paymentId], references: [id], onDelete: Restrict)
+  connection PayProviderConnection @relation(fields: [connectionId], references: [id], onDelete: Restrict)
+  method     PayMethod @relation(fields: [methodId], references: [id], onDelete: Restrict)
+  webhooks   PayWebhookReceipt[]
+
+  @@unique([connectionId, providerReference])
+  @@index([paymentId, createdAt])
+  @@index([status, createdAt])
+}
+
+// Journal de réception : signature à valider avec le SECRET
+// spécifique à la connexion. Ne jamais faire confiance au payload
+// non vérifié pour émettre un ticket ou valider un don.
+model PayWebhookReceipt {
+  id            String @id @default(uuid()) @db.Uuid
+  providerId    String @db.Uuid
+  connectionId  String? @db.Uuid
+  attemptId     String? @db.Uuid
+
+  deduplicationKey String @unique
+  providerEventId String?
+  eventType       String?
+  payloadHash     String
+  redactedPayload Json?
+  signatureValid  Boolean @default(false)
+  status          PayWebhookStatus @default(RECEIVED)
+  failureCode     String?
+
+  receivedAt  DateTime @default(now())
+  processedAt DateTime?
+
+  provider   PayProvider @relation(fields: [providerId], references: [id], onDelete: Restrict)
+  connection PayProviderConnection? @relation(fields: [connectionId], references: [id], onDelete: SetNull)
+  attempt    PayPaymentAttempt? @relation(fields: [attemptId], references: [id], onDelete: SetNull)
+
+  @@index([providerId, receivedAt])
+  @@index([status, receivedAt])
+  @@index([attemptId])
+}
+
+// Marchands autorisés à appeler le moteur, y compris TIKEMIA même.
+model PayMerchant {
+  id       String @id @default(uuid()) @db.Uuid
+  code     String @unique @db.VarChar(80)
+  name     String
+  status   PayMerchantStatus @default(ACTIVE)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  apiKeys PayMerchantApiKey[]
+}
+
+// La clé brute n'est affichée qu'une fois lors de sa création.
+// keyHash est l'empreinte de la clé ; scopes déclarés et vérifiés
+// par l'API (p. ex. CREATE_PAYMENT, READ_PAYMENT, REFUND).
+model PayMerchantApiKey {
+  id          String @id @default(uuid()) @db.Uuid
+  merchantId  String @db.Uuid
+  label       String
+  keyPrefix   String @unique
+  keyHash     String @unique
+  scopes      Json
+
+  lastUsedAt DateTime?
+  expiresAt  DateTime?
+  revokedAt  DateTime?
+  createdAt  DateTime @default(now())
+
+  merchant PayMerchant @relation(fields: [merchantId], references: [id], onDelete: Restrict)
+
+  @@index([merchantId, revokedAt])
+}
+
+// Suivi des demandes de remboursement auprès du prestataire.
+// Refund est la source de vérité du remboursement TIKEMIA.
+model PayRefundAttempt {
+  id           String @id @default(uuid()) @db.Uuid
+  refundId     String @db.Uuid
+  connectionId String @db.Uuid
+
+  idempotencyKey    String @unique
+  providerReference String?
+  status            PayAttemptStatus @default(CREATED)
+  failureCode       String?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+  completedAt       DateTime?
+
+  refund     Refund @relation(fields: [refundId], references: [id], onDelete: Restrict)
+  connection PayProviderConnection @relation(fields: [connectionId], references: [id], onDelete: Restrict)
+
+  @@unique([connectionId, providerReference])
+  @@index([refundId, createdAt])
+}
+
+// Journal des changements de configuration et des traitements.
+// Ne pas y enregistrer les identifiants API, jetons ou secrets.
+model PayOperationLog {
+  id         String @id @default(uuid()) @db.Uuid
+  providerId String? @db.Uuid
+  actorId    String? @db.Uuid
+
+  action   String
+  entity   String
+  entityId String?
+  severity PayOperationSeverity @default(INFO)
+  metadata Json?
+  createdAt DateTime @default(now())
+
+  provider PayProvider? @relation(fields: [providerId], references: [id], onDelete: SetNull)
+
+  @@index([providerId, createdAt])
+  @@index([entity, entityId])
+  @@index([severity, createdAt])
+}
