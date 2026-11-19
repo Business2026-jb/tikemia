@@ -367,8 +367,8 @@ function getPasswordHash(): string {
 }
 
 async function checkPassword(password: string, storedHash?: string | null): Promise<boolean> {
-  const stored = storedHash || getPasswordHash();
   try {
+    const stored = storedHash || getPasswordHash();
     if (stored.startsWith("$argon2")) return await argon2.verify(stored, password);
     if (/^\$2[aby]\$/.test(stored)) return await compare(password, stored);
     const parts = stored.split(":");
@@ -554,15 +554,21 @@ function generateConfirmationToken(recovery = false) {
 
 function getSiteUrl(): URL {
   const configured =
-    process.env.TIKEMIA_APP_URL;
+    process.env.TIKEMIA_APP_URL?.trim() || "https://tikemia.com";
 
-  if (!configured) {
-    throw new Error(
-      "TIKEMIA_APP_URL_MANQUANTE"
-    );
+  let url: URL;
+  try {
+    url = new URL(configured);
+  } catch {
+    throw new Error("TIKEMIA_APP_URL_INVALIDE");
   }
 
-  const url = new URL(configured);
+  // The public deployment always uses HTTPS, even if an old setting used HTTP.
+  if (url.protocol === "http:" &&
+      (url.hostname === "tikemia.com" || url.hostname === "www.tikemia.com") &&
+      !url.port) {
+    url.protocol = "https:";
+  }
 
   const localDevelopment =
     process.env.NODE_ENV !==
@@ -1199,8 +1205,8 @@ export async function POST(
       console.error(
         "[TIKEMIA_ADMIN_EMAIL]",
         mailError instanceof Error
-          ? mailError.name
-          : "ERREUR_INCONNUE"
+          ? { type: mailError.name, code: ["CONFIGURATION_EMAIL_MANQUANTE", "ENVOI_EMAIL_ECHOUE"].includes(mailError.message) ? mailError.message : "ENVOI_INDISPONIBLE" }
+          : { type: "UnknownError", code: "ERREUR_INCONNUE" }
       );
 
       return errorResponse(
@@ -1251,8 +1257,8 @@ export async function POST(
     console.error(
       "[TIKEMIA_ADMIN_LOGIN]",
       error instanceof Error
-        ? error.name
-        : "ERREUR_INCONNUE"
+        ? { type: error.name, code: /^(TIKEMIA_APP_URL_|ADMIN_PASSWORD_HASH_|DATABASE_URL_)/.test(error.message) ? error.message : "CONNEXION_INDISPONIBLE" }
+        : { type: "UnknownError", code: "ERREUR_INCONNUE" }
     );
 
     return errorResponse(

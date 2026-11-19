@@ -377,7 +377,7 @@ function buildFullAddress(
     country: string;
   }
 ): string {
-  const parts = [
+  const fields = [
     cleanOptional(venue.name),
     cleanOptional(venue.address),
     cleanOptional(venue.city),
@@ -387,6 +387,17 @@ function buildFullAddress(
       typeof value === "string"
   );
 
+  const seen = new Set<string>();
+  const parts: string[] = [];
+  for (const field of fields) {
+    for (const value of field.split(/[,;\r\n]+/)) {
+      const label = value.trim().replace(/\s+/g, " ");
+      const key = label.normalize("NFKD").replace(/\p{M}/gu, "").toLowerCase().replace(/[’']/g, "");
+      if (!key || seen.has(key)) continue;
+      seen.add(key);
+      parts.push(label);
+    }
+  }
   return parts.join(", ");
 }
 
