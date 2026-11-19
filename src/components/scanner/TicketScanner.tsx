@@ -1143,7 +1143,7 @@ export default function TicketScanner({
           shadow-lg
         "
       >
-        <div className="relative aspect-square w-full sm:aspect-[4/3] lg:aspect-[4/5] lg:max-h-[65dvh]">
+        <div className="relative aspect-square w-full sm:aspect-4/3 lg:aspect-4/5 lg:max-h-[65dvh]">
           <video
             ref={videoRef}
             autoPlay
@@ -1177,7 +1177,7 @@ export default function TicketScanner({
                 <span
                   className="
                     absolute left-4 right-4 top-1/2
-                    h-[2px] bg-[#38D66B]
+                    h-0.5 bg-[#38D66B]
                     shadow-[0_0_12px_rgba(56,214,107,0.8)]
                   "
                 />
@@ -1211,7 +1211,7 @@ export default function TicketScanner({
           )}
 
           {/* Résultat du scan */}
-          {feedback && (
+          {feedback && (!compact || feedback.tone !== "success") && (
             <div
               aria-live="polite"
               className="
@@ -1295,10 +1295,10 @@ export default function TicketScanner({
             COMMANDES CAMÉRA
         ================================================= */}
 
-        <div className="flex items-center justify-center gap-5 border-t border-slate-100 bg-white p-3 sm:gap-8">
-          <button type="button" onClick={()=>void toggleTorch()} disabled={!torchSupported||cameraStatus!=="ready"} aria-pressed={torchEnabled} aria-label={torchEnabled?t.torchOff:t.torchOn} className="flex min-w-14 flex-col items-center gap-1 text-xs font-semibold text-slate-800 disabled:opacity-40"><span className={`flex size-12 items-center justify-center rounded-full border border-slate-200 shadow-sm ${torchEnabled?"bg-amber-100":"bg-white"}`}><Zap size={23}/></span>{language==="en"?"Light":"Lampe"}</button>
-          <button type="button" onClick={enabled?stopCamera:startCamera} aria-label={enabled?t.stop:t.start} aria-pressed={enabled} className="flex min-w-16 flex-col items-center gap-1 text-xs font-bold text-green-800"><span className="flex size-16 items-center justify-center rounded-full bg-green-700 text-white shadow-sm">{enabled?<ScanLine size={30}/>:<Play size={28}/>}</span>{enabled?(language==="en"?"Pause":"Pause"):(language==="en"?"Start":"Scanner")}</button>
-          <button type="button" onClick={switchCamera} disabled={cameraStatus!=="ready"} aria-label={t.switchCamera} className="flex min-w-14 flex-col items-center gap-1 text-xs font-semibold text-slate-800 disabled:opacity-40"><span className="flex size-12 items-center justify-center rounded-full border border-slate-200 bg-white shadow-sm"><Camera size={23}/></span>{language==="en"?"Camera":"Caméra"}</button>
+        <div className="flex items-center justify-center gap-2 border-t border-slate-100 bg-white p-2 sm:gap-5 sm:p-3">
+          <button type="button" onClick={()=>void toggleTorch()} disabled={!torchSupported||cameraStatus!=="ready"} aria-pressed={torchEnabled} aria-label={torchEnabled?t.torchOff:t.torchOn} className="flex min-w-12 flex-col items-center gap-1 text-xs font-semibold text-slate-800 disabled:opacity-40"><span className={`flex size-10 items-center justify-center rounded-full border sm:size-12 border-slate-200 shadow-sm ${torchEnabled?"bg-amber-100":"bg-white"}`}><Zap size={23}/></span>{language==="en"?"Light":"Lampe"}</button>
+          <button type="button" onClick={enabled?stopCamera:startCamera} aria-label={enabled?t.stop:t.start} aria-pressed={enabled} className="flex min-w-12 flex-col items-center gap-1 text-xs font-bold text-green-800"><span className="flex size-14 items-center justify-center rounded-full bg-green sm:size-16-700 text-white shadow-sm">{enabled?<ScanLine size={30}/>:<Play size={28}/>}</span>{enabled?(language==="en"?"Pause":"Scanner"):(language==="en"?"Start":"Scanner")}</button>
+          <button type="button" onClick={switchCamera} disabled={cameraStatus!=="ready"} aria-label={t.switchCamera} className="flex min-w-12 flex-col items-center gap-1 text-xs font-semibold text-slate-800 disabled:opacity-40"><span className="flex size-10 items-center justify-center rounded-full border sm:size-12 border-slate-200 bg-white shadow-sm"><Camera size={23}/></span>{language==="en"?"Camera":"Caméra"}</button>
           <button type="button" onClick={toggleSound} aria-label={soundEnabled?t.soundOff:t.soundOn} aria-pressed={soundEnabled} className="flex size-10 items-center justify-center rounded-full text-slate-600 hover:bg-slate-100">{soundEnabled?<Volume2 size={20}/>:<VolumeX size={20}/>}</button>
         </div>
       </div>

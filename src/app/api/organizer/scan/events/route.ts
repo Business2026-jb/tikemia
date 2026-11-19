@@ -735,8 +735,9 @@ export async function GET(
       const { loadStoredEventImage } = await import("@/lib/tickets/pdf");
       const bytes=await loadStoredEventImage(event.images[0].storageKey);
       if (!bytes) return new NextResponse(null,{status:404,headers:RESPONSE_HEADERS});
-      const contentType=bytes[0]===255?"image/jpeg":bytes[0]===137?"image/png":"image/webp";
-      return new NextResponse(new Uint8Array(bytes),{headers:{...RESPONSE_HEADERS,"Content-Type":contentType}});
+      const { default: sharp } = await import("sharp");
+      const thumbnail = await sharp(bytes).rotate().resize(240,240,{fit:"cover",withoutEnlargement:true}).webp({quality:78}).toBuffer();
+      return new NextResponse(new Uint8Array(thumbnail),{headers:{...RESPONSE_HEADERS,"Content-Type":"image/webp"}});
     }
 
     const query = parseQuery(request);
