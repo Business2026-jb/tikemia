@@ -68,6 +68,7 @@ function OrganizerDashboardContent({
      ÉTAT DU MENU MOBILE
   ========================================== */
 
+  const [access, setAccess] = useState<"checking" | "authorized" | "error">("checking");
   const [identity, setIdentity] = useState<{ name: string; avatarUrl: string | null; blueBadgeEnabled: boolean }>({ name: "", avatarUrl: null, blueBadgeEnabled: false });
 
   const storedLocale = useSyncExternalStore(subscribeLocale, readStoredLocale, () => defaultLocale);
@@ -79,13 +80,29 @@ function OrganizerDashboardContent({
   useEffect(() => {
     let stopped = false;
     let controller: AbortController | null = null;
+    let refreshing = false;
     const refresh = () => {
+      if (refreshing || stopped) return;
+      refreshing = true;
       controller?.abort();
       controller = new AbortController();
       const signal = controller.signal;
+      const timeout = window.setTimeout(() => controller?.abort(), 20000);
       const options = { credentials: "same-origin" as const, cache: "no-store" as const, signal, headers: { "Accept-Language": locale } };
       return Promise.all([
-        fetch("/api/organizer/settings/profile", options).then(response => response.ok ? response.json() : null),
+        fetch("/api/organizer/settings/profile", options).then(async response => {
+          if (signal.aborted) return null;
+          if (response.status === 401 || response.status === 403) {
+            setAccess("checking");
+            window.location.replace("/organizer/login");
+            return null;
+          }
+          if (!response.ok) throw new Error("SESSION_CHECK_FAILED");
+          const result = await response.json();
+          if (!result.success) throw new Error("SESSION_CHECK_FAILED");
+          setAccess("authorized");
+          return result;
+        }),
         fetch("/api/organizer/settings/profile/avatar", options).then(response => response.ok ? response.json() : null),
       ]).then(([result, photo]) => {
         if (stopped || signal.aborted) return;
@@ -95,7 +112,7 @@ function OrganizerDashboardContent({
           blueBadgeEnabled: profile ? profile.blueBadgeEnabled === true : previous.blueBadgeEnabled,
           avatarUrl: photo?.success ? photo.avatar?.url ?? null : previous.avatarUrl,
         }));
-      }).catch(() => {});
+      }).catch(() => { if (!stopped) setAccess("error"); }).finally(() => { refreshing = false; window.clearTimeout(timeout); });
     };
     const refreshVisible = () => { if (document.visibilityState === "visible") void refresh(); };
     void refresh();
@@ -103,7 +120,8 @@ function OrganizerDashboardContent({
     window.addEventListener("tikemia:organizer-avatar-updated", refreshVisible);
     window.addEventListener("tikemia:organizer-profile-updated", refreshVisible);
     window.addEventListener("focus", refreshVisible);
-    return () => { stopped = true; controller?.abort(); window.clearInterval(timer); window.removeEventListener("tikemia:organizer-avatar-updated", refreshVisible); window.removeEventListener("tikemia:organizer-profile-updated", refreshVisible); window.removeEventListener("focus", refreshVisible); };
+    document.addEventListener("visibilitychange", refreshVisible);
+    return () => { stopped = true; controller?.abort(); window.clearInterval(timer); window.removeEventListener("tikemia:organizer-avatar-updated", refreshVisible); window.removeEventListener("tikemia:organizer-profile-updated", refreshVisible); window.removeEventListener("focus", refreshVisible); document.removeEventListener("visibilitychange", refreshVisible); };
   }, [locale]);
 
   const changeLocale = useCallback((nextLocale: Locale) => {
@@ -195,6 +213,8 @@ function OrganizerDashboardContent({
   /* ==========================================
      AFFICHAGE
   ========================================== */
+
+  if (access !== "authorized") return <div role="status" className="flex min-h-dvh w-full flex-col items-center justify-center gap-3 bg-[#f8faf9] p-4 text-center"><p>{access === "error" ? "Impossible de vérifier la session." : "Vérification de la session..."}</p>{access === "error" && <button type="button" onClick={() => window.location.reload()} className="rounded-xl bg-green-700 px-5 py-3 text-white">Réessayer</button>}</div>;
 
   return (
     <div

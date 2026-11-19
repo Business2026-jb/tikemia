@@ -104,10 +104,15 @@ function ProtectedAdminLayout({
 
     let cancelled = false;
 
-    const controller = new AbortController();
-    const timeout = window.setTimeout(() => controller.abort(), 12000);
+    let controller = new AbortController();
+    let checking = false;
+
 
     async function verifyAccess() {
+      if (checking || cancelled) return;
+      checking = true;
+      controller = new AbortController();
+      const timeout = window.setTimeout(() => controller.abort(), 12000);
 
 
       try {
@@ -130,7 +135,8 @@ function ProtectedAdminLayout({
 
         if (response.status === 401 ||
             response.status === 403) {
-          router.replace(ADMIN_LOGIN);
+          setAccess("checking");
+          window.location.replace(ADMIN_LOGIN);
           return;
         }
 
@@ -163,13 +169,19 @@ function ProtectedAdminLayout({
         if (!cancelled) {
           setAccess("error");
         }
-      }
+      } finally { checking = false; window.clearTimeout(timeout); }
     }
 
     void verifyAccess();
+    const refresh = () => { if (document.visibilityState === "visible") void verifyAccess(); };
+    const interval = window.setInterval(refresh, 15_000);
+    window.addEventListener("focus", refresh);
+    document.addEventListener("visibilitychange", refresh);
 
     return () => {
-      window.clearTimeout(timeout);
+      window.clearInterval(interval);
+      window.removeEventListener("focus", refresh);
+      document.removeEventListener("visibilitychange", refresh);
       cancelled = true;
       controller.abort();
     };
@@ -238,7 +250,7 @@ function ProtectedAdminLayout({
         inert={access !== "authorized"}
         className="min-w-0 flex-1 overflow-x-hidden px-3 pb-24 pt-5 sm:px-5 md:pb-8 md:pt-6 xl:px-7"
       >
-        {children}
+        {access === "authorized" ? children : null}
       </main>
     </div>
   );

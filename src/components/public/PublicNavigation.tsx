@@ -1106,16 +1106,16 @@ export function PublicCategoryStrip({ locale, selected, onSelect }: { locale: "f
     if (strip) strip.scrollBy({ left: direction * Math.max(160, strip.clientWidth * 0.75), behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "instant" : "smooth" });
   }
   const icons = { Music2, Drama, GraduationCap, Martini, Palmtree, Trophy, Tent, FlaskConical, Church, UtensilsCrossed, BriefcaseBusiness, Ellipsis };
-  const cardClass = "tk-public-category flex min-h-23 w-32 shrink-0 snap-start flex-col items-center justify-center gap-2 rounded-xl border px-3 py-3 text-center text-xs font-extrabold text-[#334454] sm:w-40 sm:text-sm";
+  const cardClass = "tk-public-category flex min-h-16 w-23 sm:min-h-23 shrink-0 snap-start flex-col items-center justify-center gap-1 rounded-xl border px-2 py-2 text-center text-[11px] sm:gap-2 sm:px-3 sm:py-3 font-extrabold text-[#334454] sm:w-40 sm:text-sm";
   const arrowClass = "flex size-9 shrink-0 items-center justify-center rounded-full border border-[#dce7de] bg-white text-[#087d30] disabled:cursor-default disabled:opacity-30 sm:size-10";
   return <div className="flex w-full min-w-0 items-center gap-2 sm:gap-3">
     <button type="button" aria-label={locale === "fr" ? "Cat\u00e9gories pr\u00e9c\u00e9dentes" : "Previous categories"} aria-controls={id} disabled={edges.start} onClick={() => scroll(-1)} className={arrowClass}><ChevronLeft size={20} /></button>
     <div id={id} ref={stripRef} onScroll={syncEdges} tabIndex={0} role="region" aria-label={locale === "fr" ? "Cat\u00e9gories" : "Categories"} className="tk-public-category-strip min-w-0 flex-1 snap-x snap-proximity overscroll-x-contain py-1 [scrollbar-width:thin]" style={{ display: "flex", flexWrap: "nowrap", overflowX: "auto", gap: 10 }}>
-      {onSelect && <button type="button" onClick={() => onSelect("")} aria-pressed={selected === ""} className={cardClass} style={{ flexShrink: 0, borderColor: selected === "" ? "#087d30" : "#e4eae5", backgroundColor: "#edf7ee" }}><span className="flex size-10 items-center justify-center rounded-full bg-white/75"><Grid2X2 size={22} color="#087d30" /></span><span>{locale === "fr" ? "Tous" : "All"}</span></button>}
+      {onSelect && <button type="button" onClick={() => onSelect("")} aria-pressed={selected === ""} className={cardClass} style={{ flexShrink: 0, borderColor: selected === "" ? "#087d30" : "#e4eae5", backgroundColor: "#edf7ee" }}><span className="flex size-7 sm:size-10 items-center justify-center rounded-full bg-white/75"><Grid2X2 size={22} className="size-4 sm:size-5.5" color="#087d30" /></span><span>{locale === "fr" ? "Tous" : "All"}</span></button>}
       {EVENT_CATEGORY_DEFINITIONS.map(category => {
         const Icon = icons[category.icon];
         const active = selected === category.key;
-        const content = <><span className="flex size-10 items-center justify-center rounded-full bg-white/75"><Icon size={22} color={category.color} aria-hidden="true" /></span><span className="line-clamp-2 leading-tight">{eventCategoryLabel(category.key, locale)}</span></>;
+        const content = <><span className="flex size-7 sm:size-10 items-center justify-center rounded-full bg-white/75"><Icon size={22} className="size-4 sm:size-5.5" color={category.color} aria-hidden="true" /></span><span className="line-clamp-2 leading-tight">{eventCategoryLabel(category.key, locale)}</span></>;
         const style = { flexShrink: 0, backgroundColor: category.color + "12", borderColor: active ? category.color : "#e4eae5", boxShadow: active ? "inset 0 0 0 1px " + category.color : undefined };
         return onSelect ? <button key={category.key} type="button" onClick={() => onSelect(category.key)} aria-pressed={active} className={cardClass} style={style}>{content}</button> : <Link key={category.key} href={"/explore?category=" + encodeURIComponent(category.key)} className={cardClass} style={style}>{content}</Link>;
       })}
@@ -1129,6 +1129,33 @@ export function PublicAccountShell({ locale, children }: { locale: "fr" | "en"; 
   const router = useRouter();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(false);
+  const [access, setAccess] = useState<"checking" | "authorized" | "error">("checking");
+  useEffect(() => {
+    let stopped = false;
+    let timer: ReturnType<typeof setTimeout>;
+    let controller: AbortController | null = null;
+    const check = async () => {
+      controller?.abort();
+      controller = new AbortController();
+      const signal = controller.signal;
+      try {
+        const response = await fetch("/api/public/account?session=1", { credentials: "same-origin", cache: "no-store", signal });
+        if (stopped || signal.aborted) return;
+        if (response.status === 401 || response.status === 403) {
+          setAccess("checking"); window.location.replace("/login"); return;
+        }
+        if (!response.ok) throw new Error("SESSION_CHECK_FAILED");
+        const result = await response.json();
+        if (!result.success) throw new Error("SESSION_CHECK_FAILED");
+        setAccess("authorized"); clearTimeout(timer);
+        const remaining = Date.parse(result.expiresAt) - Date.now();
+        timer = setTimeout(() => void check(), Number.isFinite(remaining) ? Math.max(100, Math.min(15000, remaining)) : 15000);
+      } catch { if (!stopped && !signal.aborted) { setAccess("error"); timer = setTimeout(() => void check(), 15000); } }
+    };
+    const refresh = () => { if (document.visibilityState === "visible") void check(); };
+    void check(); window.addEventListener("focus", refresh); document.addEventListener("visibilitychange", refresh);
+    return () => { stopped = true; controller?.abort(); clearTimeout(timer); window.removeEventListener("focus", refresh); document.removeEventListener("visibilitychange", refresh); };
+  }, [pathname]);
   const items = [{ href: "/account", icon: UserRound, label: locale === "fr" ? "Mon compte" : "My account" }, { href: "/account/tickets", icon: Ticket, label: locale === "fr" ? "Mes billets" : "My tickets" }, { href: "/account/transfer", icon: ArrowLeftRight, label: locale === "fr" ? "Transf\u00e9rer un billet" : "Transfer a ticket" }];
   async function logout() {
     if (busy) return;
@@ -1136,6 +1163,7 @@ export function PublicAccountShell({ locale, children }: { locale: "fr" | "en"; 
     try { const response = await fetch("/api/public/account", { method: "DELETE", credentials: "same-origin" }); if (!response.ok) throw new Error(); router.replace("/login"); router.refresh(); }
     catch { setError(true); setBusy(false); }
   }
+  if (access !== "authorized") return <div role="status" className="flex min-h-60 w-full flex-col items-center justify-center gap-3 p-4 text-center"><p>{locale === "fr" ? (access === "error" ? "Impossible de vérifier la session." : "Vérification de la session...") : "Checking session..."}</p>{access === "error" && <button type="button" onClick={() => window.location.reload()}>{locale === "fr" ? "Réessayer" : "Retry"}</button>}</div>;
   return <div className="grid w-full min-w-0 flex-1 grid-cols-1 lg:grid-cols-[240px_minmax(0,1fr)]">
     <aside className="hidden min-w-0 bg-[#00432c] text-white lg:block">
       <nav aria-label={locale === "fr" ? "Espace personnel" : "Account navigation"} className="sticky top-24 flex flex-col gap-2 px-3 py-6">

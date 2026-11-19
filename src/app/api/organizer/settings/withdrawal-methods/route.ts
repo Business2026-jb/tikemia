@@ -1,3 +1,4 @@
+import { getTrustedRequestOrigin } from "@/lib/tikemia-pay/providers";
 import { getPlatformPrisma } from "@/lib/payments/fulfillment";
 import { isSupportedCurrency } from "@/i18n/config";
 
@@ -455,7 +456,7 @@ function isSameOrigin(
   try {
     return (
       new URL(origin).origin ===
-      request.nextUrl.origin
+      getTrustedRequestOrigin(request)
     );
   } catch {
     return false;

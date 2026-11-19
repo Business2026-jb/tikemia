@@ -158,7 +158,7 @@ function json(
 function forbidden(
   status: 401 | 403 = 401
 ) {
-  return json(
+  const response = json(
     {
       success: false,
 
@@ -174,6 +174,8 @@ function forbidden(
     },
     status
   );
+  response.cookies.set(SESSION_COOKIE, "", { httpOnly: true, secure: process.env.NODE_ENV === "production", sameSite: "strict", path: "/", maxAge: 0 });
+  return response;
 }
 
 /* ======================================================

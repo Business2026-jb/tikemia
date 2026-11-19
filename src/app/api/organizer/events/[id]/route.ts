@@ -1,3 +1,4 @@
+import { getTrustedRequestOrigin } from "@/lib/tikemia-pay/providers";
 import { getPlatformPrisma } from "@/lib/payments/fulfillment";
 import { SUPPORTED_CURRENCIES, currencyDecimals } from "@/i18n/config";
 import { createClient } from "@supabase/supabase-js";
@@ -205,7 +206,7 @@ function validOrigin(request: NextRequest): boolean {
     return false;
   }
 
-  return Boolean(origin && origin === request.nextUrl.origin);
+  return Boolean(origin && origin === getTrustedRequestOrigin(request));
 }
 
 /* ============================================

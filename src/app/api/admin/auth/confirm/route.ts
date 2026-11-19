@@ -1,3 +1,4 @@
+import { getTrustedRequestOrigin } from "@/lib/tikemia-pay/providers";
 import { hash as hashPassword } from "bcryptjs";
 import { unstable_rethrow } from "next/navigation";
 
@@ -164,7 +165,7 @@ function validOrigin(
   try {
     return (
       new URL(origin).origin ===
-      request.nextUrl.origin
+      getTrustedRequestOrigin(request)
     );
   } catch {
     return false;

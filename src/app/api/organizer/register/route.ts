@@ -1,3 +1,4 @@
+import { getTrustedRequestOrigin } from "@/lib/tikemia-pay/providers";
 import { getPlatformPrisma } from "@/lib/payments/fulfillment";
 
 import { NextRequest, NextResponse } from "next/server";
@@ -625,7 +626,7 @@ export async function POST(
 
     if (
       origin &&
-      origin !== request.nextUrl.origin
+      origin !== getTrustedRequestOrigin(request)
     ) {
       return errorResponse(
         language,
@@ -1236,7 +1237,7 @@ const loginRequests = new Map<string, { count: number; until: number }>();
 export async function PATCH(request: NextRequest) {
   let language: Language = "fr";
   try {
-    if (request.headers.get("origin") !== request.nextUrl.origin || request.headers.get("sec-fetch-site") === "cross-site") return errorResponse(language, "invalidRequest", 403);
+    if (request.headers.get("origin") !== getTrustedRequestOrigin(request) || request.headers.get("sec-fetch-site") === "cross-site") return errorResponse(language, "invalidRequest", 403);
     if (!request.headers.get("content-type")?.toLowerCase().startsWith("application/json")) return errorResponse(language, "invalidRequest", 415);
     const reader = request.body?.getReader();
     if (!reader) return errorResponse(language, "invalidRequest", 400);

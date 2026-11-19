@@ -1,3 +1,4 @@
+import { getTrustedRequestOrigin } from "@/lib/tikemia-pay/providers";
 import { getPlatformPrisma } from "@/lib/payments/fulfillment";
 import {
   isSupportedCurrency,
@@ -423,7 +424,7 @@ function validOrigin(
 
   return Boolean(
     origin &&
-    origin === request.nextUrl.origin
+    origin === getTrustedRequestOrigin(request)
   );
 }
 

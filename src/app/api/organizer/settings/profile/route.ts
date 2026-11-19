@@ -1,3 +1,4 @@
+import { getTrustedRequestOrigin } from "@/lib/tikemia-pay/providers";
 import { getPlatformPrisma } from "@/lib/payments/fulfillment";
 
 import {
@@ -364,7 +365,7 @@ function errorResponse(
   key: ErrorKey,
   status: number
 ) {
-  return respond(
+  const response = respond(
     {
       success: false,
 
@@ -373,6 +374,8 @@ function errorResponse(
     },
     status
   );
+  if (status === 401) response.cookies.set(SESSION_COOKIE, "", { httpOnly: true, secure: process.env.NODE_ENV === "production", sameSite: "lax", path: "/", maxAge: 0 });
+  return response;
 }
 
 /* ==========================================================
@@ -412,7 +415,7 @@ function isSameOrigin(
   try {
     return (
       new URL(origin).origin ===
-      request.nextUrl.origin
+      getTrustedRequestOrigin(request)
     );
   } catch {
     return false;

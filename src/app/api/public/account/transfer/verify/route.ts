@@ -1,3 +1,4 @@
+import { getTrustedRequestOrigin } from "@/lib/tikemia-pay/providers";
 import { after } from "next/server";
 import { runEmailWorker } from "@/lib/email/worker";
 import { createTicketQrToken } from "@/lib/tickets/qr";
@@ -152,7 +153,7 @@ function validOrigin(request: NextRequest) {
   const origin = request.headers.get("origin");
 
   return !origin ||
-    origin === request.nextUrl.origin;
+    origin === getTrustedRequestOrigin(request);
 }
 
 function sessionHash(

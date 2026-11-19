@@ -1,3 +1,4 @@
+import { getTrustedRequestOrigin } from "@/lib/tikemia-pay/providers";
 import { unstable_rethrow } from "next/navigation";
 
 import "server-only";
@@ -303,7 +304,7 @@ function hasValidOrigin(
 
   try {
     const requestOrigin =
-      new URL(request.url).origin;
+      getTrustedRequestOrigin(request);
 
     const suppliedOrigin =
       new URL(origin).origin;

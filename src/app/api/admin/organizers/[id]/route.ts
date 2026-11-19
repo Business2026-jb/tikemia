@@ -1,3 +1,4 @@
+import { getTrustedRequestOrigin } from "@/lib/tikemia-pay/providers";
 import { decryptWithdrawalDetails } from "@/lib/withdrawals/email";
 import { unstable_rethrow } from "next/navigation";
 ﻿
@@ -319,46 +320,9 @@ async function authenticateAdmin(
  * credentials: "same-origin"
  */
 
-function hasValidOrigin(
-  request: NextRequest
-): boolean {
-  const origin =
-    request.headers.get("origin");
-
-  if (!origin) {
-    return false;
-  }
-
-  try {
-    const incoming =
-      new URL(origin);
-
-    const host =
-      request.headers.get("host");
-
-    if (!host) {
-      return false;
-    }
-
-    /*
-     * Le protocole rÃ©el est dÃ©terminÃ©
-     * par l'URL publique de la requÃªte.
-     *
-     * Pour la production, le dÃ©ploiement
-     * doit Ãªtre servi en HTTPS.
-     */
-
-    const expected =
-      new URL(request.url);
-
-    return (
-      incoming.origin ===
-        expected.origin &&
-      incoming.host === host
-    );
-  } catch {
-    return false;
-  }
+function hasValidOrigin(request: NextRequest): boolean {
+  const origin = request.headers.get("origin");
+  return Boolean(origin && origin === getTrustedRequestOrigin(request));
 }
 
 /* ============================================================

@@ -1,3 +1,4 @@
+import { getTrustedRequestOrigin } from "@/lib/tikemia-pay/providers";
 import argon2 from "argon2";
 import { compare as compareBcrypt } from "bcryptjs";
 import { unstable_rethrow } from "next/navigation";
@@ -301,7 +302,7 @@ function validOrigin(
     return true;
   }
 
-  return origin === request.nextUrl.origin;
+  return origin === getTrustedRequestOrigin(request);
 }
 
 /* ==========================================================

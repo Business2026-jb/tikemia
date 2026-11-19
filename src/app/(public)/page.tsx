@@ -1134,6 +1134,8 @@ export default function PublicHomePage() {
      RECHERCHE
   ======================================================== */
 
+  const [searchExpanded, setSearchExpanded] = useState(false);
+
   const [searchTerm, setSearchTerm] =
     useState("");
 
@@ -1522,14 +1524,16 @@ export default function PublicHomePage() {
       ================================================== */}
 
       <section className="w-full border-b border-[#e4ece5] bg-white px-4 py-4 sm:px-6 lg:px-10 lg:py-4">
-        <h2 className="mb-3 text-base font-extrabold text-[#23374a] sm:text-lg">
-          {t.searchTitle}
+        <h2 className="text-base font-extrabold text-[#23374a] sm:text-lg lg:mb-3">
+          <span className="hidden lg:inline">{t.searchTitle}</span>
+          <button type="button" aria-expanded={searchExpanded} aria-controls="home-event-search" onClick={() => setSearchExpanded(value => !value)} className="flex min-h-11 w-full items-center justify-between gap-2 text-left lg:hidden"><span>{t.searchTitle}</span><Search size={20} /></button>
         </h2>
 
         <form
+          id="home-event-search"
           role="search"
           onSubmit={handleSearch}
-          className="grid w-full min-w-0 grid-cols-2 gap-2.5 lg:grid-cols-[minmax(0,2fr)_minmax(0,1fr)_minmax(0,1fr)_minmax(0,1.2fr)_auto] lg:items-center"
+          className={`${searchExpanded ? "grid" : "hidden"} mt-3 w-full min-w-0 grid-cols-2 gap-2.5 lg:mt-0 lg:grid lg:grid-cols-[minmax(0,2fr)_minmax(0,1fr)_minmax(0,1fr)_minmax(0,1.2fr)_auto] lg:items-center`}
         >
           {/* RECHERCHE TEXTE */}
 

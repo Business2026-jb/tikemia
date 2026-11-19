@@ -1,3 +1,4 @@
+import { getTrustedRequestOrigin } from "@/lib/tikemia-pay/providers";
 import argon2 from "argon2";
 import { unstable_rethrow } from "next/navigation";
 
@@ -193,7 +194,7 @@ function validOrigin(
   try {
     return (
       new URL(origin).origin ===
-      request.nextUrl.origin
+      getTrustedRequestOrigin(request)
     );
   } catch {
     return false;

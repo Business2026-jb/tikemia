@@ -1,3 +1,4 @@
+import { getTrustedRequestOrigin } from "@/lib/tikemia-pay/providers";
 import { getProviderConnector } from "@/lib/payments/methods";
 import { currencyDecimals, isSupportedCurrency } from "@/i18n/config";
 
@@ -307,7 +308,7 @@ function validOrigin(
     process.env.NEXT_PUBLIC_APP_URL;
 
   let expectedOrigin =
-    request.nextUrl.origin;
+    getTrustedRequestOrigin(request);
 
   if (configuredOrigin) {
     try {

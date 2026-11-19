@@ -1,3 +1,4 @@
+import { getTrustedRequestOrigin } from "@/lib/tikemia-pay/providers";
 import { createClient } from "@supabase/supabase-js";
 import { unstable_rethrow } from "next/navigation";
 
@@ -175,7 +176,7 @@ function validOrigin(request: NextRequest) {
 
   return (
     !origin ||
-    origin === request.nextUrl.origin
+    origin === getTrustedRequestOrigin(request)
   );
 }
 

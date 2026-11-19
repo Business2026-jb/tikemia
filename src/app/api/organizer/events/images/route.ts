@@ -1,3 +1,4 @@
+import { getTrustedRequestOrigin } from "@/lib/tikemia-pay/providers";
 import { getPlatformPrisma } from "@/lib/payments/fulfillment";
 import { createClient } from "@supabase/supabase-js";
 import { NextRequest, NextResponse } from "next/server";
@@ -175,7 +176,7 @@ function isAllowedOrigin(
     return true;
   }
 
-  return origin === request.nextUrl.origin;
+  return origin === getTrustedRequestOrigin(request);
 }
 
 /* ============================================

@@ -1,3 +1,4 @@
+import { getTrustedRequestOrigin } from "@/lib/tikemia-pay/providers";
 import { getPlatformPrisma } from "@/lib/payments/fulfillment";
 import { publicationSlug as titleSlug } from "@/i18n/config";
 import {
@@ -434,7 +435,7 @@ function isAllowedOrigin(
 
   return Boolean(
     origin &&
-    origin === request.nextUrl.origin
+    origin === getTrustedRequestOrigin(request)
   );
 }
 

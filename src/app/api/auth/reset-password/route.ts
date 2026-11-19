@@ -1,3 +1,4 @@
+import { getTrustedRequestOrigin } from "@/lib/tikemia-pay/providers";
 import { unstable_rethrow } from "next/navigation";
 
 import {
@@ -290,7 +291,7 @@ function validOrigin(
     return true;
   }
 
-  return origin === request.nextUrl.origin;
+  return origin === getTrustedRequestOrigin(request);
 }
 
 /* ==========================================================

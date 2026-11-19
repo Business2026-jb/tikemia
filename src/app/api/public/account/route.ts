@@ -1,3 +1,4 @@
+import { getTrustedRequestOrigin } from "@/lib/tikemia-pay/providers";
 import { parsePhoneNumberFromString } from "libphonenumber-js";
 import { createClient } from "@supabase/supabase-js";
 import { unstable_rethrow } from "next/navigation";
@@ -208,10 +209,9 @@ async function respond(
   body: Record<string, unknown>,
   status = 200
 ) {
-  return NextResponse.json(await resolveAccountMedia(body), {
-    status,
-    headers: RESPONSE_HEADERS,
-  });
+  const response = NextResponse.json(await resolveAccountMedia(body), { status, headers: RESPONSE_HEADERS });
+  if (status === 401 || status === 403) response.cookies.set(SESSION_COOKIE, "", { httpOnly: true, secure: process.env.NODE_ENV === "production", sameSite: "lax", path: "/", maxAge: 0 });
+  return response;
 }
 
 function unauthorized() {
@@ -470,6 +470,8 @@ export async function GET(
     ) {
       return forbidden();
     }
+
+    if (request.nextUrl.searchParams.get("session") === "1") return respond({ success: true, expiresAt: session.expiresAt.toISOString() });
 
     /* ======================================================
        4. PAGINATION
@@ -1023,7 +1025,7 @@ async function resolveAccountMedia<T>(body: T): Promise<T> {
 
 function validAccountOrigin(request: NextRequest): boolean {
   const origin = request.headers.get("origin");
-  return request.headers.get("sec-fetch-site") !== "cross-site" && (!origin || origin === request.nextUrl.origin);
+  return request.headers.get("sec-fetch-site") !== "cross-site" && (!origin || origin === getTrustedRequestOrigin(request));
 }
 export async function DELETE(request: NextRequest) {
   if (!validAccountOrigin(request)) return respond({ success: false, message: "Forbidden" }, 403);

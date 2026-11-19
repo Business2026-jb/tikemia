@@ -1,3 +1,4 @@
+import { getTrustedRequestOrigin } from "@/lib/tikemia-pay/providers";
 import { getPlatformPrisma } from "@/lib/payments/fulfillment";
 
 import { NextRequest, NextResponse } from "next/server";
@@ -334,7 +335,7 @@ export async function POST(
       request.headers.get("origin");
 
     const expectedOrigin =
-      request.nextUrl.origin;
+      getTrustedRequestOrigin(request);
 
     if (
       origin &&
@@ -855,7 +856,7 @@ export async function POST(
 /* Fin de la session courante : aucune autre session n'est affectée. */
 export async function DELETE(request: NextRequest) {
   const origin = request.headers.get("origin");
-  if ((origin && origin !== request.nextUrl.origin) || request.headers.get("sec-fetch-site") === "cross-site") {
+  if ((origin && origin !== getTrustedRequestOrigin(request)) || request.headers.get("sec-fetch-site") === "cross-site") {
     return jsonResponse({ success: false }, 403);
   }
 

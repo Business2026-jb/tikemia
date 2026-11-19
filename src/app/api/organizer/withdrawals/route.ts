@@ -1,3 +1,4 @@
+import { getTrustedRequestOrigin } from "@/lib/tikemia-pay/providers";
 import { getPlatformPrisma } from "@/lib/payments/fulfillment";
 import { isSupportedCurrency } from "@/i18n/config";
 
@@ -323,7 +324,7 @@ function checkOrigin(request: NextRequest) {
 
   try {
     if (
-      new URL(origin).origin !== request.nextUrl.origin
+      new URL(origin).origin !== getTrustedRequestOrigin(request)
     ) {
       throw new ApiError("forbidden", 403);
     }

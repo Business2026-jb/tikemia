@@ -621,29 +621,6 @@ function formatEventTime(
   }
 }
 
-function displayCountry(
-  value: string,
-  locale: Locale
-): string {
-  const country = value.trim();
-
-  if (!/^[A-Z]{2}$/i.test(country)) {
-    return country;
-  }
-
-  try {
-    return (
-      new Intl.DisplayNames(
-        [locale],
-        { type: "region" }
-      ).of(country.toUpperCase()) ??
-      country
-    );
-  } catch {
-    return country;
-  }
-}
-
 /* ==========================================================
    UTILITAIRE — CARTE DU LIEU
 
@@ -1583,20 +1560,6 @@ export default function EventDetailsPage() {
      DONNÉES DE PRÉSENTATION
   ======================================================== */
 
-  const locationLabel =
-    event.venue
-      ? [
-          event.venue.name,
-          event.venue.city,
-          displayCountry(
-            event.venue.country,
-            locale
-          ),
-        ]
-          .filter(Boolean)
-          .join(", ")
-      : t.locationUnavailable;
-
   const mapAddress =
     event.venue?.mapQuery ??
     event.venue?.fullAddress ??
@@ -1752,22 +1715,7 @@ export default function EventDetailsPage() {
               </p>
             )}
 
-            <div className="flex items-start gap-3">
-              <MapPin
-                size={20}
-                className="mt-0.5 shrink-0 text-[#087d2d]"
-              />
 
-              <div className="min-w-0">
-                <p className="text-[11px] text-[#85929b]">
-                  {t.location}
-                </p>
-
-                <p className="text-sm font-semibold leading-relaxed text-[#283d4a]">
-                  {locationLabel}
-                </p>
-              </div>
-            </div>
           </div>
 
           {/* ORGANISATEUR */}
@@ -1779,28 +1727,28 @@ export default function EventDetailsPage() {
 
           {/* DESCRIPTION */}
 
-          <div className="border-b border-[#e7ece8] pb-5">
-            <h2 className="mb-2 text-lg font-black text-[#06472b]">
+          <details className="border-b border-[#e7ece8] pb-4">
+            <summary className="cursor-pointer py-2 text-lg font-black text-[#06472b]">
               {t.description}
-            </h2>
+            </summary>
 
             <p className="whitespace-pre-line wrap-break-word text-sm leading-[1.75] text-[#425466]">
               {event.description}
             </p>
-          </div>
+          </details>
 
           {/* ==================================================
               LOCALISATION ET CARTE
           ================================================== */}
 
-          <div>
-            <h2 className="mb-3 flex items-center gap-2 text-lg font-black text-[#06472b]">
+          <details className="border-b border-[#e7ece8] pb-4">
+            <summary className="cursor-pointer py-2 text-lg font-black text-[#06472b]">
               <MapPin
                 size={21}
-                className="text-[#087d2d]"
+                className="mr-2 inline-block align-middle text-[#087d2d]"
               />
               {t.location}
-            </h2>
+            </summary>
 
             {event.venue ? (
               <div className="space-y-3">
@@ -1857,7 +1805,7 @@ export default function EventDetailsPage() {
                 {t.mapUnavailable}
               </p>
             )}
-          </div>
+          </details>
 
           {/* ==================================================
               SÉANCES MULTIPLES

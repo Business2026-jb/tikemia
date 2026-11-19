@@ -1,3 +1,4 @@
+import { getTrustedRequestOrigin } from "@/lib/tikemia-pay/providers";
 import { getPlatformPrisma } from "@/lib/payments/fulfillment";
 
 import { NextRequest, NextResponse } from "next/server";
@@ -185,7 +186,7 @@ function validateOrigin(request: NextRequest): void {
   }
 
   try {
-    if (new URL(origin).origin !== request.nextUrl.origin) {
+    if (new URL(origin).origin !== getTrustedRequestOrigin(request)) {
       throw new ResetError("forbidden", 403);
     }
   } catch {

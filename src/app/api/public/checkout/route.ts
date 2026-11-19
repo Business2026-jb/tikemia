@@ -1,3 +1,4 @@
+import { getTrustedRequestOrigin } from "@/lib/tikemia-pay/providers";
 import { createClient } from "@supabase/supabase-js";
 import { getPlatformPrisma } from "@/lib/payments/fulfillment";
 import { getPublicPaymentMethods } from "@/lib/payments/methods";
@@ -312,7 +313,7 @@ function validOrigin(request: NextRequest) {
   const origin = request.headers.get("origin");
 
   return !origin ||
-    origin === request.nextUrl.origin;
+    origin === getTrustedRequestOrigin(request);
 }
 
 /* ============================================
